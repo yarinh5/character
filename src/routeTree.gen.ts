@@ -25,6 +25,7 @@ import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as OperatorSettingsRouteImport } from './routes/operator.settings'
 import { Route as OperatorConversationsRouteImport } from './routes/operator.conversations'
+import { Route as OperatorAnalyticsRouteImport } from './routes/operator.analytics'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppPackagesRouteImport } from './routes/app.packages'
 import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
@@ -123,6 +124,11 @@ const OperatorSettingsRoute = OperatorSettingsRouteImport.update({
 const OperatorConversationsRoute = OperatorConversationsRouteImport.update({
   id: '/conversations',
   path: '/conversations',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorAnalyticsRoute = OperatorAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
   getParentRoute: () => OperatorRoute,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
@@ -251,6 +257,7 @@ export interface FileRoutesByFullPath {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
   '/admin/': typeof AdminIndexRoute
@@ -285,6 +292,7 @@ export interface FileRoutesByTo {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
   '/admin': typeof AdminIndexRoute
@@ -323,6 +331,7 @@ export interface FileRoutesById {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
   '/admin/': typeof AdminIndexRoute
@@ -362,6 +371,7 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/operator/analytics'
     | '/operator/conversations'
     | '/operator/settings'
     | '/admin/'
@@ -396,6 +406,7 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/operator/analytics'
     | '/operator/conversations'
     | '/operator/settings'
     | '/admin'
@@ -433,6 +444,7 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/operator/analytics'
     | '/operator/conversations'
     | '/operator/settings'
     | '/admin/'
@@ -570,6 +582,13 @@ declare module '@tanstack/react-router' {
       path: '/conversations'
       fullPath: '/operator/conversations'
       preLoaderRoute: typeof OperatorConversationsRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/analytics': {
+      id: '/operator/analytics'
+      path: '/analytics'
+      fullPath: '/operator/analytics'
+      preLoaderRoute: typeof OperatorAnalyticsRouteImport
       parentRoute: typeof OperatorRoute
     }
     '/app/profile': {
@@ -772,6 +791,7 @@ const AppRouteChildren: AppRouteChildren = {
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface OperatorRouteChildren {
+  OperatorAnalyticsRoute: typeof OperatorAnalyticsRoute
   OperatorConversationsRoute: typeof OperatorConversationsRoute
   OperatorSettingsRoute: typeof OperatorSettingsRoute
   OperatorIndexRoute: typeof OperatorIndexRoute
@@ -779,6 +799,7 @@ interface OperatorRouteChildren {
 }
 
 const OperatorRouteChildren: OperatorRouteChildren = {
+  OperatorAnalyticsRoute: OperatorAnalyticsRoute,
   OperatorConversationsRoute: OperatorConversationsRoute,
   OperatorSettingsRoute: OperatorSettingsRoute,
   OperatorIndexRoute: OperatorIndexRoute,

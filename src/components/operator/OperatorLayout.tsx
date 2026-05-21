@@ -1,6 +1,6 @@
-import { ReactNode, useEffect, useState, createContext, useContext } from "react";
+﻿import { ReactNode, useEffect, useState, createContext, useContext } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
+import { BarChart3, LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -24,10 +24,16 @@ export const useOperator = () => {
   return ctx;
 };
 
-type NavItem = { to: "/operator" | "/operator/conversations" | "/operator/settings"; label: string; icon: typeof LayoutDashboard; exact?: boolean };
+type NavItem = {
+  to: "/operator" | "/operator/conversations" | "/operator/analytics" | "/operator/settings";
+  label: string;
+  icon: typeof LayoutDashboard;
+  exact?: boolean;
+};
 const NAV: NavItem[] = [
   { to: "/operator", label: "דשבורד", icon: LayoutDashboard, exact: true },
   { to: "/operator/conversations", label: "שיחות", icon: MessageCircle },
+  { to: "/operator/analytics", label: "ביצועים", icon: BarChart3 },
   { to: "/operator/settings", label: "הגדרות", icon: Settings },
 ];
 
@@ -142,7 +148,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
         </div>
         <div className="px-4 py-4 border-b border-border">
           <div className="text-sm font-medium truncate">
-            {operator?.full_name ?? (isAdmin ? "מנהל מערכת" : "—")}
+            {operator?.full_name ?? (isAdmin ? "מנהל מערכת" : "-")}
           </div>
           {operator && (
             <div className="flex items-center gap-2 mt-1">
@@ -190,7 +196,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
       </main>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {NAV.map(({ to, label, icon: Icon, exact }) => (
             <Link
               key={to}

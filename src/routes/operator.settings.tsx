@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { LogOut } from "lucide-react";
+import { AccountSecurityCard, AccountSummaryCard } from "@/components/account/AccountSettingsShared";
 
 export const Route = createFileRoute("/operator/settings")({
   component: OperatorSettingsPage,
@@ -28,19 +28,31 @@ type AssignedRow = {
 };
 
 function OperatorSettingsPage() {
-  const { user, signOut } = useAuth();
+  const { user, role, signOut } = useAuth();
   const { operator, refresh } = useOperator();
-  const navigate = useNavigate();
   const [fullName, setFullName] = useState(operator?.full_name ?? "");
   const [status, setStatus] = useState(operator?.availability_status ?? "available");
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  const [profileEmail, setProfileEmail] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [assigned, setAssigned] = useState<AssignedRow[] | null>(null);
 
   useEffect(() => {
-    if (!operator) return;
-    setFullName(operator.full_name);
-    setStatus(operator.availability_status);
+    if (!user) return;
     (async () => {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("display_name, email, status")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      setProfileEmail(profile?.email ?? user.email ?? null);
+      setProfileStatus(profile?.status ?? null);
+      if (!operator) {
+        setAssigned([]);
+        return;
+      }
+      setFullName(operator.full_name || profile?.display_name || "");
+      setStatus(operator.availability_status);
       const { data } = await supabase
         .from("character_operator_assignments")
         .select("character_id, characters(id, name, avatar_url, availability_status)")
@@ -54,7 +66,6 @@ function OperatorSettingsPage() {
           const { count } = await supabase
             .from("conversations")
             .select("id", { count: "exact", head: true })
-            .eq("assigned_operator_id", operator.id)
             .eq("character_id", a.character_id)
             .neq("status", "closed");
           return { ...a, openCount: count ?? 0 };
@@ -62,35 +73,34 @@ function OperatorSettingsPage() {
       );
       setAssigned(withCounts);
     })();
-  }, [operator]);
+  }, [operator, user]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!operator) return;
+    if (!operator || !user) return;
     if (fullName.trim().length < 2) {
       toast.error("שם קצר מדי");
       return;
     }
     setSaving(true);
-    const { error } = await supabase
-      .from("operators")
-      .update({
-        full_name: fullName.trim().slice(0, 100),
-        availability_status: status,
-      })
-      .eq("id", operator.id);
+    const cleanedName = fullName.trim().slice(0, 100);
+    const [profileResult, operatorResult] = await Promise.all([
+      supabase.from("profiles").update({ display_name: cleanedName }).eq("user_id", user.id),
+      supabase
+        .from("operators")
+        .update({
+          full_name: cleanedName,
+          availability_status: status,
+        })
+        .eq("id", operator.id),
+    ]);
     setSaving(false);
-    if (error) {
+    if (profileResult.error || operatorResult.error) {
       toast.error("שמירה נכשלה");
       return;
     }
     toast.success("נשמר");
     await refresh();
-  };
-
-  const handleLogout = async () => {
-    await signOut();
-    navigate({ to: "/login" });
   };
 
   return (
@@ -99,6 +109,8 @@ function OperatorSettingsPage() {
         <h1 className="text-2xl md:text-3xl font-bold">הגדרות</h1>
         <p className="text-sm text-muted-foreground mt-1">{user?.email}</p>
       </header>
+
+      <AccountSummaryCard displayName={fullName} email={profileEmail} role={role} status={profileStatus} />
 
       {operator ? (
         <Card>
@@ -188,13 +200,17 @@ function OperatorSettingsPage() {
       )}
 
       <Card>
-        <CardContent className="p-4">
-          <Button variant="outline" className="w-full gap-2" onClick={handleLogout}>
-            <LogOut className="h-4 w-4" />
-            התנתקות
-          </Button>
+        <CardContent className="p-4 text-xs text-muted-foreground">
+          שינוי הרשאות או role מתבצע רק מפאנל ניהול משתמשים, לא מהגדרות החשבון האישיות.
         </CardContent>
       </Card>
+
+      <AccountSecurityCard
+        userId={user?.id}
+        email={profileEmail}
+        signOut={signOut}
+        onDeletionRequested={() => setProfileStatus("deletion_requested")}
+      />
     </div>
   );
 }

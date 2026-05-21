@@ -26,7 +26,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Edit, Link as LinkIcon } from "lucide-react";
+import { Plus, Edit, Link as LinkIcon, BarChart3 } from "lucide-react";
+import { AnalyticsContent } from "@/routes/operator.analytics";
+import { fetchOperatorPerformance } from "@/lib/operatorPerformance";
 
 export const Route = createFileRoute("/admin/operators")({
   component: OperatorsPage,
@@ -46,6 +48,7 @@ function OperatorsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Operator | null>(null);
   const [assignOp, setAssignOp] = useState<Operator | null>(null);
+  const [performanceOp, setPerformanceOp] = useState<Operator | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-operators"],
@@ -123,6 +126,9 @@ function OperatorsPage() {
                     <span>{o.active} שיחות</span>
                   </div>
                   <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setPerformanceOp(o)}>
+                      <BarChart3 className="h-4 w-4" />
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => setAssignOp(o)}>
                       <LinkIcon className="h-4 w-4" />
                     </Button>
@@ -166,7 +172,35 @@ function OperatorsPage() {
           }}
         />
       )}
+      {performanceOp && (
+        <OperatorPerformanceDialog op={performanceOp} onClose={() => setPerformanceOp(null)} />
+      )}
     </div>
+  );
+}
+
+function OperatorPerformanceDialog({ op, onClose }: { op: Operator; onClose: () => void }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["admin-operator-performance", op.id],
+    queryFn: () => fetchOperatorPerformance(op.id),
+  });
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto" dir="rtl">
+        <DialogHeader>
+          <DialogTitle>ביצועי עובד - {op.full_name}</DialogTitle>
+          <DialogDescription>
+            אותם נתוני ביצועים שהעובד רואה בדף האנליטיקה האישי שלו.
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading && <Skeleton className="h-96" />}
+        {!isLoading && error && (
+          <p className="text-sm text-destructive text-center py-8">טעינת ביצועי העובד נכשלה.</p>
+        )}
+        {!isLoading && data && <AnalyticsContent data={data} />}
+      </DialogContent>
+    </Dialog>
   );
 }
 

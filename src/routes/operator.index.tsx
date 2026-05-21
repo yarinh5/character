@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+﻿import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Award, Bell, Clock, MessageCircle, Send, Sparkles, Timer, Users } from "lucide-react";
+import { Award, BarChart3, Bell, Clock, MessageCircle, Send, Sparkles, Timer, Users } from "lucide-react";
 
 export const Route = createFileRoute("/operator/")({
   component: OperatorDashboard,
@@ -39,7 +39,10 @@ function OperatorDashboard() {
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
       const monthStartIso = monthStart.toISOString();
-      const monthKey = monthStartIso.slice(0, 10);
+      const monthKey = toMonthKey(monthStart);
+      const previousMonthStart = new Date(monthStart);
+      previousMonthStart.setMonth(previousMonthStart.getMonth() - 1);
+      const previousMonthKey = toMonthKey(previousMonthStart);
 
       let characterIds: string[] | null = null;
       if (operator && !isAdmin) {
@@ -62,7 +65,7 @@ function OperatorDashboard() {
             : convQuery.in("character_id", characterIds);
       }
 
-      const [{ data: convs, error }, { data: assigned }, monthlyScoreResult, sentMessagesResult] =
+      const [{ data: convs, error }, { data: assigned }, monthlyScoreResult, previousScoreResult, sentMessagesResult] =
         await Promise.all([
           convQuery,
           operator
@@ -77,6 +80,14 @@ function OperatorDashboard() {
                 .select("points, message_count")
                 .eq("operator_id", operator.id)
                 .eq("period_month", monthKey)
+                .maybeSingle() as any)
+            : Promise.resolve({ data: null }),
+          operator
+            ? (supabase
+                .from("operator_monthly_scores" as any)
+                .select("points, message_count")
+                .eq("operator_id", operator.id)
+                .eq("period_month", previousMonthKey)
                 .maybeSingle() as any)
             : Promise.resolve({ data: null }),
           operator
@@ -111,6 +122,7 @@ function OperatorDashboard() {
         (c) => c.status === "closed" && c.updated_at && new Date(c.updated_at) >= today,
       ).length;
       const monthlyScore = monthlyScoreResult.data as { points: number; message_count: number } | null;
+      const previousScore = previousScoreResult.data as { points: number; message_count: number } | null;
 
       return {
         active,
@@ -118,6 +130,7 @@ function OperatorDashboard() {
         unread,
         closedToday,
         monthlyPoints: monthlyScore?.points ?? 0,
+        monthlyPointChange: (monthlyScore?.points ?? 0) - (previousScore?.points ?? 0),
         scoredMessages: monthlyScore?.message_count ?? 0,
         sentThisMonth: sentMessagesResult.count ?? 0,
         avgResponseSec: calculateAverageResponseSeconds((monthMessages ?? []) as DashboardMessage[], operator?.id),
@@ -197,13 +210,37 @@ function OperatorDashboard() {
         </Card>
       )}
 
+      {operator && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium">ביצועים החודש</div>
+                <p className="text-xs text-muted-foreground mt-1">מבט מהיר על נקודות ופעילות מנוקדת.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 md:min-w-[360px]">
+                <QuickStat label="נקודות" value={stats?.monthlyPoints} loading={isLoading} />
+                <QuickStat label="הודעות מנוקדות" value={stats?.scoredMessages} loading={isLoading} />
+                <QuickStat label="מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
+              </div>
+              <Button variant="outline" asChild>
+                <Link to="/operator/analytics">
+                  <BarChart3 className="h-4 w-4 ml-2" />
+                  צפה באנליטיקה מלאה
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="נקודות החודש" value={stats?.monthlyPoints} icon={Award} loading={isLoading} />
         <StatCard label="שיחות פעילות" value={stats?.active} icon={MessageCircle} loading={isLoading} />
         <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
         <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />
         <StatCard label="זמן תגובה ממוצע" value={stats?.avgResponseSec} suffix="ש׳" icon={Timer} loading={isLoading} />
-        <StatCard label="הודעות שנוקדו" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
+        <StatCard label="הודעות מנוקדות" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>
@@ -239,10 +276,10 @@ function OperatorDashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">{c.characters?.name ?? "—"}</span>
+                      <span className="font-medium truncate">{c.characters?.name ?? "-"}</span>
                       <ConversationStatusBadge status={c.status} />
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "-"}</p>
                   </div>
                   {c.operator_unread_count > 0 && (
                     <span className="bg-primary text-primary-foreground text-xs rounded-full h-5 min-w-5 px-1.5 flex items-center justify-center">
@@ -280,11 +317,11 @@ function OperatorDashboard() {
                   className="flex items-center justify-between gap-3 p-3 rounded-lg border hover:bg-accent transition-colors"
                 >
                   <div className="min-w-0">
-                    <div className="font-medium truncate">{c.characters?.name ?? "—"}</div>
-                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "—"}</p>
+                    <div className="font-medium truncate">{c.characters?.name ?? "-"}</div>
+                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "-"}</p>
                   </div>
                   <div className="text-xs text-muted-foreground whitespace-nowrap">
-                    {c.last_message_at ? formatShortDate(c.last_message_at) : "—"}
+                    {c.last_message_at ? formatShortDate(c.last_message_at) : "-"}
                   </div>
                 </Link>
               ))}
@@ -318,7 +355,7 @@ function OperatorDashboard() {
                         </div>
                       )}
                     </div>
-                    <div className="text-sm truncate">{a.characters?.name ?? "—"}</div>
+                    <div className="text-sm truncate">{a.characters?.name ?? "-"}</div>
                   </div>
                 ))}
               </div>
@@ -365,6 +402,27 @@ function StatCard({
   );
 }
 
+function QuickStat({
+  label,
+  value,
+  signed,
+  loading,
+}: {
+  label: string;
+  value: number | undefined;
+  signed?: boolean;
+  loading?: boolean;
+}) {
+  const displayValue = signed && (value ?? 0) > 0 ? `+${value}` : `${value ?? 0}`;
+
+  return (
+    <div className="rounded-lg border border-border p-3 min-w-0">
+      <div className="text-xs text-muted-foreground truncate">{label}</div>
+      {loading ? <Skeleton className="h-7 w-12 mt-1" /> : <div className="text-xl font-bold mt-1">{displayValue}</div>}
+    </div>
+  );
+}
+
 function calculateAverageResponseSeconds(messages: DashboardMessage[], operatorId?: string) {
   if (!operatorId) return 0;
   const byConversation = new Map<string, DashboardMessage[]>();
@@ -403,4 +461,10 @@ function formatShortDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function toMonthKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
 }
