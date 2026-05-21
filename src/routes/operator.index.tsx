@@ -216,11 +216,11 @@ function OperatorDashboard() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="text-sm font-medium">ביצועים החודש</div>
-                <p className="text-xs text-muted-foreground mt-1">מבט מהיר על נקודות ופעילות מנוקדת.</p>
+                <p className="text-xs text-muted-foreground mt-1">מבט מהיר על נקודות והודעות שנשלחו.</p>
               </div>
               <div className="grid grid-cols-3 gap-3 md:min-w-[360px]">
                 <QuickStat label="נקודות" value={stats?.monthlyPoints} loading={isLoading} />
-                <QuickStat label="הודעות מנוקדות" value={stats?.scoredMessages} loading={isLoading} />
+                <QuickStat label="הודעות שנשלחו" value={stats?.scoredMessages} loading={isLoading} />
                 <QuickStat label="מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
               </div>
               <Button variant="outline" asChild>
@@ -240,7 +240,7 @@ function OperatorDashboard() {
         <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
         <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />
         <StatCard label="זמן תגובה ממוצע" value={stats?.avgResponseSec} suffix="ש׳" icon={Timer} loading={isLoading} />
-        <StatCard label="הודעות מנוקדות" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
+        <StatCard label="הודעות שנשלחו" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>

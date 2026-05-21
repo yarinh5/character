@@ -54,7 +54,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard label="נקודות החודש" value={data.currentPoints} icon={Award} />
-        <MetricCard label="הודעות מנוקדות" value={data.currentScoredMessages} icon={Sparkles} />
+        <MetricCard label="הודעות שנשלחו" value={data.currentScoredMessages} icon={Sparkles} />
         <MetricCard label="דמויות משויכות" value={data.assignedCharacters.length} icon={Users} />
         <MetricCard label="זמן תגובה ממוצע" value={formatResponseTime(data.avgResponseSec)} icon={Clock} />
       </div>
@@ -70,7 +70,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
               <div className="mt-1 text-2xl font-bold">{formatChange(data.monthlyPointChange)}</div>
             </div>
             <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">הודעות מנוקדות</div>
+              <div className="text-xs text-muted-foreground">הודעות שנשלחו</div>
               <div className="mt-1 text-2xl font-bold">{formatChange(data.monthlyMessageChange)}</div>
             </div>
           </div>
@@ -116,7 +116,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
                     <TableRow>
                       <TableHead className="text-right">חודש</TableHead>
                       <TableHead className="text-right">סה״כ נקודות</TableHead>
-                      <TableHead className="text-right">הודעות מנוקדות</TableHead>
+                      <TableHead className="text-right">הודעות שנשלחו</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
