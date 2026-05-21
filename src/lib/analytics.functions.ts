@@ -21,7 +21,25 @@ export const adminAnalytics = createServerFn({ method: "GET" })
     since.setHours(0, 0, 0, 0);
     const sinceIso = since.toISOString();
 
-    const [convs, users, msgs, opMsgs, charMsgs] = await Promise.all([
+    const currentMonth = new Date();
+    currentMonth.setDate(1);
+    currentMonth.setHours(0, 0, 0, 0);
+    const currentMonthKey = currentMonth.toISOString().slice(0, 10);
+
+    const [
+      convs,
+      users,
+      msgs,
+      opMsgs,
+      charMsgs,
+      creditTransactions,
+      monthlyScores,
+      operators,
+      wallets,
+      profiles,
+      clientMessagesTotal,
+      operatorMessagesTotal,
+    ] = await Promise.all([
       supabaseAdmin
         .from("conversations")
         .select("id, created_at")
@@ -42,6 +60,34 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       supabaseAdmin
         .from("conversations")
         .select("character_id, characters(name)"),
+      supabaseAdmin
+        .from("credit_transactions")
+        .select("amount, type"),
+      supabaseAdmin
+        .from("operator_monthly_scores" as any)
+        .select("operator_id, points, message_count, period_month")
+        .eq("period_month", currentMonthKey)
+        .order("points", { ascending: false }),
+      supabaseAdmin
+        .from("operators")
+        .select("id, full_name, availability_status, is_active"),
+      supabaseAdmin
+        .from("credit_wallets")
+        .select("user_id, balance")
+        .lte("balance", 2)
+        .order("balance", { ascending: true })
+        .limit(12),
+      supabaseAdmin
+        .from("profiles")
+        .select("user_id, display_name, email"),
+      supabaseAdmin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("sender_type", "client"),
+      supabaseAdmin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("sender_type", "operator"),
     ]);
 
     // Build 14-day series
@@ -122,5 +168,56 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
-    return { days, avgResponseSec, topOperators, topCharacters };
+    const creditRows = (creditTransactions.data ?? []) as Array<{ amount: number; type: string }>;
+    const totalCreditsSpent = creditRows
+      .filter((tx) => tx.amount < 0)
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    const manualCreditsAdded = creditRows
+      .filter((tx) => tx.type === "admin_adjustment" && tx.amount > 0)
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const operatorById = new Map((operators.data ?? []).map((op) => [op.id, op]));
+    const topMonthlyOperators = ((monthlyScores.data ?? []) as Array<{
+      operator_id: string;
+      points: number;
+      message_count: number;
+      period_month: string;
+    }>)
+      .map((score) => {
+        const op = operatorById.get(score.operator_id);
+        return {
+          id: score.operator_id,
+          name: op?.full_name ?? "—",
+          points: score.points,
+          messages: score.message_count,
+          status: op?.availability_status ?? "offline",
+          isActive: op?.is_active ?? false,
+        };
+      })
+      .slice(0, 8);
+
+    const profileByUser = new Map((profiles.data ?? []).map((profile) => [profile.user_id, profile]));
+    const lowBalanceUsers = ((wallets.data ?? []) as Array<{ user_id: string; balance: number }>)
+      .map((wallet) => {
+        const profile = profileByUser.get(wallet.user_id);
+        return {
+          userId: wallet.user_id,
+          name: profile?.display_name ?? profile?.email ?? "—",
+          email: profile?.email ?? null,
+          balance: wallet.balance,
+        };
+      });
+
+    return {
+      days,
+      avgResponseSec,
+      topOperators,
+      topCharacters,
+      totalCreditsSpent,
+      manualCreditsAdded,
+      clientMessages: clientMessagesTotal.count ?? 0,
+      operatorMessages: operatorMessagesTotal.count ?? 0,
+      topMonthlyOperators,
+      lowBalanceUsers,
+    };
   });

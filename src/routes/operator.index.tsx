@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { MessageCircle, Clock, Bell, Users } from "lucide-react";
+import { Award, Bell, Clock, MessageCircle, Send, Sparkles, Timer, Users } from "lucide-react";
 
 export const Route = createFileRoute("/operator/")({
   component: OperatorDashboard,
@@ -19,46 +19,109 @@ const STATUS_OPTIONS = [
   { value: "offline", label: "לא מחובר", cls: "bg-muted text-muted-foreground" },
 ] as const;
 
+type DashboardMessage = {
+  conversation_id: string;
+  sender_type: string;
+  operator_id: string | null;
+  created_at: string;
+};
+
 function OperatorDashboard() {
   const { operator, isAdmin, refresh } = useOperator();
   const qc = useQueryClient();
 
   const { data: stats, isLoading } = useQuery({
-    queryKey: ["operator-stats", operator?.id ?? "admin"],
+    queryKey: ["operator-stats", operator?.id ?? "admin", isAdmin],
     queryFn: async () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthStartIso = monthStart.toISOString();
+      const monthKey = monthStartIso.slice(0, 10);
+
+      let characterIds: string[] | null = null;
+      if (operator && !isAdmin) {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("character_operator_assignments")
+          .select("character_id")
+          .eq("operator_id", operator.id);
+        if (assignmentsError) throw assignmentsError;
+        characterIds = (assignments ?? []).map((assignment) => assignment.character_id);
+      }
 
       let convQuery = supabase
         .from("conversations")
         .select("id, status, operator_unread_count, last_message_at, last_message_preview, characters(id, name, avatar_url), client_id, updated_at")
         .order("last_message_at", { ascending: false, nullsFirst: false });
-      if (operator) convQuery = convQuery.eq("assigned_operator_id", operator.id);
+      if (characterIds) {
+        convQuery =
+          characterIds.length === 0
+            ? convQuery.in("character_id", ["00000000-0000-0000-0000-000000000000"])
+            : convQuery.in("character_id", characterIds);
+      }
 
-      const [{ data: convs, error }, { data: assigned }] = await Promise.all([
-        convQuery,
-        operator
-          ? supabase
-              .from("character_operator_assignments")
-              .select("character_id, characters(id, name, avatar_url, availability_status)")
-              .eq("operator_id", operator.id)
-          : Promise.resolve({ data: [] as unknown[] }),
-      ]);
+      const [{ data: convs, error }, { data: assigned }, monthlyScoreResult, sentMessagesResult] =
+        await Promise.all([
+          convQuery,
+          operator
+            ? supabase
+                .from("character_operator_assignments")
+                .select("character_id, characters(id, name, avatar_url, availability_status)")
+                .eq("operator_id", operator.id)
+            : Promise.resolve({ data: [] as unknown[] }),
+          operator
+            ? (supabase
+                .from("operator_monthly_scores" as any)
+                .select("points, message_count")
+                .eq("operator_id", operator.id)
+                .eq("period_month", monthKey)
+                .maybeSingle() as any)
+            : Promise.resolve({ data: null }),
+          operator
+            ? supabase
+                .from("messages")
+                .select("id", { count: "exact", head: true })
+                .eq("operator_id", operator.id)
+                .eq("sender_type", "operator")
+                .gte("created_at", monthStartIso)
+            : Promise.resolve({ count: 0 }),
+        ]);
       if (error) throw error;
 
       const list = convs ?? [];
+      const conversationIds = list.map((c) => c.id);
+      const { data: monthMessages } =
+        conversationIds.length > 0
+          ? await supabase
+              .from("messages")
+              .select("conversation_id, sender_type, operator_id, created_at")
+              .in("conversation_id", conversationIds)
+              .gte("created_at", monthStartIso)
+              .order("created_at", { ascending: true })
+              .limit(1000)
+          : { data: [] as DashboardMessage[] };
+
       const active = list.filter((c) => c.status !== "closed").length;
-      const waiting = list.filter((c) => c.status === "waiting").length;
+      const waitingConversations = list.filter((c) => c.status === "waiting" || (c.operator_unread_count ?? 0) > 0);
+      const waiting = waitingConversations.length;
       const unread = list.reduce((s, c) => s + (c.operator_unread_count ?? 0), 0);
       const closedToday = list.filter(
         (c) => c.status === "closed" && c.updated_at && new Date(c.updated_at) >= today,
       ).length;
+      const monthlyScore = monthlyScoreResult.data as { points: number; message_count: number } | null;
 
       return {
         active,
         waiting,
         unread,
         closedToday,
+        monthlyPoints: monthlyScore?.points ?? 0,
+        scoredMessages: monthlyScore?.message_count ?? 0,
+        sentThisMonth: sentMessagesResult.count ?? 0,
+        avgResponseSec: calculateAverageResponseSeconds((monthMessages ?? []) as DashboardMessage[], operator?.id),
+        waitingConversations: waitingConversations.slice(0, 5),
         recent: list.slice(0, 5),
         assignedCharacters: (assigned ?? []) as Array<{
           character_id: string;
@@ -72,6 +135,12 @@ function OperatorDashboard() {
     const ch = supabase
       .channel("operator-dashboard")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
+        qc.invalidateQueries({ queryKey: ["operator-stats"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
+        qc.invalidateQueries({ queryKey: ["operator-stats"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "operator_monthly_scores" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-stats"] }),
       )
       .subscribe();
@@ -129,8 +198,12 @@ function OperatorDashboard() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="נקודות החודש" value={stats?.monthlyPoints} icon={Award} loading={isLoading} />
         <StatCard label="שיחות פעילות" value={stats?.active} icon={MessageCircle} loading={isLoading} />
         <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
+        <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />
+        <StatCard label="זמן תגובה ממוצע" value={stats?.avgResponseSec} suffix="ש׳" icon={Timer} loading={isLoading} />
+        <StatCard label="הודעות שנוקדו" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>
@@ -188,6 +261,38 @@ function OperatorDashboard() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">שיחות שממתינות למענה</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading && <Skeleton className="h-24" />}
+          {!isLoading && stats && stats.waitingConversations.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">אין כרגע שיחות שממתינות למענה</p>
+          )}
+          {!isLoading && stats && stats.waitingConversations.length > 0 && (
+            <div className="space-y-2">
+              {stats.waitingConversations.map((c) => (
+                <Link
+                  key={c.id}
+                  to="/operator/chat/$conversationId"
+                  params={{ conversationId: c.id }}
+                  className="flex items-center justify-between gap-3 p-3 rounded-lg border hover:bg-accent transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{c.characters?.name ?? "—"}</div>
+                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "—"}</p>
+                  </div>
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                    {c.last_message_at ? formatShortDate(c.last_message_at) : "—"}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {operator && (
         <Card>
           <CardHeader>
@@ -228,12 +333,14 @@ function OperatorDashboard() {
 function StatCard({
   label,
   value,
+  suffix,
   icon: Icon,
   loading,
   highlight,
 }: {
   label: string;
   value: number | undefined;
+  suffix?: string;
   icon: typeof MessageCircle;
   loading?: boolean;
   highlight?: boolean;
@@ -248,9 +355,52 @@ function StatCard({
         {loading ? (
           <Skeleton className="h-8 w-12" />
         ) : (
-          <div className="text-2xl font-bold">{value ?? 0}</div>
+          <div className="text-2xl font-bold">
+            {value ?? 0}
+            {suffix && <span className="text-sm font-medium text-muted-foreground mr-1">{suffix}</span>}
+          </div>
         )}
       </CardContent>
     </Card>
   );
+}
+
+function calculateAverageResponseSeconds(messages: DashboardMessage[], operatorId?: string) {
+  if (!operatorId) return 0;
+  const byConversation = new Map<string, DashboardMessage[]>();
+  messages.forEach((message) => {
+    const list = byConversation.get(message.conversation_id) ?? [];
+    list.push(message);
+    byConversation.set(message.conversation_id, list);
+  });
+
+  let totalMs = 0;
+  let pairs = 0;
+  byConversation.forEach((list) => {
+    let pendingClientAt: number | null = null;
+    list.forEach((message) => {
+      if (message.sender_type === "client") {
+        pendingClientAt = +new Date(message.created_at);
+      } else if (
+        message.sender_type === "operator" &&
+        message.operator_id === operatorId &&
+        pendingClientAt !== null
+      ) {
+        totalMs += +new Date(message.created_at) - pendingClientAt;
+        pairs += 1;
+        pendingClientAt = null;
+      }
+    });
+  });
+
+  return pairs > 0 ? Math.round(totalMs / pairs / 1000) : 0;
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }

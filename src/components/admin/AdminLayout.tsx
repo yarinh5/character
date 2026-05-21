@@ -9,6 +9,7 @@ import {
   Flag,
   Settings,
   LogOut,
+  Coins,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ type NavTo =
   | "/admin/operators"
   | "/admin/characters"
   | "/admin/conversations"
+  | "/admin/credits"
   | "/admin/reports"
   | "/admin/audit-logs"
   | "/admin/settings";
@@ -38,6 +40,7 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/operators", label: "עובדים", icon: UserCog },
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
   { to: "/admin/conversations", label: "שיחות", icon: MessageCircle },
+  { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },
   { to: "/admin/audit-logs", label: "יומן פעולות", icon: ScrollText },
   { to: "/admin/settings", label: "הגדרות", icon: Settings },

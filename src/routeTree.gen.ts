@@ -26,6 +26,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as OperatorSettingsRouteImport } from './routes/operator.settings'
 import { Route as OperatorConversationsRouteImport } from './routes/operator.conversations'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
+import { Route as AppPackagesRouteImport } from './routes/app.packages'
 import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
 import { Route as AppConversationsRouteImport } from './routes/app.conversations'
 import { Route as AppCharactersRouteImport } from './routes/app.characters'
@@ -34,6 +35,7 @@ import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
 import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
+import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
 import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminCharactersRouteImport } from './routes/admin.characters'
@@ -128,6 +130,11 @@ const AppProfileRoute = AppProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPackagesRoute = AppPackagesRouteImport.update({
+  id: '/packages',
+  path: '/packages',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOnboardingRoute = AppOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
@@ -166,6 +173,11 @@ const AdminOperatorsRoute = AdminOperatorsRouteImport.update({
 const AdminInvitesRoute = AdminInvitesRouteImport.update({
   id: '/invites',
   path: '/invites',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminCreditsRoute = AdminCreditsRouteImport.update({
+  id: '/credits',
+  path: '/credits',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminConversationsRoute = AdminConversationsRouteImport.update({
@@ -228,6 +240,7 @@ export interface FileRoutesByFullPath {
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
+  '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -236,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
   '/app/onboarding': typeof AppOnboardingRoute
+  '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -260,6 +274,7 @@ export interface FileRoutesByTo {
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
+  '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -268,6 +283,7 @@ export interface FileRoutesByTo {
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
   '/app/onboarding': typeof AppOnboardingRoute
+  '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -296,6 +312,7 @@ export interface FileRoutesById {
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
+  '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -304,6 +321,7 @@ export interface FileRoutesById {
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
   '/app/onboarding': typeof AppOnboardingRoute
+  '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
   '/operator/conversations': typeof OperatorConversationsRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -333,6 +351,7 @@ export interface FileRouteTypes {
     | '/admin/characters'
     | '/admin/clients'
     | '/admin/conversations'
+    | '/admin/credits'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -341,6 +360,7 @@ export interface FileRouteTypes {
     | '/app/characters'
     | '/app/conversations'
     | '/app/onboarding'
+    | '/app/packages'
     | '/app/profile'
     | '/operator/conversations'
     | '/operator/settings'
@@ -365,6 +385,7 @@ export interface FileRouteTypes {
     | '/admin/characters'
     | '/admin/clients'
     | '/admin/conversations'
+    | '/admin/credits'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -373,6 +394,7 @@ export interface FileRouteTypes {
     | '/app/characters'
     | '/app/conversations'
     | '/app/onboarding'
+    | '/app/packages'
     | '/app/profile'
     | '/operator/conversations'
     | '/operator/settings'
@@ -400,6 +422,7 @@ export interface FileRouteTypes {
     | '/admin/characters'
     | '/admin/clients'
     | '/admin/conversations'
+    | '/admin/credits'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -408,6 +431,7 @@ export interface FileRouteTypes {
     | '/app/characters'
     | '/app/conversations'
     | '/app/onboarding'
+    | '/app/packages'
     | '/app/profile'
     | '/operator/conversations'
     | '/operator/settings'
@@ -555,6 +579,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProfileRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/packages': {
+      id: '/app/packages'
+      path: '/packages'
+      fullPath: '/app/packages'
+      preLoaderRoute: typeof AppPackagesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/onboarding': {
       id: '/app/onboarding'
       path: '/onboarding'
@@ -609,6 +640,13 @@ declare module '@tanstack/react-router' {
       path: '/invites'
       fullPath: '/admin/invites'
       preLoaderRoute: typeof AdminInvitesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/credits': {
+      id: '/admin/credits'
+      path: '/credits'
+      fullPath: '/admin/credits'
+      preLoaderRoute: typeof AdminCreditsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/conversations': {
@@ -686,6 +724,7 @@ interface AdminRouteChildren {
   AdminCharactersRoute: typeof AdminCharactersRoute
   AdminClientsRoute: typeof AdminClientsRoute
   AdminConversationsRoute: typeof AdminConversationsRouteWithChildren
+  AdminCreditsRoute: typeof AdminCreditsRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
   AdminOperatorsRoute: typeof AdminOperatorsRoute
   AdminReportsRoute: typeof AdminReportsRoute
@@ -699,6 +738,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminCharactersRoute: AdminCharactersRoute,
   AdminClientsRoute: AdminClientsRoute,
   AdminConversationsRoute: AdminConversationsRouteWithChildren,
+  AdminCreditsRoute: AdminCreditsRoute,
   AdminInvitesRoute: AdminInvitesRoute,
   AdminOperatorsRoute: AdminOperatorsRoute,
   AdminReportsRoute: AdminReportsRoute,
@@ -713,6 +753,7 @@ interface AppRouteChildren {
   AppCharactersRoute: typeof AppCharactersRoute
   AppConversationsRoute: typeof AppConversationsRoute
   AppOnboardingRoute: typeof AppOnboardingRoute
+  AppPackagesRoute: typeof AppPackagesRoute
   AppProfileRoute: typeof AppProfileRoute
   AppIndexRoute: typeof AppIndexRoute
   AppChatConversationIdRoute: typeof AppChatConversationIdRoute
@@ -722,6 +763,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCharactersRoute: AppCharactersRoute,
   AppConversationsRoute: AppConversationsRoute,
   AppOnboardingRoute: AppOnboardingRoute,
+  AppPackagesRoute: AppPackagesRoute,
   AppProfileRoute: AppProfileRoute,
   AppIndexRoute: AppIndexRoute,
   AppChatConversationIdRoute: AppChatConversationIdRoute,

@@ -6,13 +6,7 @@ import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search } from "lucide-react";
 
 export const Route = createFileRoute("/admin/conversations")({
@@ -23,17 +17,6 @@ function ConversationsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
-  const [opFilter, setOpFilter] = useState<string>("all");
-
-  const { data: aux } = useQuery({
-    queryKey: ["admin-conv-aux"],
-    queryFn: async () => {
-      const [{ data: ops }] = await Promise.all([
-        supabase.from("operators").select("id, full_name").eq("is_active", true),
-      ]);
-      return { ops: ops ?? [] };
-    },
-  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-conversations"],
@@ -41,17 +24,35 @@ function ConversationsPage() {
       const { data, error } = await supabase
         .from("conversations")
         .select(
-          "id, status, last_message_at, last_message_preview, client_unread_count, operator_unread_count, created_at, characters(name, avatar_url), operators(id, full_name), client_id",
+          "id, status, last_message_at, last_message_preview, client_unread_count, operator_unread_count, created_at, character_id, characters(name, avatar_url), operators(id, full_name), client_id",
         )
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(200);
       if (error) throw error;
       const clientIds = Array.from(new Set((data ?? []).map((c: any) => c.client_id)));
+      const characterIds = Array.from(new Set((data ?? []).map((c: any) => c.character_id).filter(Boolean)));
       const { data: profs } = clientIds.length
         ? await supabase.from("profiles").select("user_id, display_name, email").in("user_id", clientIds)
         : { data: [] as any[] };
+      const { data: assignments } = characterIds.length
+        ? await supabase
+            .from("character_operator_assignments")
+            .select("character_id, operators(full_name, is_active)")
+            .in("character_id", characterIds)
+        : { data: [] as any[] };
       const map = new Map((profs ?? []).map((p) => [p.user_id, p]));
-      return (data ?? []).map((c: any) => ({ ...c, client: map.get(c.client_id) }));
+      const sharedInboxMap = new Map<string, string[]>();
+      (assignments ?? []).forEach((a: any) => {
+        if (!a.operators?.is_active) return;
+        const names = sharedInboxMap.get(a.character_id) ?? [];
+        names.push(a.operators.full_name);
+        sharedInboxMap.set(a.character_id, names);
+      });
+      return (data ?? []).map((c: any) => ({
+        ...c,
+        client: map.get(c.client_id),
+        sharedInboxOperators: sharedInboxMap.get(c.character_id) ?? [],
+      }));
     },
   });
 
@@ -69,11 +70,9 @@ function ConversationsPage() {
 
   const filtered = (data ?? []).filter((c: any) => {
     if (status !== "all" && c.status !== status) return false;
-    if (opFilter === "none" && c.operators) return false;
-    if (opFilter !== "all" && opFilter !== "none" && c.operators?.id !== opFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      const hay = `${c.characters?.name ?? ""} ${c.client?.display_name ?? ""} ${c.client?.email ?? ""} ${c.last_message_preview ?? ""}`.toLowerCase();
+      const hay = `${c.characters?.name ?? ""} ${c.client?.display_name ?? ""} ${c.client?.email ?? ""} ${c.sharedInboxOperators?.join(" ") ?? ""} ${c.last_message_preview ?? ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -84,7 +83,7 @@ function ConversationsPage() {
       <PageHeader title="שיחות" description="כל השיחות במערכת" />
 
       <Card className="mb-4">
-        <CardContent className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="relative md:col-span-1">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="חיפוש" className="pr-10" />
@@ -98,16 +97,6 @@ function ConversationsPage() {
               <SelectItem value="answered">נענו</SelectItem>
               <SelectItem value="closed">סגורות</SelectItem>
               <SelectItem value="reported">דווחו</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={opFilter} onValueChange={setOpFilter}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">כל העובדים</SelectItem>
-              <SelectItem value="none">ללא עובד משויך</SelectItem>
-              {(aux?.ops ?? []).map((o) => (
-                <SelectItem key={o.id} value={o.id}>{o.full_name}</SelectItem>
-              ))}
             </SelectContent>
           </Select>
         </CardContent>
@@ -143,8 +132,14 @@ function ConversationsPage() {
                       <StatusBadge status={c.status} />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {c.client?.display_name ?? c.client?.email ?? "—"} ↔ {c.operators?.full_name ?? "ללא עובד"}
+                      {c.client?.display_name ?? c.client?.email ?? "—"} ↔ Shared Inbox:{" "}
+                      {c.sharedInboxOperators?.length ? c.sharedInboxOperators.join(", ") : "אין עובדים משויכים לדמות"}
                     </div>
+                    {c.operators?.full_name && (
+                      <div className="text-[11px] text-muted-foreground/80 truncate">
+                        legacy assignment metadata: {c.operators.full_name}
+                      </div>
+                    )}
                     <div className="text-xs text-muted-foreground truncate mt-0.5">{c.last_message_preview ?? "—"}</div>
                   </div>
                   <div className="text-xs text-muted-foreground hidden md:block whitespace-nowrap">

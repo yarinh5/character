@@ -42,7 +42,7 @@ function formatTime(iso: string | null) {
 }
 
 function OperatorConversationsPage() {
-  const { operator } = useOperator();
+  const { operator, isAdmin } = useOperator();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
   const [characterFilter, setCharacterFilter] = useState<string>("all");
@@ -51,13 +51,24 @@ function OperatorConversationsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["operator-conversations", operator?.id ?? "admin"],
     queryFn: async () => {
+      let characterIds: string[] | null = null;
+      if (operator && !isAdmin) {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("character_operator_assignments")
+          .select("character_id")
+          .eq("operator_id", operator.id);
+        if (assignmentsError) throw assignmentsError;
+        characterIds = (assignments ?? []).map((assignment) => assignment.character_id);
+        if (characterIds.length === 0) return [];
+      }
+
       let q = supabase
         .from("conversations")
         .select(
           "id, status, last_message_at, last_message_preview, operator_unread_count, client_id, characters(id, name, avatar_url)",
         )
         .order("last_message_at", { ascending: false, nullsFirst: false });
-      if (operator) q = q.eq("assigned_operator_id", operator.id);
+      if (characterIds) q = q.in("character_id", characterIds);
       const { data, error } = await q;
       if (error) throw error;
 

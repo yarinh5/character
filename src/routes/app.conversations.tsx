@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,19 +44,27 @@ const STATUS_LABEL: Record<string, string> = {
 
 function ConversationsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["conversations", "client"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("conversations")
-        .select(
-          "id, status, last_message_at, last_message_preview, client_unread_count, characters(id, name, avatar_url)",
-        )
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+      const [{ data, error }, { data: deleted, error: deletedError }] = await Promise.all([
+        supabase
+          .from("conversations")
+          .select(
+            "id, status, last_message_at, last_message_preview, client_unread_count, characters(id, name, avatar_url)",
+          )
+          .order("last_message_at", { ascending: false, nullsFirst: false }),
+        supabase.from("client_conversation_deletions").select("conversation_id"),
+      ]);
       if (error) throw error;
-      return data as unknown as Row[];
+      if (deletedError) throw deletedError;
+
+      const deletedIds = new Set((deleted ?? []).map((row) => row.conversation_id));
+      return (data ?? []).filter((row) => !deletedIds.has(row.id)) as unknown as Row[];
     },
+    enabled: !!user,
   });
 
   useEffect(() => {
@@ -64,6 +73,11 @@ function ConversationsPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "conversations" },
+        () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "client_conversation_deletions" },
         () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
       )
       .subscribe();

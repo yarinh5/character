@@ -21,6 +21,18 @@ const KEYS = [
   { key: "require_age_confirmation", label: "דרוש אישור גיל בהרשמה", type: "bool", default: true },
   { key: "allow_new_registrations", label: "אפשר הרשמות חדשות", type: "bool", default: true },
   { key: "default_conversation_status", label: "סטטוס שיחה ברירת מחדל", type: "text", default: "open" },
+  {
+    key: "concurrency_mode",
+    label: "מצב עבודה במקביל",
+    type: "select",
+    default: "open",
+    options: [
+      { value: "open", label: "Open - כולם יכולים לענות" },
+      { value: "warning", label: "Warning - אזהרה בלבד" },
+      { value: "lock", label: "Lock - נעילת שיחה" },
+    ],
+  },
+  { key: "lock_timeout_minutes", label: "שחרור נעילה אוטומטי אחרי דקות", type: "number", default: 10 },
   { key: "service_disclaimer_text", label: "טקסט גילוי נאות", type: "textarea", default: "" },
 ] as const;
 
@@ -96,6 +108,18 @@ function SettingsPage() {
                     value={form[k.key] ?? ""}
                     onChange={(e) => setForm({ ...form, [k.key]: e.target.value })}
                   />
+                ) : k.type === "select" ? (
+                  <select
+                    value={form[k.key] ?? k.default}
+                    onChange={(e) => setForm({ ...form, [k.key]: e.target.value })}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    {k.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <Input
                     value={form[k.key] ?? ""}

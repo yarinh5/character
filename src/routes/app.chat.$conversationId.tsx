@@ -12,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Send, Flag } from "lucide-react";
+import { ArrowRight, Send, Flag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/chat/$conversationId")({
@@ -40,6 +40,12 @@ type Conv = {
   } | null;
 };
 
+type SendClientMessageResponse = {
+  message?: Msg;
+  balance?: number;
+  credits_enabled?: boolean;
+};
+
 function ChatPage() {
   const { conversationId } = Route.useParams();
   const { user } = useAuth();
@@ -50,6 +56,9 @@ function ChatPage() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Load conversation + messages
@@ -57,7 +66,7 @@ function ChatPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [{ data: c, error: ce }, { data: m, error: me }] = await Promise.all([
+      const [{ data: c, error: ce }, { data: m, error: me }, { data: deletion }, { data: wallet }] = await Promise.all([
         supabase
           .from("conversations")
           .select("id, client_id, status, characters(id, name, avatar_url, availability_status)")
@@ -68,9 +77,15 @@ function ChatPage() {
           .select("*")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: true }),
+        supabase
+          .from("client_conversation_deletions")
+          .select("conversation_id")
+          .eq("conversation_id", conversationId)
+          .maybeSingle(),
+        supabase.from("credit_wallets").select("balance").maybeSingle(),
       ]);
       if (cancelled) return;
-      if (ce || !c) {
+      if (ce || !c || deletion) {
         toast.error("שיחה לא נמצאה");
         navigate({ to: "/app/conversations" });
         return;
@@ -78,6 +93,7 @@ function ChatPage() {
       if (me) toast.error("שגיאה בטעינת הודעות");
       setConv(c as unknown as Conv);
       setMessages((m ?? []) as Msg[]);
+      setCreditBalance(wallet?.balance ?? null);
       setLoading(false);
       // mark read
       await supabase.rpc("mark_conversation_read", {
@@ -135,18 +151,50 @@ function ChatPage() {
       return;
     }
     setSending(true);
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_type: "client",
-      sender_id: user.id,
-      content,
+    const { data, error } = await supabase.rpc("send_client_message", {
+      _conversation_id: conversationId,
+      _content: content,
     });
     setSending(false);
     if (error) {
+      if (error.message.includes("insufficient_credits")) {
+        toast.error("נגמרו לך הקרדיטים. אפשר להמשיך לקרוא את השיחה, אבל כדי לשלוח הודעה צריך להטעין קרדיטים.", {
+          action: {
+            label: "לחבילות",
+            onClick: () => navigate({ to: "/app/packages" }),
+          },
+        });
+        return;
+      }
       toast.error("שליחה נכשלה");
       return;
     }
+    const result = data as SendClientMessageResponse | null;
+    if (typeof result?.balance === "number") setCreditBalance(result.balance);
+    if (result?.message) {
+      setMessages((prev) => (prev.some((m) => m.id === result.message!.id) ? prev : [...prev, result.message!]));
+    }
     setInput("");
+  };
+
+  const deleteConversation = async () => {
+    if (!user || deleting) return;
+
+    setDeleting(true);
+    const { error } = await supabase.from("client_conversation_deletions").insert({
+      client_id: user.id,
+      conversation_id: conversationId,
+    });
+    setDeleting(false);
+
+    if (error) {
+      toast.error("מחיקת השיחה נכשלה");
+      return;
+    }
+
+    setDeleteOpen(false);
+    toast.success("השיחה נמחקה מהרשימה שלך");
+    navigate({ to: "/app/conversations" });
   };
 
   if (loading) {
@@ -160,7 +208,7 @@ function ChatPage() {
   const character = conv?.characters;
 
   return (
-    <div className="flex flex-col h-screen bg-background" dir="rtl">
+    <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
       {/* Header */}
       <header className="h-16 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
         <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/app/conversations" })}>
@@ -184,10 +232,13 @@ function ChatPage() {
         <Button variant="ghost" size="icon" onClick={() => setReportOpen(true)}>
           <Flag className="h-5 w-5" />
         </Button>
+        <Button variant="ghost" size="icon" onClick={() => setDeleteOpen(true)}>
+          <Trash2 className="h-5 w-5" />
+        </Button>
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
         {messages.length === 0 && (
           <div className="text-center text-muted-foreground py-8 text-sm">
             פתח את השיחה — שלח הודעה ראשונה
@@ -208,7 +259,7 @@ function ChatPage() {
           return (
             <div key={m.id} className={`flex ${mine ? "justify-start" : "justify-end"}`}>
               <div
-                className={`max-w-[75%] rounded-2xl px-4 py-2 ${
+                className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
                   mine
                     ? "bg-primary text-primary-foreground rounded-bl-sm"
                     : "bg-card border border-border rounded-br-sm"
@@ -229,6 +280,9 @@ function ChatPage() {
 
       {/* Composer */}
       <div className="border-t border-border bg-card p-3 shrink-0">
+        {creditBalance !== null && (
+          <p className="text-xs text-muted-foreground mb-2 text-end">יתרת קרדיטים: {creditBalance}</p>
+        )}
         <div className="flex gap-2 items-end">
           <Textarea
             value={input}
@@ -259,7 +313,46 @@ function ChatPage() {
         conversationId={conversationId}
         userId={user?.id}
       />
+      <DeleteConversationDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onConfirm={deleteConversation}
+        deleting={deleting}
+      />
     </div>
+  );
+}
+
+function DeleteConversationDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  deleting,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onConfirm: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl">
+        <DialogHeader>
+          <DialogTitle>מחיקת שיחה מהרשימה</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground leading-6">
+          השיחה תוסתר רק אצלך. העובדים והאדמין עדיין יראו את ההיסטוריה, ואם תפתח שוב את אותה דמות תיווצר שיחה חדשה.
+        </p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
+            ביטול
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={deleting}>
+            {deleting ? "מוחק..." : "מחק שיחה"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

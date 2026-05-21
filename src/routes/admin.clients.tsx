@@ -33,11 +33,24 @@ function ClientsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["admin-clients"],
     queryFn: async () => {
-      const { data: roles } = await supabase
+      const [{ data: roles, error: rolesError }, { data: clientProfiles, error: clientProfilesError }] = await Promise.all([
+        supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "client");
-      const ids = (roles ?? []).map((r) => r.user_id);
+        .select("user_id, role"),
+        supabase.from("client_profiles").select("user_id"),
+      ]);
+      if (rolesError) throw rolesError;
+      if (clientProfilesError) throw clientProfilesError;
+
+      const clientCandidates = new Set<string>();
+      const elevatedUsers = new Set<string>();
+      (roles ?? []).forEach((role) => {
+        if (role.role === "client") clientCandidates.add(role.user_id);
+        if (role.role === "operator" || role.role === "admin") elevatedUsers.add(role.user_id);
+      });
+      (clientProfiles ?? []).forEach((profile) => clientCandidates.add(profile.user_id));
+
+      const ids = [...clientCandidates].filter((userId) => !elevatedUsers.has(userId));
       if (ids.length === 0) return [];
       const { data: profs } = await supabase
         .from("profiles")

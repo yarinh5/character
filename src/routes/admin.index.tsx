@@ -8,15 +8,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminAnalytics } from "@/lib/analytics.functions";
 import {
-  Users,
-  UserCog,
-  Sparkles,
-  MessageCircle,
-  Clock,
-  Flag,
-  AlertTriangle,
   Activity,
+  AlertTriangle,
+  Coins,
+  Flag,
+  MessageCircle,
+  Sparkles,
   Timer,
+  TrendingDown,
+  TrendingUp,
+  UserCog,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/")({
@@ -25,6 +28,7 @@ export const Route = createFileRoute("/admin/")({
 
 function AdminDashboard() {
   const qc = useQueryClient();
+  const analyticsFn = useServerFn(adminAnalytics);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-stats"],
@@ -40,58 +44,28 @@ function AdminDashboard() {
         operatorsAvailable,
         characters,
         convsAll,
-        msgsToday,
         reportsOpen,
         recent,
-        topChars,
-        operatorLoad,
-        unassigned,
       ] = await Promise.all([
         supabase.from("user_roles").select("user_id", { count: "exact", head: true }).eq("role", "client"),
         supabase.from("profiles").select("user_id", { count: "exact", head: true }).gte("created_at", iso),
         supabase.from("operators").select("id", { count: "exact", head: true }),
-        supabase.from("operators").select("id", { count: "exact", head: true }).eq("availability_status", "available").eq("is_active", true),
+        supabase
+          .from("operators")
+          .select("id", { count: "exact", head: true })
+          .eq("availability_status", "available")
+          .eq("is_active", true),
         supabase.from("characters").select("id", { count: "exact", head: true }).eq("is_active", true),
-        supabase.from("conversations").select("id, status, assigned_operator_id"),
-        supabase.from("messages").select("id", { count: "exact", head: true }).gte("created_at", iso),
+        supabase.from("conversations").select("id, status"),
         supabase.from("reports").select("id", { count: "exact", head: true }).eq("status", "open"),
         supabase
           .from("conversations")
           .select("id, status, last_message_at, last_message_preview, characters(name, avatar_url), operators(full_name)")
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(8),
-        supabase.from("messages").select("conversation_id, conversations(character_id, characters(name))").limit(500).order("created_at", { ascending: false }),
-        supabase.from("operators").select("id, full_name, availability_status, is_active"),
-        supabase.from("conversations").select("id", { count: "exact", head: true }).is("assigned_operator_id", null),
       ]);
 
       const allConvs = convsAll.data ?? [];
-      const activeConvs = allConvs.filter((c) => c.status !== "closed").length;
-      const waitingConvs = allConvs.filter((c) => c.status === "waiting").length;
-
-      // top characters by messages
-      const charMap = new Map<string, { name: string; count: number }>();
-      (topChars.data ?? []).forEach((m) => {
-        const ch = (m as any).conversations?.characters;
-        const id = (m as any).conversations?.character_id;
-        if (!id || !ch) return;
-        const cur = charMap.get(id) ?? { name: ch.name, count: 0 };
-        cur.count += 1;
-        charMap.set(id, cur);
-      });
-      const topCharacters = Array.from(charMap.values()).sort((a, b) => b.count - a.count).slice(0, 5);
-
-      // operator load
-      const opLoad = (operatorLoad.data ?? []).map((op) => {
-        const opConvs = allConvs.filter((c) => c.assigned_operator_id === op.id && c.status !== "closed");
-        return {
-          id: op.id,
-          name: op.full_name,
-          status: op.availability_status,
-          is_active: op.is_active,
-          active: opConvs.length,
-        };
-      }).sort((a, b) => b.active - a.active).slice(0, 8);
 
       return {
         clients: clients.count ?? 0,
@@ -99,26 +73,34 @@ function AdminDashboard() {
         operators: operators.count ?? 0,
         operatorsAvailable: operatorsAvailable.count ?? 0,
         characters: characters.count ?? 0,
-        activeConvs,
-        waitingConvs,
-        msgsToday: msgsToday.count ?? 0,
+        activeConvs: allConvs.filter((c) => c.status !== "closed").length,
+        waitingConvs: allConvs.filter((c) => c.status === "waiting").length,
         reportsOpen: reportsOpen.count ?? 0,
-        unassigned: unassigned.count ?? 0,
         recent: recent.data ?? [],
-        topCharacters,
-        opLoad,
       };
     },
+  });
+
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ["admin-analytics"],
+    queryFn: () => analyticsFn(),
   });
 
   useEffect(() => {
     const ch = supabase
       .channel("admin-dashboard")
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
-        qc.invalidateQueries({ queryKey: ["admin-stats"] }),
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
+        qc.invalidateQueries({ queryKey: ["admin-stats"] });
+        qc.invalidateQueries({ queryKey: ["admin-analytics"] });
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
-        qc.invalidateQueries({ queryKey: ["admin-stats"] }),
+        qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "operator_monthly_scores" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
       )
       .subscribe();
     return () => {
@@ -126,19 +108,11 @@ function AdminDashboard() {
     };
   }, [qc]);
 
-
-  const analyticsFn = useServerFn(adminAnalytics);
-  const { data: analytics } = useQuery({
-    queryKey: ["admin-analytics"],
-    queryFn: () => analyticsFn(),
-  });
-
   const maxMsgs = Math.max(1, ...(analytics?.days.map((d) => d.messages) ?? [0]));
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8">
       <PageHeader title="דשבורד" description="סקירת מערכת בזמן אמת" />
-
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <Stat label="סך לקוחות" value={data?.clients} icon={Users} loading={isLoading} />
@@ -147,10 +121,12 @@ function AdminDashboard() {
         <Stat label="עובדים זמינים" value={data?.operatorsAvailable} icon={UserCog} loading={isLoading} />
         <Stat label="דמויות פעילות" value={data?.characters} icon={Sparkles} loading={isLoading} />
         <Stat label="שיחות פעילות" value={data?.activeConvs} icon={MessageCircle} loading={isLoading} />
-        <Stat label="ממתינות" value={data?.waitingConvs} icon={Clock} loading={isLoading} highlight />
-        <Stat label="הודעות היום" value={data?.msgsToday} icon={MessageCircle} loading={isLoading} />
+        <Stat label="ממתינות" value={data?.waitingConvs} icon={Timer} loading={isLoading} highlight />
         <Stat label="דיווחים פתוחים" value={data?.reportsOpen} icon={Flag} loading={isLoading} highlight />
-        <Stat label="ללא עובד" value={data?.unassigned} icon={AlertTriangle} loading={isLoading} highlight />
+        <Stat label="קרדיטים שנוצלו" value={analytics?.totalCreditsSpent} icon={TrendingDown} loading={analyticsLoading} />
+        <Stat label="נוספו ידנית" value={analytics?.manualCreditsAdded} icon={Coins} loading={analyticsLoading} />
+        <Stat label="הודעות לקוחות" value={analytics?.clientMessages} icon={MessageCircle} loading={analyticsLoading} />
+        <Stat label="הודעות עובדים" value={analytics?.operatorMessages} icon={TrendingUp} loading={analyticsLoading} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -199,19 +175,30 @@ function AdminDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">דמויות הכי פעילות</CardTitle>
+            <CardTitle className="text-base">דירוג עובדים חודשי</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoading && <Skeleton className="h-32" />}
-            {!isLoading && data && data.topCharacters.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">אין נתונים</p>
+            {analyticsLoading && <Skeleton className="h-32" />}
+            {!analyticsLoading && analytics && analytics.topMonthlyOperators.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-6">אין עדיין ניקוד לחודש הנוכחי</p>
             )}
-            {!isLoading && data && data.topCharacters.length > 0 && (
+            {!analyticsLoading && analytics && analytics.topMonthlyOperators.length > 0 && (
               <div className="space-y-2">
-                {data.topCharacters.map((c, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 p-2 rounded-lg border">
-                    <span className="font-medium truncate">{c.name}</span>
-                    <span className="text-sm text-muted-foreground">{c.count} הודעות אחרונות</span>
+                {analytics.topMonthlyOperators.map((op, index) => (
+                  <div key={op.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {index + 1}. {op.name}
+                      </div>
+                      <div className="flex gap-2 mt-1">
+                        <StatusBadge status={op.status} />
+                        {!op.isActive && <StatusBadge status="inactive" />}
+                      </div>
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xl font-bold">{op.points}</div>
+                      <div className="text-[11px] text-muted-foreground">{op.messages} הודעות</div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -219,29 +206,47 @@ function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">עומס עובדים</CardTitle>
+            <CardTitle className="text-base">דמויות הכי פעילות</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoading && <Skeleton className="h-32" />}
-            {!isLoading && data && data.opLoad.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">אין עובדים במערכת</p>
+            {analyticsLoading && <Skeleton className="h-24" />}
+            {!analyticsLoading && analytics && analytics.topCharacters.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">אין נתונים</p>
             )}
-            {!isLoading && data && data.opLoad.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {data.opLoad.map((op) => (
-                  <div key={op.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+            {!analyticsLoading && analytics && analytics.topCharacters.length > 0 && (
+              <div className="space-y-2">
+                {analytics.topCharacters.map((c, i) => (
+                  <div key={`${c.name}-${i}`} className="flex justify-between items-center p-2 rounded-lg border">
+                    <span className="font-medium truncate">{c.name}</span>
+                    <span className="text-sm text-muted-foreground">{c.count} שיחות</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">לקוחות עם יתרה נמוכה</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading && <Skeleton className="h-24" />}
+            {!analyticsLoading && analytics && analytics.lowBalanceUsers.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">אין לקוחות עם יתרה נמוכה</p>
+            )}
+            {!analyticsLoading && analytics && analytics.lowBalanceUsers.length > 0 && (
+              <div className="space-y-2">
+                {analytics.lowBalanceUsers.map((user) => (
+                  <div key={user.userId} className="flex items-center justify-between gap-3 p-2 rounded-lg border">
                     <div className="min-w-0">
-                      <div className="font-medium truncate">{op.name}</div>
-                      <div className="flex gap-2 mt-1">
-                        <StatusBadge status={op.status} />
-                        {!op.is_active && <StatusBadge status="inactive" />}
-                      </div>
+                      <div className="font-medium truncate">{user.name}</div>
+                      {user.email && <div className="text-xs text-muted-foreground truncate">{user.email}</div>}
                     </div>
-                    <div className="text-right">
-                      <div className="text-xl font-bold">{op.active}</div>
-                      <div className="text-[11px] text-muted-foreground">שיחות פעילות</div>
+                    <div className={user.balance === 0 ? "text-destructive font-bold" : "font-bold"}>
+                      {user.balance}
                     </div>
                   </div>
                 ))}
@@ -259,8 +264,8 @@ function AdminDashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {!analytics && <Skeleton className="h-32" />}
-            {analytics && (
+            {analyticsLoading && <Skeleton className="h-32" />}
+            {!analyticsLoading && analytics && (
               <div className="flex items-end gap-1 h-32">
                 {analytics.days.map((d) => (
                   <div key={d.date} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}: ${d.messages} הודעות`}>
@@ -269,50 +274,6 @@ function AdminDashboard() {
                       style={{ height: `${(d.messages / maxMsgs) * 100}%`, minHeight: d.messages > 0 ? "4px" : "1px" }}
                     />
                     <span className="text-[9px] text-muted-foreground">{d.date.slice(8)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">עובדים מובילים (14 ימים)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!analytics && <Skeleton className="h-24" />}
-            {analytics && analytics.topOperators.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">אין נתונים</p>
-            )}
-            {analytics && analytics.topOperators.length > 0 && (
-              <div className="space-y-2">
-                {analytics.topOperators.map((op, i) => (
-                  <div key={i} className="flex justify-between items-center p-2 rounded-lg border">
-                    <span className="font-medium truncate">{op.name}</span>
-                    <span className="text-sm text-muted-foreground">{op.count} הודעות</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">דמויות מובילות (כל הזמנים)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!analytics && <Skeleton className="h-24" />}
-            {analytics && analytics.topCharacters.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">אין נתונים</p>
-            )}
-            {analytics && analytics.topCharacters.length > 0 && (
-              <div className="space-y-2">
-                {analytics.topCharacters.map((c, i) => (
-                  <div key={i} className="flex justify-between items-center p-2 rounded-lg border">
-                    <span className="font-medium truncate">{c.name}</span>
-                    <span className="text-sm text-muted-foreground">{c.count} שיחות</span>
                   </div>
                 ))}
               </div>
@@ -333,7 +294,7 @@ function Stat({
 }: {
   label: string;
   value: number | undefined;
-  icon: typeof Users;
+  icon: LucideIcon;
   loading?: boolean;
   highlight?: boolean;
 }) {

@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -14,7 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, FileText, Info } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
@@ -25,9 +27,14 @@ function ConvView() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const [noteInput, setNoteInput] = useState("");
+  const [customerInfoInput, setCustomerInfoInput] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["admin-conv", conversationId],
+    queryKey: ["admin-conv", conversationId, user?.id],
     queryFn: async () => {
       const { data: conv, error } = await supabase
         .from("conversations")
@@ -38,19 +45,32 @@ function ConvView() {
         .single();
       if (error) throw error;
 
-      const [{ data: client }, { data: cprof }, { data: msgs }, { data: notes }, { data: reports }, { data: charOps }] =
-        await Promise.all([
+      const [
+        { data: client },
+        { data: cprof },
+        { data: msgs },
+        { data: notes },
+        { data: customerInfo },
+        { data: reports },
+        { data: charOps },
+        { data: currentOperator },
+      ] = await Promise.all([
           supabase.from("profiles").select("display_name, email, status").eq("user_id", conv.client_id).maybeSingle(),
           supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
           supabase
             .from("messages")
-            .select("id, content, sender_type, created_at")
+            .select("id, content, sender_type, sender_id, operator_id, created_at, operators(full_name)")
             .eq("conversation_id", conversationId)
             .order("created_at", { ascending: true }),
           supabase
             .from("internal_notes")
             .select("id, note, created_at, operator_id, operators(full_name)")
             .eq("conversation_id", conversationId)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("customer_info_entries")
+            .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
+            .eq("client_id", conv.client_id)
             .order("created_at", { ascending: false }),
           supabase
             .from("reports")
@@ -60,6 +80,13 @@ function ConvView() {
             .from("character_operator_assignments")
             .select("operator_id, operators(id, full_name, is_active, availability_status)")
             .eq("character_id", conv.character_id),
+          user?.id
+            ? supabase
+                .from("operators")
+                .select("id, full_name")
+                .eq("user_id", user.id)
+                .maybeSingle()
+            : Promise.resolve({ data: null }),
         ]);
       return {
         conv,
@@ -67,7 +94,9 @@ function ConvView() {
         cprof,
         msgs: msgs ?? [],
         notes: notes ?? [],
+        customerInfo: customerInfo ?? [],
         reports: reports ?? [],
+        currentOperator,
         availableOps: (charOps ?? [])
           .map((a: any) => a.operators)
           .filter((o: any) => o && o.is_active),
@@ -88,11 +117,26 @@ function ConvView() {
         { event: "*", schema: "public", table: "conversations", filter: `id=eq.${conversationId}` },
         () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "internal_notes", filter: `conversation_id=eq.${conversationId}` },
+        () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "customer_info_entries",
+          filter: data?.conv.client_id ? `client_id=eq.${data.conv.client_id}` : undefined,
+        },
+        () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [conversationId, qc]);
+  }, [conversationId, data?.conv.client_id, qc]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -104,10 +148,10 @@ function ConvView() {
       .update({ assigned_operator_id: opId, status: "open" })
       .eq("id", conversationId);
     if (error) {
-      toast.error("העברה נכשלה: " + error.message);
+      toast.error("עדכון שיוך legacy נכשל: " + error.message);
       return;
     }
-    toast.success("השיחה הועברה");
+    toast.success("שיוך legacy עודכן");
     qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
   };
 
@@ -121,6 +165,50 @@ function ConvView() {
       return;
     }
     toast.success("סטטוס עודכן");
+    qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+  };
+
+  const saveNote = async () => {
+    const text = noteInput.trim();
+    if (!text || savingNote) return;
+    setSavingNote(true);
+    const { error } = await supabase.from("internal_notes").insert({
+      conversation_id: conversationId,
+      operator_id: data?.currentOperator?.id ?? null,
+      note: text.slice(0, 2000),
+    });
+    setSavingNote(false);
+    if (error) {
+      toast.error("שמירת הערה נכשלה");
+      return;
+    }
+    setNoteInput("");
+    toast.success("הערה נשמרה");
+    qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+  };
+
+  const saveCustomerInfo = async () => {
+    const text = customerInfoInput.trim();
+    if (!text || savingCustomerInfo || !user || !data) return;
+    if (!data.currentOperator?.id) {
+      toast.error("כדי לשמור מידע לקוח צריך רשומת עובד פעילה לאדמין הזה.");
+      return;
+    }
+    setSavingCustomerInfo(true);
+    const { error } = await supabase.from("customer_info_entries").insert({
+      client_id: data.conv.client_id,
+      conversation_id: conversationId,
+      operator_id: data.currentOperator.id,
+      created_by_user_id: user.id,
+      content: text.slice(0, 2000),
+    });
+    setSavingCustomerInfo(false);
+    if (error) {
+      toast.error("שמירת מידע לקוח נכשלה");
+      return;
+    }
+    setCustomerInfoInput("");
+    toast.success("מידע הלקוח נשמר");
     qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
   };
 
@@ -157,7 +245,8 @@ function ConvView() {
                 <div>
                   <CardTitle className="text-base">{data.conv.characters?.name}</CardTitle>
                   <div className="text-xs text-muted-foreground">
-                    עובד: {data.conv.operators?.full_name ?? "ללא"}
+                    Shared Inbox לפי שיוך לדמות
+                    {data.conv.operators?.full_name ? ` · legacy: ${data.conv.operators.full_name}` : ""}
                   </div>
                 </div>
               </div>
@@ -184,7 +273,11 @@ function ConvView() {
                     }`}
                   >
                     <div className="text-[10px] opacity-70 mb-0.5">
-                      {m.sender_type === "client" ? "לקוח" : m.sender_type === "operator" ? "עובד (כדמות)" : "אדמין"}
+                      {m.sender_type === "client"
+                        ? "לקוח"
+                        : m.sender_type === "operator"
+                          ? `עובד: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
+                          : "אדמין"}
                     </div>
                     <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>
                     <div className="text-[10px] opacity-60 mt-1">
@@ -201,10 +294,13 @@ function ConvView() {
           <Card>
             <CardHeader><CardTitle className="text-sm">פעולות</CardTitle></CardHeader>
             <CardContent className="space-y-3">
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                מקור האמת לשיחות עובדים הוא Shared Inbox לפי שיוך העובדים לדמות. השדה כאן נשמר כ־legacy metadata בלבד.
+              </div>
               <div>
-                <label className="text-xs text-muted-foreground">העברה לעובד</label>
+                <label className="text-xs text-muted-foreground">Legacy assignment / metadata</label>
                 <Select onValueChange={reassign}>
-                  <SelectTrigger><SelectValue placeholder="בחר עובד" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="בחר עובד לשיוך legacy" /></SelectTrigger>
                   <SelectContent>
                     {data.availableOps.length === 0 && (
                       <div className="px-2 py-3 text-xs text-muted-foreground">אין עובדים משויכים לדמות</div>
@@ -252,21 +348,82 @@ function ConvView() {
             </CardContent>
           </Card>
 
-          {data.notes.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle className="text-sm">הערות פנימיות</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FileText className="h-4 w-4" /> הערות פנימיות
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Textarea
+                  value={noteInput}
+                  onChange={(e) => setNoteInput(e.target.value)}
+                  placeholder="הערה פנימית..."
+                  rows={2}
+                  maxLength={2000}
+                  className="resize-none text-sm"
+                />
+                <Button onClick={saveNote} disabled={savingNote || !noteInput.trim()} size="sm" className="w-full">
+                  {savingNote ? "שומר..." : "שמור הערה"}
+                </Button>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {data.notes.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-2">אין הערות</p>
+                )}
                 {data.notes.map((n: any) => (
                   <div key={n.id} className="text-xs p-2 rounded bg-muted">
                     <div className="text-muted-foreground mb-1">
-                      {n.operators?.full_name ?? "—"} · {new Date(n.created_at).toLocaleString("he-IL")}
+                      {n.operators?.full_name ?? "מנהל"} · {new Date(n.created_at).toLocaleString("he-IL")}
                     </div>
-                    <div>{n.note}</div>
+                    <div className="whitespace-pre-wrap break-words">{n.note}</div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Info className="h-4 w-4" /> מידע פנימי על הלקוח
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Textarea
+                  value={customerInfoInput}
+                  onChange={(e) => setCustomerInfoInput(e.target.value)}
+                  placeholder="לדוגמה: רווק, עובד בהייטק, אוהב ספורט..."
+                  rows={2}
+                  maxLength={2000}
+                  className="resize-none text-sm"
+                />
+                <Button
+                  onClick={saveCustomerInfo}
+                  disabled={savingCustomerInfo || !customerInfoInput.trim()}
+                  size="sm"
+                  className="w-full"
+                >
+                  {savingCustomerInfo ? "שומר..." : "שמור מידע"}
+                </Button>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {data.customerInfo.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-2">אין מידע פנימי עדיין</p>
+                )}
+                {data.customerInfo.map((entry: any) => (
+                  <div key={entry.id} className="text-xs p-2 rounded bg-muted">
+                    <div className="text-muted-foreground mb-1">
+                      {entry.operators?.full_name ?? "מנהל"} · {new Date(entry.created_at).toLocaleString("he-IL")}
+                    </div>
+                    <div className="whitespace-pre-wrap break-words">{entry.content}</div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {data.reports.length > 0 && (
             <Card>

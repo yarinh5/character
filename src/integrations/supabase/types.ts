@@ -134,6 +134,32 @@ export type Database = {
         }
         Relationships: []
       }
+      client_conversation_deletions: {
+        Row: {
+          client_id: string
+          conversation_id: string
+          deleted_at: string
+        }
+        Insert: {
+          client_id: string
+          conversation_id: string
+          deleted_at?: string
+        }
+        Update: {
+          client_id?: string
+          conversation_id?: string
+          deleted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_conversation_deletions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_profiles: {
         Row: {
           age: number | null
@@ -224,6 +250,129 @@ export type Database = {
           },
         ]
       }
+      credit_packages: {
+        Row: {
+          created_at: string
+          credits: number
+          currency: string
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          price: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          credits: number
+          currency?: string
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          price: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          credits?: number
+          currency?: string
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          price?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      credit_transactions: {
+        Row: {
+          amount: number
+          balance_after: number
+          created_at: string
+          created_by: string | null
+          id: string
+          message_id: string | null
+          metadata: Json
+          package_id: string | null
+          reason: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          metadata?: Json
+          package_id?: string | null
+          reason?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          metadata?: Json
+          package_id?: string | null
+          reason?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_package_id_fkey"
+            columns: ["package_id"]
+            isOneToOne: false
+            referencedRelation: "credit_packages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_wallets: {
+        Row: {
+          balance: number
+          created_at: string
+          lifetime_earned: number
+          lifetime_spent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          balance?: number
+          created_at?: string
+          lifetime_earned?: number
+          lifetime_spent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          balance?: number
+          created_at?: string
+          lifetime_earned?: number
+          lifetime_spent?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       internal_notes: {
         Row: {
           conversation_id: string
@@ -312,6 +461,7 @@ export type Database = {
           created_at: string
           id: string
           is_read: boolean
+          operator_id: string | null
           sender_id: string | null
           sender_type: Database["public"]["Enums"]["sender_type"]
         }
@@ -321,6 +471,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_read?: boolean
+          operator_id?: string | null
           sender_id?: string | null
           sender_type: Database["public"]["Enums"]["sender_type"]
         }
@@ -330,6 +481,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_read?: boolean
+          operator_id?: string | null
           sender_id?: string | null
           sender_type?: Database["public"]["Enums"]["sender_type"]
         }
@@ -339,6 +491,13 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
             referencedColumns: ["id"]
           },
         ]
@@ -527,11 +686,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_adjust_client_credits: {
+        Args: { _amount: number; _reason: string; _user_id: string }
+        Returns: Json
+      }
       get_my_operator_id: { Args: never; Returns: string }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
       }
+      grant_signup_credits: { Args: never; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -556,6 +720,14 @@ export type Database = {
       operator_can_access_character: {
         Args: { _character_id: string }
         Returns: boolean
+      }
+      send_client_message: {
+        Args: { _content: string; _conversation_id: string }
+        Returns: Json
+      }
+      send_operator_message: {
+        Args: { _content: string; _conversation_id: string }
+        Returns: Json
       }
       start_or_get_conversation: {
         Args: { _character_id: string }

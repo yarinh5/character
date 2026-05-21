@@ -13,7 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { ArrowRight, Send, User, FileText, Lock, Unlock } from "lucide-react";
+import { ArrowRight, Send, User, FileText, Lock, Unlock, Info } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -25,13 +25,16 @@ type Msg = {
   conversation_id: string;
   sender_type: "client" | "operator" | "admin" | "system";
   sender_id: string | null;
+  operator_id: string | null;
   content: string;
   created_at: string;
+  operators?: { full_name: string } | null;
 };
 
 type Conv = {
   id: string;
   client_id: string;
+  character_id: string;
   status: string;
   assigned_operator_id: string | null;
   characters: { id: string; name: string; avatar_url: string | null; availability_status: string } | null;
@@ -56,6 +59,33 @@ type Note = {
   operators?: { full_name: string } | null;
 };
 
+type CustomerInfoEntry = {
+  id: string;
+  content: string;
+  created_at: string;
+  operator_id: string;
+  created_by_user_id: string;
+  operators?: { full_name: string } | null;
+};
+
+type ConcurrencyMode = "open" | "warning" | "lock";
+
+type ConversationLock = {
+  conversation_id: string;
+  locked_by_operator_id: string;
+  locked_by_user_id: string;
+  locked_at: string;
+  last_activity_at: string;
+  expires_at: string;
+  released_at: string | null;
+  release_reason: string | null;
+  operators?: { full_name: string } | null;
+};
+
+function isActiveLock(lock: ConversationLock | null) {
+  return !!lock && !lock.released_at && new Date(lock.expires_at).getTime() > Date.now();
+}
+
 function OperatorChatPage() {
   const { conversationId } = Route.useParams();
   const { user } = useAuth();
@@ -66,10 +96,18 @@ function OperatorChatPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [client, setClient] = useState<ClientInfo | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [customerInfoEntries, setCustomerInfoEntries] = useState<CustomerInfoEntry[]>([]);
   const [input, setInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
+  const [customerInfoInput, setCustomerInfoInput] = useState("");
   const [sending, setSending] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
+  const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
+  const [lockTimeoutMinutes, setLockTimeoutMinutes] = useState(10);
+  const [conversationLock, setConversationLock] = useState<ConversationLock | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [, setLockClock] = useState(0);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -81,7 +119,7 @@ function OperatorChatPage() {
       setLoading(true);
       const { data: c, error: ce } = await supabase
         .from("conversations")
-        .select("id, client_id, status, assigned_operator_id, characters(id, name, avatar_url, availability_status)")
+        .select("id, client_id, character_id, status, assigned_operator_id, characters(id, name, avatar_url, availability_status)")
         .eq("id", conversationId)
         .maybeSingle();
       if (cancelled) return;
@@ -90,20 +128,52 @@ function OperatorChatPage() {
         setLoading(false);
         return;
       }
-      // additional safety: operator can only access own
-      if (!isAdmin && operator && c.assigned_operator_id !== operator.id) {
-        setForbidden(true);
-        setLoading(false);
-        return;
+      if (!isAdmin) {
+        if (!operator) {
+          setForbidden(true);
+          setLoading(false);
+          return;
+        }
+        const { data: assignment } = await supabase
+          .from("character_operator_assignments")
+          .select("id")
+          .eq("operator_id", operator.id)
+          .eq("character_id", c.character_id)
+          .maybeSingle();
+        if (!assignment) {
+          setForbidden(true);
+          setLoading(false);
+          return;
+        }
       }
       setConv(c as unknown as Conv);
 
-      const [{ data: m }, { data: n }, { data: prof }, { data: cp }, { count }] = await Promise.all([
-        supabase.from("messages").select("*").eq("conversation_id", conversationId).order("created_at", { ascending: true }),
+      await (supabase as any).rpc("cleanup_expired_conversation_locks");
+
+      const [
+        { data: m },
+        { data: n },
+        { data: info },
+        { data: prof },
+        { data: cp },
+        { count },
+        { data: settings },
+        { data: lock },
+      ] = await Promise.all([
+        supabase
+          .from("messages")
+          .select("*, operators(full_name)")
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: true }),
         supabase
           .from("internal_notes")
           .select("id, note, created_at, operator_id, operators(full_name)")
           .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("customer_info_entries")
+          .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
+          .eq("client_id", c.client_id)
           .order("created_at", { ascending: false }),
         supabase
           .from("profiles")
@@ -119,10 +189,26 @@ function OperatorChatPage() {
           .from("conversations")
           .select("id", { count: "exact", head: true })
           .eq("client_id", c.client_id),
+        supabase
+          .from("system_settings")
+          .select("key, value")
+          .in("key", ["concurrency_mode", "lock_timeout_minutes"]),
+        supabase
+          .from("conversation_locks")
+          .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
+          .eq("conversation_id", conversationId)
+          .maybeSingle(),
       ]);
       if (cancelled) return;
       setMessages((m ?? []) as Msg[]);
       setNotes((n ?? []) as unknown as Note[]);
+      setCustomerInfoEntries((info ?? []) as unknown as CustomerInfoEntry[]);
+      const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
+      const mode = settingsMap.get("concurrency_mode");
+      const timeout = settingsMap.get("lock_timeout_minutes");
+      setConcurrencyMode(mode === "warning" || mode === "lock" ? mode : "open");
+      setLockTimeoutMinutes(typeof timeout === "number" ? timeout : 10);
+      setConversationLock((lock ?? null) as unknown as ConversationLock | null);
       setClient({
         display_name: prof?.display_name ?? null,
         email: prof?.email ?? null,
@@ -159,7 +245,19 @@ function OperatorChatPage() {
         },
         (payload) => {
           const newMsg = payload.new as Msg;
-          setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
+          if (newMsg.operator_id) {
+            supabase
+              .from("operators")
+              .select("full_name")
+              .eq("id", newMsg.operator_id)
+              .maybeSingle()
+              .then(({ data }) => {
+                const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name } : null };
+                setMessages((prev) => (prev.some((m) => m.id === hydrated.id) ? prev : [...prev, hydrated]));
+              });
+          } else {
+            setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
+          }
           if (newMsg.sender_type === "client") {
             supabase.rpc("mark_conversation_read", {
               _conversation_id: conversationId,
@@ -185,15 +283,110 @@ function OperatorChatPage() {
           setNotes((data ?? []) as unknown as Note[]);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "customer_info_entries",
+          filter: conv?.client_id ? `client_id=eq.${conv.client_id}` : undefined,
+        },
+        async () => {
+          if (!conv?.client_id) return;
+          const { data } = await supabase
+            .from("customer_info_entries")
+            .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
+            .eq("client_id", conv.client_id)
+            .order("created_at", { ascending: false });
+          setCustomerInfoEntries((data ?? []) as unknown as CustomerInfoEntry[]);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_locks",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        async () => {
+          const { data } = await supabase
+            .from("conversation_locks")
+            .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
+            .eq("conversation_id", conversationId)
+            .maybeSingle();
+          setConversationLock((data ?? null) as unknown as ConversationLock | null);
+        },
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [conversationId]);
+  }, [conversationId, conv?.client_id]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (concurrencyMode === "open") return;
+    const timer = window.setInterval(() => {
+      setLockClock((tick) => tick + 1);
+      void (supabase as any).rpc("cleanup_expired_conversation_locks");
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [concurrencyMode]);
+
+  const acquireLock = async () => {
+    if (concurrencyMode === "open" || !operator || lockBusy) return false;
+    const active = isActiveLock(conversationLock);
+    if (active && conversationLock?.locked_by_operator_id === operator.id) return true;
+    if (active && conversationLock?.locked_by_operator_id !== operator.id && concurrencyMode === "lock") return false;
+
+    setLockBusy(true);
+    const { data, error } = await (supabase as any).rpc("acquire_conversation_lock", {
+      _conversation_id: conversationId,
+    });
+    setLockBusy(false);
+
+    if (error) {
+      toast.error("תפיסת השיחה נכשלה");
+      return false;
+    }
+
+    const payload = data as { acquired?: boolean; lock?: ConversationLock; holder_name?: string } | null;
+    if (payload?.lock) {
+      setConversationLock({
+        ...payload.lock,
+        operators: payload.holder_name ? { full_name: payload.holder_name } : payload.lock.operators,
+      });
+    }
+    return payload?.acquired === true;
+  };
+
+  const releaseLock = async () => {
+    if (lockBusy) return;
+    setLockBusy(true);
+    const { data, error } = await (supabase as any).rpc("release_conversation_lock", {
+      _conversation_id: conversationId,
+    });
+    setLockBusy(false);
+
+    if (error) {
+      toast.error("שחרור השיחה נכשל");
+      return;
+    }
+
+    const payload = data as { released?: boolean; lock?: ConversationLock } | null;
+    if (payload?.lock) setConversationLock(payload.lock);
+    toast.success(payload?.released ? "השיחה שוחררה" : "אין נעילה פעילה");
+  };
+
+  const handleComposerActivity = () => {
+    if (concurrencyMode !== "open") {
+      void acquireLock();
+    }
+  };
 
   const send = async () => {
     const content = input.trim();
@@ -206,18 +399,47 @@ function OperatorChatPage() {
       toast.error("הודעה ארוכה מדי");
       return;
     }
+    if (concurrencyMode === "lock") {
+      const active = isActiveLock(conversationLock);
+      if (active && operator && conversationLock?.locked_by_operator_id !== operator.id) {
+        toast.error("השיחה נעולה כרגע לעובד אחר");
+        return;
+      }
+      if (!active) {
+        const acquired = await acquireLock();
+        if (!acquired) {
+          toast.error("לא ניתן לשלוח כי השיחה נעולה לעובד אחר");
+          return;
+        }
+      }
+    } else if (concurrencyMode === "warning") {
+      void acquireLock();
+    }
     setSending(true);
-    const sender_type = isAdmin && !operator ? "admin" : "operator";
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_type,
-      sender_id: user.id,
-      content,
+    const { data, error } = await supabase.rpc("send_operator_message", {
+      _conversation_id: conversationId,
+      _content: content,
     });
     setSending(false);
     if (error) {
+      if (error.message.includes("operator_record_required")) {
+        toast.error("כדי לענות מהפאנל צריך רשומת עובד פעילה לאדמין/משתמש הזה.");
+        return;
+      }
+      if (error.message.includes("conversation_locked_by_other_operator")) {
+        toast.error("השיחה נעולה לעובד אחר");
+        return;
+      }
       toast.error("שליחה נכשלה");
       return;
+    }
+    const result = data as { message?: Msg } | null;
+    if (result?.message) {
+      const message = {
+        ...result.message,
+        operators: operator ? { full_name: operator.full_name } : null,
+      };
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
     }
     setInput("");
   };
@@ -238,6 +460,26 @@ function OperatorChatPage() {
     }
     setNoteInput("");
     toast.success("הערה נשמרה");
+  };
+
+  const saveCustomerInfo = async () => {
+    const text = customerInfoInput.trim();
+    if (!text || !operator || !user || !conv || savingCustomerInfo) return;
+    setSavingCustomerInfo(true);
+    const { error } = await supabase.from("customer_info_entries").insert({
+      client_id: conv.client_id,
+      conversation_id: conversationId,
+      operator_id: operator.id,
+      created_by_user_id: user.id,
+      content: text.slice(0, 2000),
+    });
+    setSavingCustomerInfo(false);
+    if (error) {
+      toast.error("שמירת מידע לקוח נכשלה");
+      return;
+    }
+    setCustomerInfoInput("");
+    toast.success("מידע הלקוח נשמר");
   };
 
   const updateStatus = async (status: "open" | "waiting" | "answered" | "closed") => {
@@ -273,9 +515,13 @@ function OperatorChatPage() {
 
   const character = conv?.characters;
   const closed = conv?.status === "closed";
+  const activeLock = isActiveLock(conversationLock) ? conversationLock : null;
+  const lockHeldByMe = !!activeLock && !!operator && activeLock.locked_by_operator_id === operator.id;
+  const lockHeldByOther = !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
+  const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
 
   return (
-    <div className="flex flex-col h-screen bg-background" dir="rtl">
+    <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
       {/* Header */}
       <header className="h-16 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
         <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/operator/conversations" })}>
@@ -333,6 +579,14 @@ function OperatorChatPage() {
                   savingNote={savingNote}
                   canEdit={!!operator}
                 />
+                <CustomerInfoPanel
+                  entries={customerInfoEntries}
+                  input={customerInfoInput}
+                  setInput={setCustomerInfoInput}
+                  save={saveCustomerInfo}
+                  saving={savingCustomerInfo}
+                  canEdit={!!operator}
+                />
                 <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
               </div>
             </SheetContent>
@@ -340,10 +594,21 @@ function OperatorChatPage() {
         </div>
       </header>
 
+      <LockModeBanner
+        mode={concurrencyMode}
+        lock={activeLock}
+        lockTimeoutMinutes={lockTimeoutMinutes}
+        isMine={lockHeldByMe}
+        isAdmin={isAdmin}
+        busy={lockBusy}
+        onAcquire={acquireLock}
+        onRelease={releaseLock}
+      />
+
       <div className="flex-1 flex min-h-0">
         {/* Messages */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
             {messages.length === 0 && (
               <div className="text-center text-muted-foreground py-8 text-sm">אין הודעות עדיין</div>
             )}
@@ -361,14 +626,16 @@ function OperatorChatPage() {
               return (
                 <div key={m.id} className={`flex ${isOps ? "justify-start" : "justify-end"}`}>
                   <div
-                    className={`max-w-[75%] rounded-2xl px-4 py-2 ${
+                    className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
                       isOps
                         ? "bg-primary text-primary-foreground rounded-bl-sm"
                         : "bg-card border border-border rounded-br-sm"
                     }`}
                   >
-                    {m.sender_type === "admin" && (
-                      <p className="text-[10px] mb-0.5 opacity-70">הודעת מנהל</p>
+                    {isOps && (
+                      <p className="text-[10px] mb-0.5 opacity-70">
+                        {m.operators?.full_name ?? (m.sender_type === "admin" ? "מנהל" : "עובד")}
+                      </p>
                     )}
                     <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
                     <p className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
@@ -396,19 +663,24 @@ function OperatorChatPage() {
                 <div className="flex gap-2 items-end">
                   <Textarea
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onFocus={handleComposerActivity}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      if (e.target.value.trim()) handleComposerActivity();
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         send();
                       }
                     }}
-                    placeholder={`כתוב כ${character?.name ?? "דמות"}...`}
+                    placeholder={sendBlockedByLock ? "השיחה נעולה כרגע לעובד אחר" : `כתוב כ${character?.name ?? "דמות"}...`}
                     rows={1}
                     maxLength={2000}
                     className="resize-none min-h-[40px] max-h-32"
+                    disabled={sendBlockedByLock}
                   />
-                  <Button onClick={send} disabled={sending || !input.trim()} size="icon">
+                  <Button onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
@@ -430,9 +702,92 @@ function OperatorChatPage() {
               savingNote={savingNote}
               canEdit={!!operator}
             />
+            <CustomerInfoPanel
+              entries={customerInfoEntries}
+              input={customerInfoInput}
+              setInput={setCustomerInfoInput}
+              save={saveCustomerInfo}
+              saving={savingCustomerInfo}
+              canEdit={!!operator}
+            />
             <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
           </div>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function LockModeBanner({
+  mode,
+  lock,
+  lockTimeoutMinutes,
+  isMine,
+  isAdmin,
+  busy,
+  onAcquire,
+  onRelease,
+}: {
+  mode: ConcurrencyMode;
+  lock: ConversationLock | null;
+  lockTimeoutMinutes: number;
+  isMine: boolean;
+  isAdmin: boolean;
+  busy: boolean;
+  onAcquire: () => Promise<boolean>;
+  onRelease: () => Promise<void>;
+}) {
+  if (mode === "open") return null;
+
+  const holderName = lock?.operators?.full_name ?? "עובד אחר";
+  const expiresAt = lock
+    ? new Date(lock.expires_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })
+    : null;
+
+  if (mode === "warning") {
+    if (!lock || isMine) return null;
+    return (
+      <div className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm" dir="rtl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>
+            {holderName} פעיל בשיחה הזו. אפשר לשלוח הודעה, אבל כדאי לתאם לפני מענה.
+          </span>
+          {expiresAt && <span className="text-xs text-muted-foreground">פעילות עד {expiresAt}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!lock) {
+    return (
+      <div className="border-b border-border bg-muted/50 px-4 py-2 text-sm" dir="rtl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>מצב נעילה פעיל. כדי לענות צריך לקחת את השיחה.</span>
+          <Button size="sm" variant="outline" onClick={() => void onAcquire()} disabled={busy}>
+            קח שיחה
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`border-b px-4 py-2 text-sm ${isMine ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10"}`} dir="rtl">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span className="font-medium">
+            {isMine ? "השיחה נעולה אליך" : `השיחה נעולה אצל ${holderName}`}
+          </span>
+          <span className="text-muted-foreground">
+            {" "}
+            · שחרור אוטומטי אחרי {lockTimeoutMinutes} דקות ללא פעילות{expiresAt ? ` · צפוי ב-${expiresAt}` : ""}
+          </span>
+        </div>
+        {(isMine || isAdmin) && (
+          <Button size="sm" variant="outline" onClick={() => void onRelease()} disabled={busy}>
+            {isAdmin && !isMine ? "שחרור מנהל" : "שחרר שיחה"}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -529,6 +884,59 @@ function InternalNotesPanel({
             <p className="text-muted-foreground mt-1 text-[10px]">
               {n.operators?.full_name ?? "עובד"} ·{" "}
               {new Date(n.created_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
+            </p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function CustomerInfoPanel({
+  entries,
+  input,
+  setInput,
+  save,
+  saving,
+  canEdit,
+}: {
+  entries: CustomerInfoEntry[];
+  input: string;
+  setInput: (s: string) => void;
+  save: () => Promise<void>;
+  saving: boolean;
+  canEdit: boolean;
+}) {
+  return (
+    <Card className="p-4">
+      <h3 className="font-semibold mb-3 flex items-center gap-2">
+        <Info className="h-4 w-4" /> מידע פנימי על הלקוח
+      </h3>
+      {canEdit && (
+        <div className="space-y-2 mb-3">
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="לדוגמה: רווק, עובד בהייטק, אוהב ספורט..."
+            rows={2}
+            maxLength={2000}
+            className="resize-none text-sm"
+          />
+          <Button onClick={save} disabled={saving || !input.trim()} size="sm" className="w-full">
+            {saving ? "שומר..." : "שמור מידע"}
+          </Button>
+        </div>
+      )}
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {entries.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">אין מידע פנימי עדיין</p>
+        )}
+        {entries.map((entry) => (
+          <div key={entry.id} className="text-xs p-2 rounded bg-muted">
+            <p className="whitespace-pre-wrap break-words">{entry.content}</p>
+            <p className="text-muted-foreground mt-1 text-[10px]">
+              {entry.operators?.full_name ?? "עובד"} ·{" "}
+              {new Date(entry.created_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
             </p>
           </div>
         ))}
