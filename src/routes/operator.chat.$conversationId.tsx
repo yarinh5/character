@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { useActiveConversation } from "@/lib/activeConversation";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -111,6 +112,7 @@ function OperatorChatPage() {
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useActiveConversation(conversationId, isAdmin ? "admin" : "operator");
 
   // Load conversation, messages, notes, client info
   useEffect(() => {

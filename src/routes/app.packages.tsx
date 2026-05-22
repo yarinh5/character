@@ -3,10 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Coins, MessageCircle, PackageOpen } from "lucide-react";
 import { ClientLayout } from "@/components/client/ClientLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useEffect } from "react";
 
 export const Route = createFileRoute("/app/packages")({
   component: PackagesPage,
@@ -22,6 +24,14 @@ type CreditPackage = {
 };
 
 function PackagesPage() {
+  useEffect(() => {
+    void trackAnalyticsEvent({
+      eventName: "packages_viewed",
+      metadata: { source: "client_packages_page" },
+      dedupeSeconds: 900,
+    });
+  }, []);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["client-credit-packages"],
     queryFn: async () => {

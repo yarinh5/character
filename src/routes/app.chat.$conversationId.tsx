@@ -2,6 +2,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { useActiveConversation } from "@/lib/activeConversation";
+import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -60,6 +62,7 @@ function ChatPage() {
   const [deleting, setDeleting] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useActiveConversation(conversationId, "client");
 
   // Load conversation + messages
   useEffect(() => {
@@ -158,6 +161,13 @@ function ChatPage() {
     setSending(false);
     if (error) {
       if (error.message.includes("insufficient_credits")) {
+        void trackAnalyticsEvent({
+          eventName: "insufficient_credits_shown",
+          conversationId,
+          characterId: conv?.characters?.id ?? null,
+          metadata: { source: "client_chat_send" },
+          dedupeSeconds: 300,
+        });
         toast.error("נגמרו לך הקרדיטים. אפשר להמשיך לקרוא את השיחה, אבל כדי לשלוח הודעה צריך להטעין קרדיטים.", {
           action: {
             label: "לחבילות",

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { AccountSecurityCard, AccountSummaryCard } from "@/components/account/AccountSettingsShared";
+import { NotificationSettingsCard } from "@/components/account/NotificationSettingsCard";
 
 export const Route = createFileRoute("/operator/settings")({
   component: OperatorSettingsPage,
@@ -211,6 +212,7 @@ function OperatorSettingsPage() {
         signOut={signOut}
         onDeletionRequested={() => setProfileStatus("deletion_requested")}
       />
+      <NotificationSettingsCard role={role} />
     </div>
   );
 }

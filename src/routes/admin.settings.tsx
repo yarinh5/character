@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountSecurityCard, AccountSummaryCard } from "@/components/account/AccountSettingsShared";
+import { NotificationSettingsCard } from "@/components/account/NotificationSettingsCard";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/settings")({
@@ -184,6 +185,7 @@ function SettingsPage() {
                 signOut={signOut}
                 onDeletionRequested={() => setProfileForm((current) => ({ ...current, status: "deletion_requested" }))}
               />
+              <NotificationSettingsCard role={role} />
             </>
           )}
         </TabsContent>

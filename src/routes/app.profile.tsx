@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { AvatarUpload } from "@/components/common/AvatarUpload";
 import { AccountSecurityCard, AccountSummaryCard } from "@/components/account/AccountSettingsShared";
+import { NotificationSettingsCard } from "@/components/account/NotificationSettingsCard";
 import { Coins } from "lucide-react";
 
 export const Route = createFileRoute("/app/profile")({
@@ -187,6 +188,7 @@ function ProfilePage() {
               signOut={signOut}
               onDeletionRequested={() => setAccount((current) => ({ ...current, status: "deletion_requested" }))}
             />
+            <NotificationSettingsCard role={role} />
           </>
         )}
       </div>

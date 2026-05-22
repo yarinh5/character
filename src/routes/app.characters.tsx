@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,18 @@ function CharactersPage() {
       return data;
     },
   });
+
+  useEffect(() => {
+    if (!data || data.length === 0) return;
+    data.forEach((character) => {
+      void trackAnalyticsEvent({
+        eventName: "character_viewed",
+        characterId: character.id,
+        metadata: { source: "client_characters_grid" },
+        dedupeSeconds: 3600,
+      });
+    });
+  }, [data]);
 
   const startChat = async (characterId: string) => {
     setStartingId(characterId);

@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { ArrowRight, FileText, Info } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useActiveConversation } from "@/lib/activeConversation";
 
 export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
@@ -32,6 +33,7 @@ function ConvView() {
   const [customerInfoInput, setCustomerInfoInput] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
+  useActiveConversation(conversationId, "admin");
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-conv", conversationId, user?.id],
