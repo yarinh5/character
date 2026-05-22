@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
+import { useConversationPresence } from "@/lib/conversationPresence";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -63,6 +64,12 @@ function ChatPage() {
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useActiveConversation(conversationId, "client");
+  const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
+    conversationId,
+    userId: user?.id,
+    role: "client",
+    displayName: user?.email?.split("@")[0] ?? "לקוח",
+  });
 
   // Load conversation + messages
   useEffect(() => {
@@ -153,6 +160,7 @@ function ChatPage() {
       toast.error("הודעה ארוכה מדי (מקסימום 2000 תווים)");
       return;
     }
+    stopTyping();
     setSending(true);
     const { data, error } = await supabase.rpc("send_client_message", {
       _conversation_id: conversationId,
@@ -216,6 +224,8 @@ function ChatPage() {
   }
 
   const character = conv?.characters;
+  const characterActive = activeUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
+  const characterTyping = typingUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
@@ -236,7 +246,11 @@ function ChatPage() {
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold truncate">{character?.name ?? "—"}</h2>
           <p className="text-xs text-muted-foreground">
-            {character?.availability_status === "available" ? "זמין/ה" : "לא זמין/ה כעת"}
+            {characterActive
+              ? "פעיל/ה עכשיו"
+              : character?.availability_status === "available"
+                ? "זמין/ה"
+                : "לא זמין/ה כעת"}
           </p>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setReportOpen(true)}>
@@ -286,6 +300,13 @@ function ChatPage() {
             </div>
           );
         })}
+        {characterTyping && (
+          <div className="flex justify-end">
+            <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+              הדמות מקלידה...
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Composer */}
@@ -296,7 +317,12 @@ function ChatPage() {
         <div className="flex gap-2 items-end">
           <Textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              if (e.target.value.trim()) startTyping();
+              else stopTyping();
+            }}
+            onBlur={stopTyping}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

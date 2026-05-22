@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
+import { useConversationPresence } from "@/lib/conversationPresence";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -113,6 +114,12 @@ function OperatorChatPage() {
   const [forbidden, setForbidden] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   useActiveConversation(conversationId, isAdmin ? "admin" : "operator");
+  const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
+    conversationId,
+    userId: user?.id,
+    role: isAdmin ? "admin" : "operator",
+    displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
+  });
 
   // Load conversation, messages, notes, client info
   useEffect(() => {
@@ -417,6 +424,7 @@ function OperatorChatPage() {
     } else if (concurrencyMode === "warning") {
       void acquireLock();
     }
+    stopTyping();
     setSending(true);
     const { data, error } = await supabase.rpc("send_operator_message", {
       _conversation_id: conversationId,
@@ -521,6 +529,9 @@ function OperatorChatPage() {
   const lockHeldByMe = !!activeLock && !!operator && activeLock.locked_by_operator_id === operator.id;
   const lockHeldByOther = !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
   const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
+  const clientTyping = typingUsers.some((presence) => presence.role === "client");
+  const coworkerTyping = typingUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
+  const otherActiveOperators = activeUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
@@ -545,6 +556,7 @@ function OperatorChatPage() {
           </div>
           <p className="text-xs text-muted-foreground truncate">
             עם {client?.display_name ?? "לקוח"}
+            {otherActiveOperators.length > 0 ? " · עובד נוסף פעיל בשיחה" : ""}
           </p>
         </div>
         <div className="hidden md:flex gap-1">
@@ -650,6 +662,24 @@ function OperatorChatPage() {
                 </div>
               );
             })}
+            {(clientTyping || coworkerTyping.length > 0) && (
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {clientTyping && (
+                  <div className="flex justify-end">
+                    <span className="rounded-full border border-border bg-card px-3 py-1">הלקוח מקליד...</span>
+                  </div>
+                )}
+                {coworkerTyping.length > 0 && (
+                  <div className="flex justify-start">
+                    <span className="rounded-full border border-border bg-card px-3 py-1">
+                      {coworkerTyping.length === 1
+                        ? `${coworkerTyping[0].displayName} מקליד/ה...`
+                        : "עובד נוסף מקליד..."}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-border bg-card p-3 shrink-0">
@@ -668,8 +698,14 @@ function OperatorChatPage() {
                     onFocus={handleComposerActivity}
                     onChange={(e) => {
                       setInput(e.target.value);
-                      if (e.target.value.trim()) handleComposerActivity();
+                      if (e.target.value.trim()) {
+                        handleComposerActivity();
+                        startTyping();
+                      } else {
+                        stopTyping();
+                      }
                     }}
+                    onBlur={stopTyping}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
