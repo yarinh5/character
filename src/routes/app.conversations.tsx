@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { fetchUnreadCounts } from "@/lib/readStates";
 import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,7 +63,12 @@ function ConversationsPage() {
       if (deletedError) throw deletedError;
 
       const deletedIds = new Set((deleted ?? []).map((row) => row.conversation_id));
-      return (data ?? []).filter((row) => !deletedIds.has(row.id)) as unknown as Row[];
+      const rows = (data ?? []).filter((row) => !deletedIds.has(row.id)) as unknown as Row[];
+      const unread = await fetchUnreadCounts(rows.map((row) => row.id));
+      return rows.map((row) => ({
+        ...row,
+        client_unread_count: unread.get(row.id)?.unread_count ?? 0,
+      }));
     },
     enabled: !!user,
   });
@@ -80,11 +86,16 @@ function ConversationsPage() {
         { event: "*", schema: "public", table: "client_conversation_deletions" },
         () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_read_states", filter: user?.id ? `user_id=eq.${user.id}` : undefined },
+        () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [qc]);
+  }, [qc, user?.id]);
 
   return (
     <ClientLayout>

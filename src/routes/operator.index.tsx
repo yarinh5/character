@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchUnreadCounts } from "@/lib/readStates";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -101,7 +102,11 @@ function OperatorDashboard() {
         ]);
       if (error) throw error;
 
-      const list = convs ?? [];
+      const unreadCounts = await fetchUnreadCounts((convs ?? []).map((c) => c.id));
+      const list = (convs ?? []).map((conversation) => ({
+        ...conversation,
+        operator_unread_count: unreadCounts.get(conversation.id)?.unread_count ?? 0,
+      }));
       const conversationIds = list.map((c) => c.id);
       const { data: monthMessages } =
         conversationIds.length > 0
@@ -153,6 +158,16 @@ function OperatorDashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-stats"] }),
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_read_states",
+          filter: operator?.user_id ? `user_id=eq.${operator.user_id}` : undefined,
+        },
+        () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
+      )
       .on("postgres_changes", { event: "*", schema: "public", table: "operator_monthly_scores" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-stats"] }),
       )
@@ -160,7 +175,7 @@ function OperatorDashboard() {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [qc]);
+  }, [qc, operator?.user_id]);
 
   const updateStatus = async (status: "available" | "busy" | "offline") => {
     if (!operator) return;

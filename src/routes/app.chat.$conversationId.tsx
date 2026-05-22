@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
+import { fetchReadSummary, type ReadSummary } from "@/lib/readStates";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +30,7 @@ type Msg = {
   sender_id: string | null;
   content: string;
   created_at: string;
+  is_read: boolean;
 };
 
 type Conv = {
@@ -62,6 +64,7 @@ function ChatPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [readSummary, setReadSummary] = useState<ReadSummary | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useActiveConversation(conversationId, "client");
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
@@ -110,6 +113,7 @@ function ChatPage() {
         _conversation_id: conversationId,
         _as: "client",
       });
+      fetchReadSummary(conversationId).then(setReadSummary).catch(() => undefined);
     })();
     return () => {
       cancelled = true;
@@ -123,7 +127,7 @@ function ChatPage() {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
@@ -131,6 +135,9 @@ function ChatPage() {
         (payload) => {
           const newMsg = payload.new as Msg;
           setMessages((prev) => {
+            if (payload.eventType === "UPDATE") {
+              return prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m));
+            }
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
@@ -140,6 +147,7 @@ function ChatPage() {
               _as: "client",
             });
           }
+          fetchReadSummary(conversationId).then(setReadSummary).catch(() => undefined);
         },
       )
       .subscribe();
@@ -226,6 +234,9 @@ function ChatPage() {
   const character = conv?.characters;
   const characterActive = activeUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
   const characterTyping = typingUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
+  const operatorLastReadAt = readSummary?.operator_last_read_at
+    ? new Date(readSummary.operator_last_read_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })
+    : null;
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
@@ -295,11 +306,21 @@ function ChatPage() {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
+                  {mine && (
+                    <span className="ms-2">
+                      {m.is_read ? "נראה" : "נשלח"}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
           );
         })}
+        {operatorLastReadAt && (
+          <div className="text-center text-[11px] text-muted-foreground">
+            נראה לאחרונה {operatorLastReadAt}
+          </div>
+        )}
         {characterTyping && (
           <div className="flex justify-end">
             <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">

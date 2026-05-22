@@ -30,6 +30,7 @@ type Msg = {
   operator_id: string | null;
   content: string;
   created_at: string;
+  is_read: boolean;
   operators?: { full_name: string } | null;
 };
 
@@ -247,13 +248,17 @@ function OperatorChatPage() {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
           const newMsg = payload.new as Msg;
+          if (payload.eventType === "UPDATE") {
+            setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m)));
+            return;
+          }
           if (newMsg.operator_id) {
             supabase
               .from("operators")
@@ -657,6 +662,11 @@ function OperatorChatPage() {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                      {isOps && (
+                        <span className="ms-2">
+                          {m.is_read ? "נראה" : "נשלח"}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>

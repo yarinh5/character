@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { fetchUnreadCounts } from "@/lib/readStates";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,6 +45,7 @@ function formatTime(iso: string | null) {
 
 function OperatorConversationsPage() {
   const { operator, isAdmin } = useOperator();
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
   const [characterFilter, setCharacterFilter] = useState<string>("all");
@@ -82,8 +85,10 @@ function OperatorConversationsPage() {
         profileMap = new Map((profs ?? []).map((p) => [p.user_id, { display_name: p.display_name, avatar_url: p.avatar_url }]));
       }
 
+      const unread = await fetchUnreadCounts((data ?? []).map((c) => c.id));
       return (data ?? []).map((c) => ({
         ...c,
+        operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
         profiles: profileMap.get(c.client_id) ?? null,
       })) as Row[];
     },
@@ -95,11 +100,16 @@ function OperatorConversationsPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_read_states", filter: user?.id ? `user_id=eq.${user.id}` : undefined },
+        () => qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [qc]);
+  }, [qc, user?.id]);
 
   const characters = useMemo(() => {
     const map = new Map<string, string>();

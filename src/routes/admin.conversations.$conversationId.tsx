@@ -61,7 +61,7 @@ function ConvView() {
           supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
           supabase
             .from("messages")
-            .select("id, content, sender_type, sender_id, operator_id, created_at, operators(full_name)")
+            .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name)")
             .eq("conversation_id", conversationId)
             .order("created_at", { ascending: true }),
           supabase
@@ -107,12 +107,28 @@ function ConvView() {
   });
 
   useEffect(() => {
+    if (!user?.id) return;
+    supabase.rpc("mark_conversation_read", {
+      _conversation_id: conversationId,
+      _as: "admin",
+    });
+  }, [conversationId, user?.id]);
+
+  useEffect(() => {
     const ch = supabase
       .channel(`admin-conv-${conversationId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
-        () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
+        (payload) => {
+          if (payload.eventType === "INSERT" && (payload.new as any).sender_type === "client") {
+            supabase.rpc("mark_conversation_read", {
+              _conversation_id: conversationId,
+              _as: "admin",
+            });
+          }
+          qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+        },
       )
       .on(
         "postgres_changes",
@@ -284,6 +300,9 @@ function ConvView() {
                     <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>
                     <div className="text-[10px] opacity-60 mt-1">
                       {new Date(m.created_at).toLocaleTimeString("he-IL")}
+                      {m.sender_type !== "client" && (
+                        <span className="ms-2">{m.is_read ? "נראה" : "נשלח"}</span>
+                      )}
                     </div>
                   </div>
                 </div>
