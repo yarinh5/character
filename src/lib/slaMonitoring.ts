@@ -42,10 +42,6 @@ export async function fetchSlaRiskConversations(limit = 10, notify = false) {
       return [] as SlaRiskConversation[];
     }
 
-    console.info("[SLA fallback] RPC unavailable, calculating SLA risk client-side", {
-      code: error.code,
-      message: error.message,
-    });
     return fetchSlaRiskConversationsFallback(limit);
   }
 
@@ -77,12 +73,6 @@ async function fetchSlaRiskConversationsFallback(limit: number) {
 
   const roles = (roleRows ?? []).map((row) => row.role);
   const role = roles.includes("admin") ? "admin" : roles.includes("operator") ? "operator" : roles[0];
-  console.info("[SLA fallback] viewer context", {
-    userId: user.id,
-    roles,
-    resolvedRole: role,
-    slaMinutes,
-  });
   if (role !== "admin" && role !== "operator") return [] as SlaRiskConversation[];
 
   let assignedCharacterIds: string[] | null = null;
@@ -109,10 +99,6 @@ async function fetchSlaRiskConversationsFallback(limit: number) {
     }
 
     assignedCharacterIds = (assignments ?? []).map((assignment) => assignment.character_id);
-    console.info("[SLA fallback] operator assignments", {
-      operatorId: operator.id,
-      assignedCharacterCount: assignedCharacterIds.length,
-    });
     if (assignedCharacterIds.length === 0) return [] as SlaRiskConversation[];
   }
 
@@ -134,11 +120,6 @@ async function fetchSlaRiskConversationsFallback(limit: number) {
   }
 
   const conversationIds = (conversations ?? []).map((conversation) => conversation.id);
-  console.info("[SLA fallback] candidate conversations", {
-    conversationCount: conversationIds.length,
-    role,
-    assignedCharacterCount: assignedCharacterIds?.length ?? null,
-  });
   if (conversationIds.length === 0) return [] as SlaRiskConversation[];
 
   const { data: messages, error: messagesError } = await supabase
@@ -173,32 +154,17 @@ async function fetchSlaRiskConversationsFallback(limit: number) {
   }
 
   const now = Date.now();
-  const rejected: Array<{ id: string; reason: string; status?: string; senderType?: string; minutesWaiting?: number }> = [];
   const risks = (conversations ?? [])
     .map((conversation: any) => {
       const latest = latestByConversation.get(conversation.id);
       if (!latest) {
-        rejected.push({ id: conversation.id, status: conversation.status, reason: "no latest message" });
         return null;
       }
       if (latest.sender_type !== "client") {
-        rejected.push({
-          id: conversation.id,
-          status: conversation.status,
-          senderType: latest.sender_type,
-          reason: "latest sender is not client",
-        });
         return null;
       }
       const minutesWaiting = Math.floor((now - new Date(latest.created_at).getTime()) / 60000);
       if (minutesWaiting < slaMinutes) {
-        rejected.push({
-          id: conversation.id,
-          status: conversation.status,
-          senderType: latest.sender_type,
-          minutesWaiting,
-          reason: "below SLA threshold",
-        });
         return null;
       }
 
@@ -218,12 +184,6 @@ async function fetchSlaRiskConversationsFallback(limit: number) {
     .filter((conversation): conversation is SlaRiskConversation => conversation !== null)
     .sort((a, b) => new Date(a.last_client_message_at).getTime() - new Date(b.last_client_message_at).getTime())
     .slice(0, Math.max(1, Math.min(limit, 100)));
-
-  console.info("[SLA fallback] result", {
-    riskCount: risks.length,
-    rejectedCount: rejected.length,
-    rejectedSamples: rejected.slice(0, 20),
-  });
 
   return risks;
 }
