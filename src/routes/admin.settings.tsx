@@ -37,6 +37,7 @@ const KEYS = [
     ],
   },
   { key: "lock_timeout_minutes", label: "שחרור נעילה אוטומטי אחרי דקות", type: "number", default: 10 },
+  { key: "conversation_waiting_sla_minutes", label: "SLA waiting minutes", type: "number", default: 15 },
   { key: "service_disclaimer_text", label: "טקסט גילוי נאות", type: "textarea", default: "" },
 ] as const;
 

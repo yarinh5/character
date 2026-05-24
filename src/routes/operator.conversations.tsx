@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
+import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,8 @@ type Row = {
   last_message_preview: string | null;
   operator_unread_count: number;
   client_id: string;
+  is_sla_risk?: boolean;
+  sla_minutes_waiting?: number;
   characters: { id: string; name: string; avatar_url: string | null } | null;
   profiles: { display_name: string | null; avatar_url: string | null } | null;
 };
@@ -93,10 +96,16 @@ function OperatorConversationsPage() {
         profileMap = new Map((profs ?? []).map((p) => [p.user_id, { display_name: p.display_name, avatar_url: p.avatar_url }]));
       }
 
-      const unread = await fetchUnreadCounts((data ?? []).map((c) => c.id));
+      const [unread, slaRisks] = await Promise.all([
+        fetchUnreadCounts((data ?? []).map((c) => c.id)),
+        fetchSlaRiskConversations(100, true),
+      ]);
+      const slaMap = new Map(slaRisks.map((risk) => [risk.conversation_id, risk]));
       return (data ?? []).map((c) => ({
         ...c,
         operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
+        is_sla_risk: slaMap.has(c.id),
+        sla_minutes_waiting: slaMap.get(c.id)?.minutes_waiting,
         profiles: profileMap.get(c.client_id) ?? null,
       })) as Row[];
     },
@@ -106,6 +115,9 @@ function OperatorConversationsPage() {
     const ch = supabase
       .channel("operator-conversations-list")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
+        qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
       )
       .on(
@@ -229,7 +241,7 @@ function OperatorConversationsPage() {
       <div className="space-y-2">
         {filtered.map((c) => (
           <Link key={c.id} to="/operator/chat/$conversationId" params={{ conversationId: c.id }}>
-            <Card className="p-4 flex items-center gap-3 hover:bg-accent transition-colors">
+            <Card className={`p-4 flex items-center gap-3 hover:bg-accent transition-colors ${c.is_sla_risk ? "border-warning/60" : ""}`}>
               <div className="flex -space-x-2 -space-x-reverse shrink-0">
                 <div className="h-11 w-11 rounded-full bg-muted overflow-hidden border-2 border-card">
                   {c.characters?.avatar_url ? (
@@ -258,6 +270,11 @@ function OperatorConversationsPage() {
                     {c.profiles?.display_name ?? "לקוח"}
                   </span>
                   <ConversationStatusBadge status={c.status} />
+                  {c.is_sla_risk && (
+                    <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
+                      בסיכון {c.sla_minutes_waiting} דק׳
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between gap-2 mt-1">
                   <p className="text-sm text-muted-foreground truncate">{c.last_message_preview ?? "—"}</p>

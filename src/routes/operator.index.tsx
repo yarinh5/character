@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
+import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -118,7 +119,10 @@ function OperatorDashboard() {
         logSupabaseError("operator.dashboard sent messages", (sentMessagesResult as { error: unknown }).error);
       }
 
-      const unreadCounts = await fetchUnreadCounts((convs ?? []).map((c) => c.id));
+      const [unreadCounts, slaRisks] = await Promise.all([
+        fetchUnreadCounts((convs ?? []).map((c) => c.id)),
+        fetchSlaRiskConversations(5, true),
+      ]);
       const list = (convs ?? []).map((conversation) => ({
         ...conversation,
         operator_unread_count: unreadCounts.get(conversation.id)?.unread_count ?? 0,
@@ -156,6 +160,7 @@ function OperatorDashboard() {
         sentThisMonth: sentMessagesResult.count ?? 0,
         avgResponseSec: calculateAverageResponseSeconds((monthMessages ?? []) as DashboardMessage[], operator?.id),
         waitingConversations: waitingConversations.slice(0, 5),
+        slaRisks,
         recent: list.slice(0, 5),
         assignedCharacters: (assigned ?? []) as Array<{
           character_id: string;
@@ -335,6 +340,38 @@ function OperatorDashboard() {
                   <Link to="/operator/conversations">לכל השיחות</Link>
                 </Button>
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">שיחות בסיכון SLA</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading && <Skeleton className="h-24" />}
+          {!isLoading && stats && stats.slaRisks.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">אין כרגע שיחות שחורגות מה־SLA</p>
+          )}
+          {!isLoading && stats && stats.slaRisks.length > 0 && (
+            <div className="space-y-2">
+              {stats.slaRisks.map((conversation) => (
+                <Link
+                  key={conversation.conversation_id}
+                  to="/operator/chat/$conversationId"
+                  params={{ conversationId: conversation.conversation_id }}
+                  className="flex items-center justify-between gap-3 p-3 rounded-lg border border-warning/40 hover:bg-accent transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{conversation.character_name ?? "-"}</div>
+                    <p className="text-xs text-muted-foreground truncate">{conversation.last_message_preview ?? "-"}</p>
+                  </div>
+                  <span className="text-xs font-medium text-warning whitespace-nowrap">
+                    {conversation.minutes_waiting} דק׳
+                  </span>
+                </Link>
+              ))}
             </div>
           )}
         </CardContent>

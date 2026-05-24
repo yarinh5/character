@@ -7,6 +7,7 @@ import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminAnalytics } from "@/lib/analytics.functions";
+import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
 import {
   Activity,
   AlertTriangle,
@@ -86,16 +87,23 @@ function AdminDashboard() {
     queryFn: () => analyticsFn(),
   });
 
+  const { data: slaRisks = [], isLoading: slaLoading } = useQuery({
+    queryKey: ["admin-sla-risks"],
+    queryFn: () => fetchSlaRiskConversations(8, true),
+  });
+
   useEffect(() => {
     const ch = supabase
       .channel("admin-dashboard")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
         qc.invalidateQueries({ queryKey: ["admin-stats"] });
         qc.invalidateQueries({ queryKey: ["admin-analytics"] });
+        qc.invalidateQueries({ queryKey: ["admin-sla-risks"] });
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
-        qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
+        qc.invalidateQueries({ queryKey: ["admin-analytics"] });
+        qc.invalidateQueries({ queryKey: ["admin-sla-risks"] });
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
         qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
       )
@@ -127,9 +135,47 @@ function AdminDashboard() {
         <Stat label="נוספו ידנית" value={analytics?.manualCreditsAdded} icon={Coins} loading={analyticsLoading} />
         <Stat label="הודעות לקוחות" value={analytics?.clientMessages} icon={MessageCircle} loading={analyticsLoading} />
         <Stat label="הודעות עובדים" value={analytics?.operatorMessages} icon={TrendingUp} loading={analyticsLoading} />
+        <Stat label="SLA risk" value={slaRisks.length} icon={AlertTriangle} loading={slaLoading} highlight />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              SLA risk conversations
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {slaLoading && <Skeleton className="h-32" />}
+            {!slaLoading && slaRisks.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-6">No conversations are currently over SLA</p>
+            )}
+            {!slaLoading && slaRisks.length > 0 && (
+              <div className="space-y-2">
+                {slaRisks.map((conversation) => (
+                  <Link
+                    key={conversation.conversation_id}
+                    to="/admin/conversations/$conversationId"
+                    params={{ conversationId: conversation.conversation_id }}
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg border border-warning/40 hover:bg-accent transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{conversation.character_name ?? "-"}</div>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {conversation.client_display_name ?? "Client"} · {conversation.last_message_preview ?? "-"}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium text-warning whitespace-nowrap">
+                      {conversation.minutes_waiting} min
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">שיחות אחרונות</CardTitle>
