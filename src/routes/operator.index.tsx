@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchUnreadCounts } from "@/lib/readStates";
+import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ function OperatorDashboard() {
   const { operator, isAdmin, refresh } = useOperator();
   const qc = useQueryClient();
 
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isLoading, error } = useQuery({
     queryKey: ["operator-stats", operator?.id ?? "admin", isAdmin],
     queryFn: async () => {
       const today = new Date();
@@ -51,14 +51,18 @@ function OperatorDashboard() {
           .from("character_operator_assignments")
           .select("character_id")
           .eq("operator_id", operator.id);
-        if (assignmentsError) throw assignmentsError;
+        if (assignmentsError) {
+          logSupabaseError("operator.dashboard assignments", assignmentsError);
+          throw assignmentsError;
+        }
         characterIds = (assignments ?? []).map((assignment) => assignment.character_id);
       }
 
       let convQuery = supabase
         .from("conversations")
         .select("id, status, operator_unread_count, last_message_at, last_message_preview, characters(id, name, avatar_url), client_id, updated_at")
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(200);
       if (characterIds) {
         convQuery =
           characterIds.length === 0
@@ -100,7 +104,19 @@ function OperatorDashboard() {
                 .gte("created_at", monthStartIso)
             : Promise.resolve({ count: 0 }),
         ]);
-      if (error) throw error;
+      if (error) {
+        logSupabaseError("operator.dashboard conversations", error);
+        throw error;
+      }
+      if ((monthlyScoreResult as { error?: unknown }).error) {
+        logSupabaseError("operator.dashboard monthly score", (monthlyScoreResult as { error: unknown }).error);
+      }
+      if ((previousScoreResult as { error?: unknown }).error) {
+        logSupabaseError("operator.dashboard previous score", (previousScoreResult as { error: unknown }).error);
+      }
+      if ((sentMessagesResult as { error?: unknown }).error) {
+        logSupabaseError("operator.dashboard sent messages", (sentMessagesResult as { error: unknown }).error);
+      }
 
       const unreadCounts = await fetchUnreadCounts((convs ?? []).map((c) => c.id));
       const list = (convs ?? []).map((conversation) => ({
@@ -259,6 +275,17 @@ function OperatorDashboard() {
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>
+
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="p-4 text-sm text-destructive">
+            שגיאה בטעינת דשבורד
+            <div className="mt-2 text-xs text-muted-foreground">
+              {(error as { message?: string }).message}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

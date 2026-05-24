@@ -19,7 +19,10 @@ export async function fetchUnreadCounts(conversationIds: string[]) {
   const { data, error } = await (supabase as any).rpc("get_my_conversation_unread_counts", {
     _conversation_ids: conversationIds,
   });
-  if (error) throw error;
+  if (error) {
+    logSupabaseError("get_my_conversation_unread_counts", error);
+    return new Map<string, UnreadCountRow>();
+  }
 
   return new Map(
     ((data ?? []) as UnreadCountRow[]).map((row) => [
@@ -37,6 +40,26 @@ export async function fetchReadSummary(conversationId: string): Promise<ReadSumm
   const { data, error } = await (supabase as any).rpc("get_conversation_read_summary", {
     _conversation_id: conversationId,
   });
-  if (error) throw error;
+  if (error) {
+    logSupabaseError("get_conversation_read_summary", error);
+    return null;
+  }
   return (data ?? null) as ReadSummary | null;
+}
+
+export function logSupabaseError(context: string, error: unknown) {
+  const value = error as {
+    message?: string;
+    details?: string;
+    hint?: string;
+    code?: string;
+  };
+
+  console.error(`[Supabase] ${context} failed`, {
+    message: value?.message,
+    details: value?.details,
+    hint: value?.hint,
+    code: value?.code,
+    raw: error,
+  });
 }

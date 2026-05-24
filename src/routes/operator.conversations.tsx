@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { fetchUnreadCounts } from "@/lib/readStates";
+import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -60,7 +60,10 @@ function OperatorConversationsPage() {
           .from("character_operator_assignments")
           .select("character_id")
           .eq("operator_id", operator.id);
-        if (assignmentsError) throw assignmentsError;
+        if (assignmentsError) {
+          logSupabaseError("operator.conversations assignments", assignmentsError);
+          throw assignmentsError;
+        }
         characterIds = (assignments ?? []).map((assignment) => assignment.character_id);
         if (characterIds.length === 0) return [];
       }
@@ -70,18 +73,23 @@ function OperatorConversationsPage() {
         .select(
           "id, status, last_message_at, last_message_preview, operator_unread_count, client_id, characters(id, name, avatar_url)",
         )
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(300);
       if (characterIds) q = q.in("character_id", characterIds);
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) {
+        logSupabaseError("operator.conversations conversations", error);
+        throw error;
+      }
 
       const clientIds = Array.from(new Set((data ?? []).map((c) => c.client_id)));
       let profileMap = new Map<string, { display_name: string | null; avatar_url: string | null }>();
       if (clientIds.length > 0) {
-        const { data: profs } = await supabase
+        const { data: profs, error: profilesError } = await supabase
           .from("profiles")
           .select("user_id, display_name, avatar_url")
           .in("user_id", clientIds);
+        if (profilesError) logSupabaseError("operator.conversations profiles", profilesError);
         profileMap = new Map((profs ?? []).map((p) => [p.user_id, { display_name: p.display_name, avatar_url: p.avatar_url }]));
       }
 
@@ -202,7 +210,14 @@ function OperatorConversationsPage() {
         </div>
       )}
 
-      {error && <div className="text-center py-12 text-destructive">שגיאה בטעינה</div>}
+      {error && (
+        <div className="text-center py-12 text-destructive">
+          שגיאה בטעינה
+          <div className="mt-2 text-xs text-muted-foreground">
+            {(error as { message?: string }).message}
+          </div>
+        </div>
+      )}
 
       {!isLoading && filtered.length === 0 && (
         <div className="text-center py-16">
