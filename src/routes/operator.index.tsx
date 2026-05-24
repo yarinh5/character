@@ -168,6 +168,7 @@ function OperatorDashboard() {
         }>,
       };
     },
+    refetchInterval: 30000,
   });
 
   useEffect(() => {

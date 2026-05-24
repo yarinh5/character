@@ -109,6 +109,7 @@ function OperatorConversationsPage() {
         profiles: profileMap.get(c.client_id) ?? null,
       })) as Row[];
     },
+    refetchInterval: 30000,
   });
 
   useEffect(() => {

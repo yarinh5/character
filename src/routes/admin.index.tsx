@@ -90,6 +90,7 @@ function AdminDashboard() {
   const { data: slaRisks = [], isLoading: slaLoading } = useQuery({
     queryKey: ["admin-sla-risks"],
     queryFn: () => fetchSlaRiskConversations(8, true),
+    refetchInterval: 30000,
   });
 
   useEffect(() => {
