@@ -539,6 +539,7 @@ export type Database = {
         Row: {
           availability_status: Database["public"]["Enums"]["availability_status"]
           created_at: string
+          deleted_at: string | null
           full_name: string
           id: string
           is_active: boolean
@@ -548,6 +549,7 @@ export type Database = {
         Insert: {
           availability_status?: Database["public"]["Enums"]["availability_status"]
           created_at?: string
+          deleted_at?: string | null
           full_name: string
           id?: string
           is_active?: boolean
@@ -557,6 +559,7 @@ export type Database = {
         Update: {
           availability_status?: Database["public"]["Enums"]["availability_status"]
           created_at?: string
+          deleted_at?: string | null
           full_name?: string
           id?: string
           is_active?: boolean
@@ -569,6 +572,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          deleted_at: string | null
           display_name: string | null
           email: string | null
           id: string
@@ -579,6 +583,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          deleted_at?: string | null
           display_name?: string | null
           email?: string | null
           id?: string
@@ -589,6 +594,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          deleted_at?: string | null
           display_name?: string | null
           email?: string | null
           id?: string

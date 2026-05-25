@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { Users, MessageCircle, User, LogOut, Coins } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -91,8 +91,10 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 }
 
 export function RequireClient({ children }: { children: ReactNode }) {
-  const { loading, session, role } = useAuth();
+  const { loading, session, role, signOut } = useAuth();
   const navigate = useNavigate();
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [clientStatus, setClientStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -105,7 +107,37 @@ export function RequireClient({ children }: { children: ReactNode }) {
     }
   }, [loading, session, role, navigate]);
 
-  if (loading) {
+  useEffect(() => {
+    if (loading) return;
+    if (!session?.user || role !== "client") {
+      setStatusLoading(false);
+      return;
+    }
+
+    let alive = true;
+    setStatusLoading(true);
+    supabase
+      .from("profiles")
+      .select("status, deleted_at")
+      .eq("user_id", session.user.id)
+      .maybeSingle()
+      .then(async ({ data }) => {
+        if (!alive) return;
+        const status = data?.deleted_at ? "archived" : data?.status ?? "active";
+        setClientStatus(status);
+        setStatusLoading(false);
+        if (status !== "active") {
+          await signOut();
+          navigate({ to: "/login" });
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [loading, navigate, role, session?.user, signOut]);
+
+  if (loading || statusLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
@@ -113,7 +145,7 @@ export function RequireClient({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!session || (role && role !== "client")) return null;
+  if (!session || (role && role !== "client") || clientStatus !== "active") return null;
 
   return <>{children}</>;
 }

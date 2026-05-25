@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { logAudit } from "@/lib/audit.server";
 
 type AppRole = "admin" | "operator" | "client";
 
@@ -16,6 +17,48 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
+async function setSingleRole(userId: string, role: AppRole) {
+  await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
+  const { error } = await supabaseAdmin.from("user_roles").insert({ user_id: userId, role });
+  if (error) throw new Error(error.message);
+}
+
+async function ensureClientProfile(userId: string) {
+  const { data } = await supabaseAdmin
+    .from("client_profiles")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) {
+    const { error } = await supabaseAdmin.from("client_profiles").insert({ user_id: userId });
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function ensureOperatorRecord(userId: string, fallbackName: string) {
+  const { data: existing } = await supabaseAdmin
+    .from("operators")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!existing) {
+    const { error } = await supabaseAdmin.from("operators").insert({
+      user_id: userId,
+      full_name: fallbackName,
+      is_active: true,
+      availability_status: "available",
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("operators")
+    .update({ is_active: true, availability_status: "available" })
+    .eq("id", existing.id);
+  if (error) throw new Error(error.message);
+}
+
 export const adminListUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -27,28 +70,28 @@ export const adminListUsers = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
 
-    const ids = (profiles ?? []).map((p) => p.user_id);
+    const ids = (profiles ?? []).map((profile) => profile.user_id);
     const { data: roles } = ids.length
       ? await supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", ids)
       : { data: [] as { user_id: string; role: AppRole }[] };
 
     const order: Record<AppRole, number> = { admin: 1, operator: 2, client: 3 };
     const roleByUser = new Map<string, AppRole>();
-    for (const r of roles ?? []) {
-      const cur = roleByUser.get(r.user_id);
-      if (!cur || order[r.role as AppRole] < order[cur]) {
-        roleByUser.set(r.user_id, r.role as AppRole);
+    for (const row of roles ?? []) {
+      const current = roleByUser.get(row.user_id);
+      if (!current || order[row.role as AppRole] < order[current]) {
+        roleByUser.set(row.user_id, row.role as AppRole);
       }
     }
 
-    return (profiles ?? []).map((p) => ({
-      user_id: p.user_id,
-      email: p.email,
-      display_name: p.display_name,
-      avatar_url: p.avatar_url,
-      status: p.status,
-      created_at: p.created_at,
-      role: (roleByUser.get(p.user_id) ?? "client") as AppRole,
+    return (profiles ?? []).map((profile) => ({
+      user_id: profile.user_id,
+      email: profile.email,
+      display_name: profile.display_name,
+      avatar_url: profile.avatar_url,
+      status: profile.status,
+      created_at: profile.created_at,
+      role: (roleByUser.get(profile.user_id) ?? "client") as AppRole,
     }));
   });
 
@@ -75,34 +118,27 @@ export const adminCreateUser = createServerFn({ method: "POST" })
       email_confirm: true,
       user_metadata: { display_name: data.full_name },
     });
-    if (error || !created.user) throw new Error(error?.message ?? "יצירה נכשלה");
+    if (error || !created.user) throw new Error(error?.message ?? "יצירת משתמש נכשלה");
 
-    const uid = created.user.id;
+    const userId = created.user.id;
 
     await supabaseAdmin
       .from("profiles")
       .update({ display_name: data.full_name })
-      .eq("user_id", uid);
+      .eq("user_id", userId);
 
-    if (data.role !== "client") {
-      await supabaseAdmin.from("user_roles").delete().eq("user_id", uid).eq("role", "client");
-      await supabaseAdmin
-        .from("user_roles")
-        .upsert({ user_id: uid, role: data.role }, { onConflict: "user_id,role" });
-    }
+    await setSingleRole(userId, data.role);
 
     if (data.role === "operator") {
-      const { data: existing } = await supabaseAdmin
-        .from("operators")
-        .select("id")
-        .eq("user_id", uid)
-        .maybeSingle();
-      if (!existing) {
-        await supabaseAdmin.from("operators").insert({ user_id: uid, full_name: data.full_name });
-      }
+      await ensureOperatorRecord(userId, data.full_name);
+    }
+    if (data.role === "client") {
+      await ensureClientProfile(userId);
     }
 
-    return { user_id: uid };
+    await logAudit(context.userId, "user.created", "user", userId, { role: data.role, email: data.email });
+
+    return { user_id: userId };
   });
 
 export const adminUpdateUser = createServerFn({ method: "POST" })
@@ -145,38 +181,31 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     }
 
     if (data.role) {
-      await supabaseAdmin.from("user_roles").delete().eq("user_id", data.user_id);
-      await supabaseAdmin.from("user_roles").insert({ user_id: data.user_id, role: data.role });
+      if (data.user_id === context.userId) {
+        throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
+      }
+
+      await setSingleRole(data.user_id, data.role);
 
       if (data.role === "operator") {
-        const { data: existing } = await supabaseAdmin
-          .from("operators")
-          .select("id")
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("display_name, email")
           .eq("user_id", data.user_id)
           .maybeSingle();
-        if (!existing) {
-          const { data: prof } = await supabaseAdmin
-            .from("profiles")
-            .select("display_name, email")
-            .eq("user_id", data.user_id)
-            .maybeSingle();
-          await supabaseAdmin.from("operators").insert({
-            user_id: data.user_id,
-            full_name: prof?.display_name ?? prof?.email ?? "עובד",
-          });
-        }
+        await ensureOperatorRecord(data.user_id, profile?.display_name ?? profile?.email ?? "עובד");
       }
 
       if (data.role === "client") {
-        const { data: existing } = await supabaseAdmin
-          .from("client_profiles")
-          .select("id")
-          .eq("user_id", data.user_id)
-          .maybeSingle();
-        if (!existing) {
-          await supabaseAdmin.from("client_profiles").insert({ user_id: data.user_id });
-        }
+        const { error } = await supabaseAdmin
+          .from("operators")
+          .update({ is_active: false, availability_status: "offline" })
+          .eq("user_id", data.user_id);
+        if (error) throw new Error(error.message);
+        await ensureClientProfile(data.user_id);
       }
+
+      await logAudit(context.userId, "user.role_changed", "user", data.user_id, { role: data.role });
     }
 
     return { ok: true };
@@ -193,6 +222,7 @@ export const adminResetPassword = createServerFn({ method: "POST" })
       password: data.password,
     });
     if (error) throw new Error(error.message);
+    await logAudit(context.userId, "user.password_reset", "user", data.user_id);
     return { ok: true };
   });
 
@@ -208,6 +238,7 @@ export const adminSetStatus = createServerFn({ method: "POST" })
       .update({ status: data.status })
       .eq("user_id", data.user_id);
     if (error) throw new Error(error.message);
+    await logAudit(context.userId, "user.status_changed", "user", data.user_id, { status: data.status });
     return { ok: true };
   });
 
@@ -219,7 +250,7 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן למחוק את עצמך");
     }
-    const { data: prof } = await supabaseAdmin
+    const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("email")
       .eq("user_id", data.user_id)
@@ -230,12 +261,13 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
       .update({
         status: "blocked",
         display_name: "משתמש מחוק",
-        email: prof?.email ? `${tag}` : tag,
+        email: profile?.email ? `${tag}` : tag,
       })
       .eq("user_id", data.user_id);
     await supabaseAdmin
       .from("operators")
       .update({ is_active: false, availability_status: "offline" })
       .eq("user_id", data.user_id);
+    await logAudit(context.userId, "user.soft_deleted", "user", data.user_id);
     return { ok: true };
   });

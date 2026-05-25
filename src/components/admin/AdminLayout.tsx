@@ -1,29 +1,27 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
-  LayoutDashboard,
-  Users,
-  UserCog,
-  Sparkles,
-  MessageCircle,
-  Flag,
-  Settings,
-  LogOut,
-  Coins,
   BarChart3,
+  Coins,
+  Flag,
+  LayoutDashboard,
+  LogOut,
+  MessageCircle,
+  ScrollText,
+  Settings,
+  Sparkles,
+  UserCog,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-
-import { Mail, ScrollText } from "lucide-react";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
 
 type NavTo =
   | "/admin"
   | "/admin/users"
-  | "/admin/invites"
   | "/admin/clients"
   | "/admin/operators"
   | "/admin/characters"
@@ -37,7 +35,6 @@ type NavTo =
 const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] = [
   { to: "/admin", label: "דשבורד", icon: LayoutDashboard, exact: true },
   { to: "/admin/users", label: "משתמשים", icon: Users },
-  { to: "/admin/invites", label: "הזמנות", icon: Mail },
   { to: "/admin/clients", label: "לקוחות", icon: Users },
   { to: "/admin/operators", label: "עובדים", icon: UserCog },
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
@@ -93,7 +90,7 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
 }
 
 function AdminShell({ children }: { children: ReactNode }) {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
 
@@ -116,7 +113,7 @@ function AdminShell({ children }: { children: ReactNode }) {
             </Link>
           </div>
           <div className="px-4 py-4 border-b border-border">
-            <div className="text-sm font-medium truncate">{user?.email ?? "—"}</div>
+            <div className="text-sm font-medium truncate">{user?.email ?? "-"}</div>
             <div className="text-xs text-muted-foreground mt-1">מנהל מערכת</div>
           </div>
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -189,16 +186,17 @@ export function StatusBadge({ status }: { status: string }) {
     offline: { label: "לא מחובר", cls: "bg-muted text-muted-foreground" },
     active: { label: "פעיל", cls: "bg-success/15 text-success" },
     inactive: { label: "לא פעיל", cls: "bg-muted text-muted-foreground" },
+    archived: { label: "נמחק/אורכב", cls: "bg-destructive/15 text-destructive" },
     blocked: { label: "חסום", cls: "bg-destructive/15 text-destructive" },
-    suspended: { label: "מושעה", cls: "bg-warning/15 text-warning" },
+    suspended: { label: "מושהה", cls: "bg-warning/15 text-warning" },
     reviewed: { label: "בטיפול", cls: "bg-primary/10 text-primary" },
     resolved: { label: "טופל", cls: "bg-success/15 text-success" },
     dismissed: { label: "נדחה", cls: "bg-muted text-muted-foreground" },
   };
-  const s = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
+  const current = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
   return (
-    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", s.cls)}>
-      {s.label}
+    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", current.cls)}>
+      {current.label}
     </span>
   );
 }
