@@ -239,7 +239,7 @@ function ChatPage() {
     : null;
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
+    <div className="flex flex-col h-[calc(100dvh-5rem)] md:h-screen bg-background" dir="rtl">
       {/* Header */}
       <header className="h-16 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
         <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/app/conversations" })}>

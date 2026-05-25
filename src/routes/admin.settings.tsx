@@ -43,7 +43,7 @@ const KEYS = [
 
 function SettingsPage() {
   const qc = useQueryClient();
-  const { user, role, signOut } = useAuth();
+  const { user, role } = useAuth();
   const { data, isLoading } = useQuery({
     queryKey: ["admin-settings"],
     queryFn: async () => {
@@ -183,7 +183,6 @@ function SettingsPage() {
               <AccountSecurityCard
                 userId={user?.id}
                 email={profileForm.email}
-                signOut={signOut}
                 onDeletionRequested={() => setProfileForm((current) => ({ ...current, status: "deletion_requested" }))}
               />
               <NotificationSettingsCard role={role} />

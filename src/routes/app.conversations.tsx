@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { fetchUnreadCounts } from "@/lib/readStates";
-import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MessageCircle } from "lucide-react";
@@ -98,7 +97,7 @@ function ConversationsPage() {
   }, [qc, user?.id]);
 
   return (
-    <ClientLayout>
+    <>
       <div className="max-w-3xl mx-auto p-4 md:p-8">
         <header className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold">השיחות שלי</h1>
@@ -170,6 +169,6 @@ function ConversationsPage() {
           </div>
         )}
       </div>
-    </ClientLayout>
+    </>
   );
 }

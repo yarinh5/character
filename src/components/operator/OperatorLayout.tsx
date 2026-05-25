@@ -189,14 +189,18 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
       </aside>
 
       <main className="flex-1 min-w-0 pb-20 md:pb-0 flex flex-col">
-        <header className="h-14 border-b border-border bg-card flex items-center justify-end px-4 gap-2 shrink-0">
+        <header className="h-14 border-b border-border bg-card flex items-center justify-between md:justify-end px-4 gap-2 shrink-0">
+          <Button variant="ghost" size="sm" className="md:hidden gap-2" onClick={handleLogout}>
+            <LogOut className="h-4 w-4" />
+            יציאה
+          </Button>
           <NotificationBell />
         </header>
         <div className="flex-1 min-h-0">{children}</div>
       </main>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-4">
           {NAV.map(({ to, label, icon: Icon, exact }) => (
             <Link
               key={to}
@@ -210,13 +214,6 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
               {label}
             </Link>
           ))}
-          <button
-            onClick={handleLogout}
-            className="flex flex-col items-center justify-center gap-1 py-3 text-xs text-muted-foreground"
-          >
-            <LogOut className="h-5 w-5" />
-            יציאה
-          </button>
         </div>
       </nav>
       </div>

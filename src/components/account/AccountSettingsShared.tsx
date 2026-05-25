@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { KeyRound, LogOut, Mail, Shield, Trash2, User } from "lucide-react";
+import { KeyRound, Mail, Shield, Trash2, User } from "lucide-react";
 
 const ROLE_LABELS: Record<AppRole, string> = {
   client: "לקוח",
@@ -54,15 +53,12 @@ export function AccountSummaryCard({
 export function AccountSecurityCard({
   userId,
   email,
-  signOut,
   onDeletionRequested,
 }: {
   userId: string | undefined;
   email: string | null | undefined;
-  signOut: () => Promise<void>;
   onDeletionRequested?: () => void;
 }) {
-  const navigate = useNavigate();
   const [resetting, setResetting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [requestingDelete, setRequestingDelete] = useState(false);
@@ -98,11 +94,6 @@ export function AccountSecurityCard({
     toast.success("בקשת מחיקת החשבון התקבלה ותטופל ידנית");
   };
 
-  const logout = async () => {
-    await signOut();
-    navigate({ to: "/login" });
-  };
-
   return (
     <>
       <Card>
@@ -113,14 +104,10 @@ export function AccountSecurityCard({
           <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
             שינוי אימייל מנוהל כרגע מחוץ למסך הזה כדי למנוע בעיות אימות. אפשר לאפס סיסמה דרך האימייל הקיים.
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2">
             <Button type="button" variant="outline" onClick={sendReset} disabled={!email || resetting} className="gap-2">
               <KeyRound className="h-4 w-4" />
               {resetting ? "שולח..." : "שלח איפוס סיסמה"}
-            </Button>
-            <Button type="button" variant="outline" onClick={logout} className="gap-2">
-              <LogOut className="h-4 w-4" />
-              יציאה מהחשבון
             </Button>
           </div>
           <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)} className="w-full gap-2">

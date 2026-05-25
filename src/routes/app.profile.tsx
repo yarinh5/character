@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +19,7 @@ export const Route = createFileRoute("/app/profile")({
 });
 
 function ProfilePage() {
-  const { user, role, signOut } = useAuth();
+  const { user, role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [account, setAccount] = useState<{ email: string | null; status: string | null; balance: number | null }>({
@@ -96,7 +95,7 @@ function ProfilePage() {
   };
 
   return (
-    <ClientLayout>
+    <>
       <div className="max-w-2xl mx-auto p-4 md:p-8 space-y-6">
         <header className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold">פרופיל והגדרות חשבון</h1>
@@ -185,13 +184,12 @@ function ProfilePage() {
             <AccountSecurityCard
               userId={user?.id}
               email={account.email}
-              signOut={signOut}
               onDeletionRequested={() => setAccount((current) => ({ ...current, status: "deletion_requested" }))}
             />
             <NotificationSettingsCard role={role} />
           </>
         )}
       </div>
-    </ClientLayout>
+    </>
   );
 }

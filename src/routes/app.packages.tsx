@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Coins, MessageCircle, PackageOpen } from "lucide-react";
-import { ClientLayout } from "@/components/client/ClientLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
 import { Button } from "@/components/ui/button";
@@ -51,7 +50,7 @@ function PackagesPage() {
   };
 
   return (
-    <ClientLayout>
+    <>
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         <header className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold">חבילות קרדיטים</h1>
@@ -115,7 +114,7 @@ function PackagesPage() {
           </div>
         )}
       </div>
-    </ClientLayout>
+    </>
   );
 }
 

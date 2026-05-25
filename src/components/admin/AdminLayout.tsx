@@ -136,12 +136,6 @@ function AdminShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <div className="p-4 border-t border-border">
-            <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleLogout}>
-              <LogOut className="h-4 w-4" />
-              התנתקות
-            </Button>
-          </div>
         </aside>
 
         <main className="flex-1 min-w-0 pb-24 md:pb-0 flex flex-col">
@@ -150,6 +144,16 @@ function AdminShell({ children }: { children: ReactNode }) {
           </header>
           <div className="flex-1 min-h-0">{children}</div>
         </main>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          className="fixed bottom-20 right-4 z-50 gap-2 shadow-lg md:bottom-4"
+          onClick={handleLogout}
+        >
+          <LogOut className="h-4 w-4" />
+          יציאה
+        </Button>
 
         <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40 overflow-x-auto">
           <div className="flex min-w-max">
@@ -166,13 +170,6 @@ function AdminShell({ children }: { children: ReactNode }) {
                 {label}
               </Link>
             ))}
-            <button
-              onClick={handleLogout}
-              className="flex flex-col items-center justify-center gap-1 py-2.5 px-4 text-[11px] min-w-[68px] text-muted-foreground"
-            >
-              <LogOut className="h-5 w-5" />
-              יציאה
-            </button>
           </div>
         </nav>
       </div>

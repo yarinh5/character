@@ -29,7 +29,7 @@ type AssignedRow = {
 };
 
 function OperatorSettingsPage() {
-  const { user, role, signOut } = useAuth();
+  const { user, role } = useAuth();
   const { operator, refresh } = useOperator();
   const [fullName, setFullName] = useState(operator?.full_name ?? "");
   const [status, setStatus] = useState(operator?.availability_status ?? "available");
@@ -209,7 +209,6 @@ function OperatorSettingsPage() {
       <AccountSecurityCard
         userId={user?.id}
         email={profileEmail}
-        signOut={signOut}
         onDeletionRequested={() => setProfileStatus("deletion_requested")}
       />
       <NotificationSettingsCard role={role} />

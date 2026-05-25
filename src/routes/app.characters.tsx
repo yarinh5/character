@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
-import { ClientLayout } from "@/components/client/ClientLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,7 +59,7 @@ function CharactersPage() {
   };
 
   return (
-    <ClientLayout>
+    <>
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         <header className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold">דמויות</h1>
@@ -146,6 +145,6 @@ function CharactersPage() {
           </div>
         )}
       </div>
-    </ClientLayout>
+    </>
   );
 }
