@@ -41,6 +41,7 @@ import { Route as AdminConversationsRouteImport } from './routes/admin.conversat
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminCharactersRouteImport } from './routes/admin.characters'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
+import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
 import { Route as AcceptInviteTokenRouteImport } from './routes/accept-invite.$token'
 import { Route as OperatorChatConversationIdRouteImport } from './routes/operator.chat.$conversationId'
 import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$conversationId'
@@ -206,6 +207,11 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
   path: '/audit-logs',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AcceptInviteTokenRoute = AcceptInviteTokenRouteImport.update({
   id: '/accept-invite/$token',
   path: '/accept-invite/$token',
@@ -242,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
@@ -277,6 +284,7 @@ export interface FileRoutesByTo {
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
@@ -316,6 +324,7 @@ export interface FileRoutesById {
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
@@ -356,6 +365,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/terms'
     | '/accept-invite/$token'
+    | '/admin/analytics'
     | '/admin/audit-logs'
     | '/admin/characters'
     | '/admin/clients'
@@ -391,6 +401,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/terms'
     | '/accept-invite/$token'
+    | '/admin/analytics'
     | '/admin/audit-logs'
     | '/admin/characters'
     | '/admin/clients'
@@ -429,6 +440,7 @@ export interface FileRouteTypes {
     | '/service'
     | '/terms'
     | '/accept-invite/$token'
+    | '/admin/analytics'
     | '/admin/audit-logs'
     | '/admin/characters'
     | '/admin/clients'
@@ -696,6 +708,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAuditLogsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/analytics': {
+      id: '/admin/analytics'
+      path: '/analytics'
+      fullPath: '/admin/analytics'
+      preLoaderRoute: typeof AdminAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/accept-invite/$token': {
       id: '/accept-invite/$token'
       path: '/accept-invite/$token'
@@ -739,6 +758,7 @@ const AdminConversationsRouteWithChildren =
   AdminConversationsRoute._addFileChildren(AdminConversationsRouteChildren)
 
 interface AdminRouteChildren {
+  AdminAnalyticsRoute: typeof AdminAnalyticsRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminCharactersRoute: typeof AdminCharactersRoute
   AdminClientsRoute: typeof AdminClientsRoute
@@ -753,6 +773,7 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAnalyticsRoute: AdminAnalyticsRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminCharactersRoute: AdminCharactersRoute,
   AdminClientsRoute: AdminClientsRoute,

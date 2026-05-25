@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Coins,
+  BarChart3,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ type NavTo =
   | "/admin/characters"
   | "/admin/conversations"
   | "/admin/credits"
+  | "/admin/analytics"
   | "/admin/reports"
   | "/admin/audit-logs"
   | "/admin/settings";
@@ -44,6 +46,7 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/reports", label: "דיווחים", icon: Flag },
   { to: "/admin/audit-logs", label: "יומן פעולות", icon: ScrollText },
   { to: "/admin/settings", label: "הגדרות", icon: Settings },
+  { to: "/admin/analytics", label: "אנליטיקות", icon: BarChart3 },
 ];
 
 function Spinner() {

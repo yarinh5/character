@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
@@ -219,5 +220,282 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       operatorMessages: operatorMessagesTotal.count ?? 0,
       topMonthlyOperators,
       lowBalanceUsers,
+    };
+  });
+
+const DateRangeSchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+const FUNNEL_EVENTS = [
+  "signup_completed",
+  "onboarding_completed",
+  "character_viewed",
+  "conversation_started",
+  "first_message_sent",
+  "packages_viewed",
+] as const;
+
+function dateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseDateRange(input: z.infer<typeof DateRangeSchema>) {
+  const today = new Date();
+  const defaultStart = new Date(today);
+  defaultStart.setDate(defaultStart.getDate() - 29);
+
+  const start = input.startDate ? new Date(`${input.startDate}T00:00:00`) : defaultStart;
+  const end = input.endDate ? new Date(`${input.endDate}T23:59:59.999`) : today;
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid date range");
+  }
+  if (start > end) {
+    throw new Error("Start date must be before end date");
+  }
+
+  const maxStart = new Date(end);
+  maxStart.setDate(maxStart.getDate() - 180);
+  const safeStart = start < maxStart ? maxStart : start;
+
+  safeStart.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    start,
+    safeStart,
+    end,
+    startIso: safeStart.toISOString(),
+    endIso: end.toISOString(),
+    startDate: dateOnly(safeStart),
+    endDate: dateOnly(end),
+  };
+}
+
+function buildDays(start: Date, end: Date) {
+  const days: Array<{
+    date: string;
+    signups: number;
+    conversations: number;
+    clientMessages: number;
+    operatorMessages: number;
+    events: number;
+  }> = [];
+
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+
+  while (cursor <= last) {
+    days.push({
+      date: dateOnly(cursor),
+      signups: 0,
+      conversations: 0,
+      clientMessages: 0,
+      operatorMessages: 0,
+      events: 0,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+}
+
+function incrementDay<T extends { date: string }>(days: T[], iso: string | null | undefined, key: keyof T) {
+  if (!iso) return;
+  const date = iso.slice(0, 10);
+  const day = days.find((item) => item.date === date);
+  if (!day || typeof day[key] !== "number") return;
+  (day[key] as number) += 1;
+}
+
+export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => DateRangeSchema.parse(d ?? {}))
+  .handler(async ({ data, context }) => {
+    await ensureAdmin(context.userId);
+    const range = parseDateRange(data);
+
+    const [
+      profiles,
+      conversations,
+      messages,
+      events,
+      creditTransactions,
+      scoreEvents,
+      characters,
+      operators,
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("profiles")
+        .select("user_id, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      supabaseAdmin
+        .from("conversations")
+        .select("id, character_id, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      supabaseAdmin
+        .from("messages")
+        .select("id, conversation_id, sender_type, operator_id, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      (supabaseAdmin as any)
+        .from("analytics_events")
+        .select("event_name, actor_user_id, role, conversation_id, character_id, operator_id, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      supabaseAdmin
+        .from("credit_transactions")
+        .select("amount, type, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      (supabaseAdmin as any)
+        .from("operator_score_events")
+        .select("operator_id, points, created_at")
+        .gte("created_at", range.startIso)
+        .lte("created_at", range.endIso)
+        .limit(10000),
+      supabaseAdmin.from("characters").select("id, name").limit(10000),
+      supabaseAdmin.from("operators").select("id, full_name, is_active, availability_status").limit(10000),
+    ]);
+
+    const errors = [
+      profiles.error,
+      conversations.error,
+      messages.error,
+      events.error,
+      creditTransactions.error,
+      scoreEvents.error,
+      characters.error,
+      operators.error,
+    ].filter(Boolean);
+    if (errors[0]) throw new Error(errors[0].message);
+
+    const profileRows = profiles.data ?? [];
+    const conversationRows = conversations.data ?? [];
+    const messageRows = messages.data ?? [];
+    const eventRows = (events.data ?? []) as Array<{
+      event_name: string;
+      actor_user_id: string | null;
+      role: string | null;
+      conversation_id: string | null;
+      character_id: string | null;
+      operator_id: string | null;
+      created_at: string;
+    }>;
+    const creditRows = creditTransactions.data ?? [];
+    const scoreRows = (scoreEvents.data ?? []) as Array<{ operator_id: string | null; points: number; created_at: string }>;
+
+    const days = buildDays(range.safeStart, range.end);
+    profileRows.forEach((row) => incrementDay(days, row.created_at, "signups"));
+    conversationRows.forEach((row) => incrementDay(days, row.created_at, "conversations"));
+    messageRows.forEach((row) => {
+      if (row.sender_type === "client") incrementDay(days, row.created_at, "clientMessages");
+      if (row.sender_type === "operator") incrementDay(days, row.created_at, "operatorMessages");
+    });
+    eventRows.forEach((row) => incrementDay(days, row.created_at, "events"));
+
+    const eventsByName = new Map<string, number>();
+    for (const event of eventRows) {
+      eventsByName.set(event.event_name, (eventsByName.get(event.event_name) ?? 0) + 1);
+    }
+
+    const messageClientCount = messageRows.filter((message) => message.sender_type === "client").length;
+    const messageOperatorCount = messageRows.filter((message) => message.sender_type === "operator").length;
+    const creditsBurn = creditRows
+      .filter((tx) => tx.amount < 0)
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+    const characterNameById = new Map((characters.data ?? []).map((character) => [character.id, character.name]));
+    const characterCounts = new Map<string, { id: string; name: string; conversations: number; views: number }>();
+    for (const conversation of conversationRows) {
+      const current = characterCounts.get(conversation.character_id) ?? {
+        id: conversation.character_id,
+        name: characterNameById.get(conversation.character_id) ?? "ללא שם",
+        conversations: 0,
+        views: 0,
+      };
+      current.conversations += 1;
+      characterCounts.set(conversation.character_id, current);
+    }
+    for (const event of eventRows) {
+      if (event.event_name !== "character_viewed" || !event.character_id) continue;
+      const current = characterCounts.get(event.character_id) ?? {
+        id: event.character_id,
+        name: characterNameById.get(event.character_id) ?? "ללא שם",
+        conversations: 0,
+        views: 0,
+      };
+      current.views += 1;
+      characterCounts.set(event.character_id, current);
+    }
+    const topCharacters = Array.from(characterCounts.values())
+      .sort((a, b) => b.conversations + b.views - (a.conversations + a.views))
+      .slice(0, 8);
+
+    const operatorById = new Map((operators.data ?? []).map((operator) => [operator.id, operator]));
+    const operatorCounts = new Map<string, { id: string; name: string; messages: number; points: number; status: string }>();
+    for (const message of messageRows) {
+      if (message.sender_type !== "operator" || !message.operator_id) continue;
+      const operator = operatorById.get(message.operator_id);
+      const current = operatorCounts.get(message.operator_id) ?? {
+        id: message.operator_id,
+        name: operator?.full_name ?? "ללא שם",
+        messages: 0,
+        points: 0,
+        status: operator?.availability_status ?? "offline",
+      };
+      current.messages += 1;
+      operatorCounts.set(message.operator_id, current);
+    }
+    for (const score of scoreRows) {
+      if (!score.operator_id) continue;
+      const operator = operatorById.get(score.operator_id);
+      const current = operatorCounts.get(score.operator_id) ?? {
+        id: score.operator_id,
+        name: operator?.full_name ?? "ללא שם",
+        messages: 0,
+        points: 0,
+        status: operator?.availability_status ?? "offline",
+      };
+      current.points += score.points ?? 0;
+      operatorCounts.set(score.operator_id, current);
+    }
+    const topOperators = Array.from(operatorCounts.values())
+      .sort((a, b) => b.points + b.messages - (a.points + a.messages))
+      .slice(0, 8);
+
+    return {
+      range: {
+        startDate: range.startDate,
+        endDate: range.endDate,
+      },
+      kpis: {
+        newUsers: profileRows.length,
+        conversationsStarted: conversationRows.length,
+        clientMessages: messageClientCount,
+        operatorMessages: messageOperatorCount,
+        characterViews: eventsByName.get("character_viewed") ?? 0,
+        packagesViewed: eventsByName.get("packages_viewed") ?? 0,
+        insufficientCredits: eventsByName.get("insufficient_credits_shown") ?? 0,
+        creditsBurn,
+      },
+      funnel: FUNNEL_EVENTS.map((eventName) => ({
+        eventName,
+        count: eventsByName.get(eventName) ?? 0,
+      })),
+      days,
+      topCharacters,
+      topOperators,
     };
   });
