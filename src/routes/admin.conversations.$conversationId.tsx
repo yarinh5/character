@@ -15,13 +15,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowRight, FileText, Info } from "lucide-react";
+import { ArrowRight, FileText, Info, Send } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 
 export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
 });
+
+function isActiveConversationLock(lock: any) {
+  return !!lock && !lock.released_at && new Date(lock.expires_at).getTime() > Date.now();
+}
 
 function ConvView() {
   const { conversationId } = Route.useParams();
@@ -31,8 +35,10 @@ function ConvView() {
   const { user } = useAuth();
   const [noteInput, setNoteInput] = useState("");
   const [customerInfoInput, setCustomerInfoInput] = useState("");
+  const [messageInput, setMessageInput] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   useActiveConversation(conversationId, "admin");
 
   const { data, isLoading } = useQuery({
@@ -56,12 +62,14 @@ function ConvView() {
         { data: reports },
         { data: charOps },
         { data: currentOperator },
+        { data: settings },
+        { data: lock },
       ] = await Promise.all([
           supabase.from("profiles").select("display_name, email, status").eq("user_id", conv.client_id).maybeSingle(),
           supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
           supabase
             .from("messages")
-            .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name)")
+            .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
             .eq("conversation_id", conversationId)
             .order("created_at", { ascending: true }),
           supabase
@@ -85,20 +93,48 @@ function ConvView() {
           user?.id
             ? supabase
                 .from("operators")
-                .select("id, full_name")
+                .select("id, full_name, is_active")
                 .eq("user_id", user.id)
                 .maybeSingle()
             : Promise.resolve({ data: null }),
+          supabase
+            .from("system_settings")
+            .select("key, value")
+            .in("key", ["concurrency_mode", "lock_timeout_minutes"]),
+          supabase
+            .from("conversation_locks")
+            .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
+            .eq("conversation_id", conversationId)
+            .maybeSingle(),
         ]);
+      const operatorUserIds = [
+        ...new Set((msgs ?? []).map((message: any) => message.operators?.user_id).filter(Boolean)),
+      ] as string[];
+      const { data: adminRoles } = operatorUserIds.length
+        ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
+        : { data: [] as { user_id: string }[] };
+      const adminOperatorUserIds = (adminRoles ?? []).map((role) => role.user_id);
+      const assignments = charOps ?? [];
+      const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
+      const mode = settingsMap.get("concurrency_mode");
+      const timeout = settingsMap.get("lock_timeout_minutes");
       return {
         conv,
         client,
         cprof,
         msgs: msgs ?? [],
+        adminOperatorUserIds,
         notes: notes ?? [],
         customerInfo: customerInfo ?? [],
         reports: reports ?? [],
         currentOperator,
+        currentOperatorAssigned: Boolean(
+          currentOperator?.id &&
+            assignments.some((assignment: any) => assignment.operator_id === currentOperator.id && assignment.operators?.is_active),
+        ),
+        concurrencyMode: mode === "warning" || mode === "lock" ? mode : "open",
+        lockTimeoutMinutes: typeof timeout === "number" ? timeout : 10,
+        lock: lock ?? null,
         availableOps: (charOps ?? [])
           .map((a: any) => a.operators)
           .filter((o: any) => o && o.is_active),
@@ -133,6 +169,11 @@ function ConvView() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "conversations", filter: `id=eq.${conversationId}` },
+        () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_locks", filter: `conversation_id=eq.${conversationId}` },
         () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
       )
       .on(
@@ -186,6 +227,49 @@ function ConvView() {
     qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
   };
 
+  const sendMessage = async () => {
+    const content = messageInput.trim();
+    if (!content || sendingMessage || !data?.currentOperator?.id) return;
+    if (content.length > 2000) {
+      toast.error("ההודעה ארוכה מדי");
+      return;
+    }
+
+    setSendingMessage(true);
+    const { data: result, error } = await supabase.rpc("send_operator_message", {
+      _conversation_id: conversationId,
+      _content: content,
+    });
+    setSendingMessage(false);
+
+    if (error) {
+      if (error.message.includes("operator_record_required")) {
+        toast.error("כדי לענות צריך רשומת עובד פעילה לאדמין הזה");
+        return;
+      }
+      if (error.message.includes("operator_not_assigned_to_character")) {
+        toast.error("האדמין לא משויך לדמות של השיחה");
+        return;
+      }
+      if (error.message.includes("conversation_locked_by_other_operator")) {
+        toast.error("השיחה נעולה כרגע לעובד אחר");
+        return;
+      }
+      if (error.message.includes("conversation_closed")) {
+        toast.error("השיחה סגורה. פתח אותה מחדש כדי לענות");
+        return;
+      }
+      toast.error("שליחת ההודעה נכשלה");
+      return;
+    }
+
+    const message = (result as { message?: any } | null)?.message;
+    if (message) {
+      qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+    }
+    setMessageInput("");
+  };
+
   const saveNote = async () => {
     const text = noteInput.trim();
     if (!text || savingNote) return;
@@ -237,6 +321,22 @@ function ConvView() {
       </div>
     );
   }
+
+  const activeLock = isActiveConversationLock(data.lock) ? data.lock : null;
+  const lockHeldByOther =
+    data.concurrencyMode === "lock" &&
+    activeLock &&
+    data.currentOperator?.id &&
+    activeLock.locked_by_operator_id !== data.currentOperator.id;
+  const canReply = Boolean(data.currentOperator?.id && data.currentOperator.is_active && data.currentOperatorAssigned);
+  const composerDisabled = sendingMessage || Boolean(lockHeldByOther) || data.conv.status === "closed";
+  const replyBlockedMessage = !data.currentOperator?.id
+    ? "כדי לענות בשם הדמות, צריך ליצור לאדמין רשומת עובד פעילה ולשייך אותה לדמות הזו."
+    : !data.currentOperator.is_active
+      ? "רשומת העובד של האדמין לא פעילה. יש להפעיל אותה במסך העובדים."
+      : !data.currentOperatorAssigned
+        ? "האדמין לא משויך לדמות של השיחה, ולכן לא ניתן לענות מכאן."
+        : "";
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-6" dir="rtl">
@@ -294,7 +394,7 @@ function ConvView() {
                       {m.sender_type === "client"
                         ? "לקוח"
                         : m.sender_type === "operator"
-                          ? `עובד: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
+                          ? `${data.adminOperatorUserIds.includes(m.operators?.user_id) ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
                           : "אדמין"}
                     </div>
                     <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>
@@ -307,6 +407,59 @@ function ConvView() {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="border-t bg-card p-3">
+              {canReply ? (
+                data.conv.status === "closed" ? (
+                  <div className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                    השיחה סגורה. פתח אותה מחדש כדי לענות בשם הדמות.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {lockHeldByOther && (
+                      <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                        השיחה נעולה כרגע ל{activeLock?.operators?.full_name ?? "עובד אחר"}. Lock Mode נאכף גם על אדמין.
+                      </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                      <Textarea
+                        value={messageInput}
+                        onChange={(event) => setMessageInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void sendMessage();
+                          }
+                        }}
+                        placeholder={`כתוב בשם ${data.conv.characters?.name ?? "הדמות"}...`}
+                        rows={1}
+                        maxLength={2000}
+                        className="min-h-10 max-h-32 resize-none"
+                        disabled={composerDisabled}
+                      />
+                      <Button
+                        size="icon"
+                        onClick={sendMessage}
+                        disabled={composerDisabled || !messageInput.trim()}
+                        title="שליחת הודעה"
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                      <span>ההודעה תישלח דרך מנגנון עובד ותישמר עם operator_id.</span>
+                      <span dir="ltr">{messageInput.length}/2000</span>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+                  <p>{replyBlockedMessage}</p>
+                  <Button asChild variant="link" size="sm" className="mt-1 h-auto p-0">
+                    <Link to="/admin/operators">ניהול עובדים ושיוכים</Link>
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

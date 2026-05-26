@@ -4,6 +4,7 @@ import { Users, MessageCircle, User, LogOut, Coins } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 
 const NAV = [
   { to: "/app/characters", label: "דמויות", icon: Users },

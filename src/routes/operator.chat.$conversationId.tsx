@@ -31,7 +31,7 @@ type Msg = {
   content: string;
   created_at: string;
   is_read: boolean;
-  operators?: { full_name: string } | null;
+  operators?: { full_name: string; user_id?: string | null } | null;
 };
 
 type Conv = {
@@ -97,6 +97,7 @@ function OperatorChatPage() {
 
   const [conv, setConv] = useState<Conv | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [adminOperatorUserIds, setAdminOperatorUserIds] = useState<string[]>([]);
   const [client, setClient] = useState<ClientInfo | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [customerInfoEntries, setCustomerInfoEntries] = useState<CustomerInfoEntry[]>([]);
@@ -172,7 +173,7 @@ function OperatorChatPage() {
       ] = await Promise.all([
         supabase
           .from("messages")
-          .select("*, operators(full_name)")
+          .select("*, operators(full_name, user_id)")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: true }),
         supabase
@@ -210,7 +211,16 @@ function OperatorChatPage() {
           .maybeSingle(),
       ]);
       if (cancelled) return;
-      setMessages((m ?? []) as Msg[]);
+      const loadedMessages = (m ?? []) as Msg[];
+      const operatorUserIds = [
+        ...new Set(loadedMessages.map((message) => message.operators?.user_id).filter(Boolean)),
+      ] as string[];
+      const { data: adminRoles } = operatorUserIds.length
+        ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
+        : { data: [] as { user_id: string }[] };
+      if (cancelled) return;
+      setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
+      setMessages(loadedMessages);
       setNotes((n ?? []) as unknown as Note[]);
       setCustomerInfoEntries((info ?? []) as unknown as CustomerInfoEntry[]);
       const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
@@ -262,11 +272,22 @@ function OperatorChatPage() {
           if (newMsg.operator_id) {
             supabase
               .from("operators")
-              .select("full_name")
+              .select("full_name, user_id")
               .eq("id", newMsg.operator_id)
               .maybeSingle()
-              .then(({ data }) => {
-                const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name } : null };
+              .then(async ({ data }) => {
+                if (data?.user_id) {
+                  const { data: adminRole } = await supabase
+                    .from("user_roles")
+                    .select("user_id")
+                    .eq("user_id", data.user_id)
+                    .eq("role", "admin")
+                    .maybeSingle();
+                  if (adminRole) {
+                    setAdminOperatorUserIds((prev) => (prev.includes(adminRole.user_id) ? prev : [...prev, adminRole.user_id]));
+                  }
+                }
+                const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name, user_id: data.user_id } : null };
                 setMessages((prev) => (prev.some((m) => m.id === hydrated.id) ? prev : [...prev, hydrated]));
               });
           } else {
@@ -653,7 +674,11 @@ function OperatorChatPage() {
                   >
                     {isOps && (
                       <p className="text-[10px] mb-0.5 opacity-70">
-                        {m.operators?.full_name ?? (m.sender_type === "admin" ? "מנהל" : "עובד")}
+                        {m.operators?.full_name
+                          ? `${adminOperatorUserIds.includes(m.operators.user_id ?? "") ? "מנהל" : "עובד"}: ${m.operators.full_name}`
+                          : m.sender_type === "admin"
+                            ? "מנהל"
+                            : "עובד"}
                       </p>
                     )}
                     <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>

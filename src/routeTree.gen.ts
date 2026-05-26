@@ -43,6 +43,7 @@ import { Route as AdminCharactersRouteImport } from './routes/admin.characters'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
 import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
 import { Route as AcceptInviteTokenRouteImport } from './routes/accept-invite.$token'
+import { Route as AdminConversationsIndexRouteImport } from './routes/admin.conversations.index'
 import { Route as OperatorChatConversationIdRouteImport } from './routes/operator.chat.$conversationId'
 import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$conversationId'
 import { Route as AdminConversationsConversationIdRouteImport } from './routes/admin.conversations.$conversationId'
@@ -217,6 +218,11 @@ const AcceptInviteTokenRoute = AcceptInviteTokenRouteImport.update({
   path: '/accept-invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminConversationsIndexRoute = AdminConversationsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminConversationsRoute,
+} as any)
 const OperatorChatConversationIdRoute =
   OperatorChatConversationIdRouteImport.update({
     id: '/chat/$conversationId',
@@ -273,6 +279,7 @@ export interface FileRoutesByFullPath {
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
+  '/admin/conversations/': typeof AdminConversationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -288,7 +295,6 @@ export interface FileRoutesByTo {
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
-  '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
@@ -309,6 +315,7 @@ export interface FileRoutesByTo {
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
+  '/admin/conversations': typeof AdminConversationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -349,6 +356,7 @@ export interface FileRoutesById {
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
+  '/admin/conversations/': typeof AdminConversationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -390,6 +398,7 @@ export interface FileRouteTypes {
     | '/admin/conversations/$conversationId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
+    | '/admin/conversations/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -405,7 +414,6 @@ export interface FileRouteTypes {
     | '/admin/audit-logs'
     | '/admin/characters'
     | '/admin/clients'
-    | '/admin/conversations'
     | '/admin/credits'
     | '/admin/invites'
     | '/admin/operators'
@@ -426,6 +434,7 @@ export interface FileRouteTypes {
     | '/admin/conversations/$conversationId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
+    | '/admin/conversations'
   id:
     | '__root__'
     | '/'
@@ -465,6 +474,7 @@ export interface FileRouteTypes {
     | '/admin/conversations/$conversationId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
+    | '/admin/conversations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -722,6 +732,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AcceptInviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/conversations/': {
+      id: '/admin/conversations/'
+      path: '/'
+      fullPath: '/admin/conversations/'
+      preLoaderRoute: typeof AdminConversationsIndexRouteImport
+      parentRoute: typeof AdminConversationsRoute
+    }
     '/operator/chat/$conversationId': {
       id: '/operator/chat/$conversationId'
       path: '/chat/$conversationId'
@@ -748,10 +765,12 @@ declare module '@tanstack/react-router' {
 
 interface AdminConversationsRouteChildren {
   AdminConversationsConversationIdRoute: typeof AdminConversationsConversationIdRoute
+  AdminConversationsIndexRoute: typeof AdminConversationsIndexRoute
 }
 
 const AdminConversationsRouteChildren: AdminConversationsRouteChildren = {
   AdminConversationsConversationIdRoute: AdminConversationsConversationIdRoute,
+  AdminConversationsIndexRoute: AdminConversationsIndexRoute,
 }
 
 const AdminConversationsRouteWithChildren =
