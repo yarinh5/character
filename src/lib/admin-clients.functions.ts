@@ -87,9 +87,9 @@ export const adminListClients = createServerFn({ method: "GET" })
       .in("user_id", ids)
       .order("created_at", { ascending: false });
 
-    if (!data.include_archived) {
-      profileQuery = profileQuery.is("deleted_at", null);
-    }
+    profileQuery = data.include_archived
+      ? profileQuery.not("deleted_at", "is", null)
+      : profileQuery.is("deleted_at", null);
 
     const { data: profiles, error } = await profileQuery;
     if (error) throw new Error(error.message);
@@ -300,6 +300,24 @@ export const adminArchiveClient = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     await setAuthBan(data.user_id, true);
     await logAudit(context.userId, "client.archived", "user", data.user_id);
+    return { ok: true };
+  });
+
+export const adminRestoreClient = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ user_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await ensureAdmin(context.userId);
+    const { profile } = await getClientContext(data.user_id);
+    if (!profile.deleted_at) return { ok: true };
+
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ status: "blocked", deleted_at: null })
+      .eq("user_id", data.user_id);
+    if (error) throw new Error(error.message);
+    await setAuthBan(data.user_id, true);
+    await logAudit(context.userId, "client.restored", "user", data.user_id, { status: "blocked" });
     return { ok: true };
   });
 

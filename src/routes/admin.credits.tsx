@@ -285,7 +285,7 @@ function PackageDialog({
   );
 }
 
-function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
+function ClientCreditsTab() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -343,15 +343,6 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
     () => (data ?? []).find((client) => client.user_id === selectedId) ?? null,
     [data, selectedId],
   );
-
-  useEffect(() => {
-    if (!focusedClientId || selectedId === focusedClientId) return;
-    const exists = (data ?? []).some((client) => client.user_id === focusedClientId);
-    if (exists) {
-      setSelectedId(focusedClientId);
-      setSearch("");
-    }
-  }, [data, focusedClientId, selectedId]);
 
   const { data: transactions, isLoading: transactionsLoading } = useQuery({
     queryKey: ["admin-client-credit-transactions", selectedId],
@@ -428,11 +419,6 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
           {isLoading && <Skeleton className="h-40" />}
           {!isLoading && filtered.length === 0 && (
             <p className="text-center text-muted-foreground py-10">לא נמצאו לקוחות</p>
-          )}
-          {focusedClientId && !isLoading && !selectedClient && (
-            <p className="rounded-md border p-3 text-sm text-muted-foreground">
-              לא נמצא לקוח תואם לקישור. אפשר לבחור לקוח מהרשימה.
-            </p>
           )}
           {!isLoading && filtered.length > 0 && (
             <div className="divide-y rounded-md border">

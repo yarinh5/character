@@ -10,6 +10,7 @@ import {
   Eye,
   KeyRound,
   MessageCircle,
+  RotateCcw,
   Search,
   User,
   UserRoundPlus,
@@ -52,6 +53,7 @@ import {
   adminArchiveClient,
   adminGetClientDetails,
   adminListClients,
+  adminRestoreClient,
   adminSetClientStatus,
   adminUpdateClient,
 } from "@/lib/admin-clients.functions";
@@ -123,6 +125,7 @@ function ClientsPage() {
   const [editing, setEditing] = useState<ClientRow | null>(null);
   const [creditsClient, setCreditsClient] = useState<ClientRow | null>(null);
   const [archiveClient, setArchiveClient] = useState<ClientRow | null>(null);
+  const [restoreClient, setRestoreClient] = useState<ClientRow | null>(null);
   const [resetClient, setResetClient] = useState<ClientRow | null>(null);
   const [promoteClient, setPromoteClient] = useState<ClientRow | null>(null);
 
@@ -226,7 +229,7 @@ function ClientsPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={client.status === "blocked" ? "inactive" : client.status} />
+                    {client.deleted_at && <StatusBadge status="archived" />}
                     {!client.deleted_at && <ClientActiveToggle client={client} onDone={refresh} />}
                   </div>
                   <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted-foreground min-w-[420px]">
@@ -251,6 +254,11 @@ function ClientsPage() {
                     <Button size="sm" variant="ghost" onClick={() => setArchiveClient(client)} title="ארכוב לקוח" disabled={Boolean(client.deleted_at)}>
                       <Archive className="h-4 w-4 text-destructive" />
                     </Button>
+                    {client.deleted_at && (
+                      <Button size="sm" variant="ghost" onClick={() => setRestoreClient(client)} title="שחזור לקוח">
+                        <RotateCcw className="h-4 w-4 text-primary" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -301,6 +309,16 @@ function ClientsPage() {
           onClose={() => setArchiveClient(null)}
           onDone={() => {
             setArchiveClient(null);
+            refresh();
+          }}
+        />
+      )}
+      {restoreClient && (
+        <RestoreClientConfirm
+          client={restoreClient}
+          onClose={() => setRestoreClient(null)}
+          onDone={() => {
+            setRestoreClient(null);
             refresh();
           }}
         />
@@ -771,6 +789,43 @@ function ArchiveClientConfirm({ client, onClose, onDone }: { client: ClientRow; 
           <AlertDialogCancel>ביטול</AlertDialogCancel>
           <AlertDialogAction onClick={submit} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
             {busy ? "מאורכב..." : "ארכב לקוח"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function RestoreClientConfirm({ client, onClose, onDone }: { client: ClientRow; onClose: () => void; onDone: () => void }) {
+  const restore = useServerFn(adminRestoreClient);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await restore({ data: { user_id: client.user_id } });
+      toast.success("הלקוח שוחזר לרשימה הרגילה כלא פעיל");
+      onDone();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent dir="rtl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>שחזור לקוח</AlertDialogTitle>
+          <AlertDialogDescription>
+            הלקוח יחזור לרשימת הלקוחות הרגילה במצב לא פעיל. ההיסטוריה, השיחות, ההודעות, הקרדיטים והדוחות יישמרו ללא שינוי.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={submit} disabled={busy}>
+            {busy ? "משחזר..." : "שחזר לקוח"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

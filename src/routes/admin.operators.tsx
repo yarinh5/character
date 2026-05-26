@@ -163,53 +163,63 @@ function OperatorsPage() {
             </p>
           )}
           {!isLoading && !error && data && data.length > 0 && (
-            <div className="space-y-3 p-3">
+            <div className="divide-y">
               {data.map((operator) => (
                 <div
                   key={operator.id}
-                  className="grid gap-4 rounded-lg border bg-background p-4 shadow-sm lg:grid-cols-[minmax(260px,1fr)_minmax(240px,auto)_auto] lg:items-center"
+                  className="grid grid-cols-[40px_92px_210px_120px_170px_170px_210px] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
                 >
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <div className="font-medium truncate">{operator.full_name}</div>
-                      {operator.role === "admin" && (
-                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                          מנהל שפועל גם כעובד
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 break-all text-xs text-muted-foreground" dir="ltr">
-                      {operator.email ?? "-"}
+                  <div className="h-10 w-10 rounded-full bg-muted overflow-hidden justify-self-start">
+                    <div className="h-full w-full flex items-center justify-center text-sm font-medium">
+                      {(operator.full_name ?? operator.email ?? "?")[0]?.toUpperCase()}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 p-2 lg:justify-end">
-                    <StatusBadge status={operator.availability_status} />
+                  <div className="min-w-0 justify-self-stretch">
+                    <div className="font-medium truncate">{operator.full_name}</div>
+                  </div>
+
+                  <div className="min-w-0 justify-self-stretch truncate text-left text-xs text-muted-foreground" dir="ltr">
+                    {operator.email ?? "-"}
+                  </div>
+
+                  <div className="min-w-0 justify-self-stretch">
+                    {operator.role === "admin" && (
+                      <span className="inline-flex w-fit text-xs px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary">
+                        מנהל שפועל גם כעובד
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="inline-flex items-center gap-2 whitespace-nowrap max-xl:col-start-2 max-xl:row-start-2 max-md:col-span-2 max-md:col-start-1">
                     {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
-                    <span className="whitespace-nowrap text-xs text-muted-foreground">{operator.chars} דמויות</span>
-                    <span className="whitespace-nowrap text-xs text-muted-foreground">{operator.active} שיחות פעילות</span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 md:justify-end">
-                    <Button size="icon" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
+                  <div className="inline-flex items-center gap-4 whitespace-nowrap text-xs text-muted-foreground max-xl:col-start-2 max-xl:row-start-3 max-md:col-span-2 max-md:col-start-1">
+                    <span className="whitespace-nowrap">{operator.chars} דמויות</span>
+                    <span className="whitespace-nowrap">{operator.active} שיחות פעילות</span>
+                  </div>
+
+                  <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap max-xl:row-span-3 max-md:col-span-2 max-md:justify-start">
+                    <Button size="sm" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
                       <BarChart3 className="h-4 w-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
+                    <Button size="sm" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
                       <LinkIcon className="h-4 w-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד">
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד">
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה">
+                    <Button size="sm" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה">
                       <RotateCcw className="h-4 w-4" />
                     </Button>
                     {operator.deleted_at && (
-                      <Button size="icon" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד">
+                      <Button size="sm" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד">
                         <Undo2 className="h-4 w-4" />
                       </Button>
                     )}
                     <Button
-                      size="icon"
+                      size="sm"
                       variant="ghost"
                       onClick={() => setArchiveOp(operator)}
                       disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
@@ -219,7 +229,7 @@ function OperatorsPage() {
                     </Button>
                     {operator.role !== "admin" && !operator.deleted_at && (
                       <Button
-                        size="icon"
+                        size="sm"
                         variant="ghost"
                         onClick={() => setConvertOp(operator)}
                         title="הפוך ללקוח"
