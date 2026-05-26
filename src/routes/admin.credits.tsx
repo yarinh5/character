@@ -23,6 +23,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/admin/credits")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    clientId: typeof search.clientId === "string" ? search.clientId : undefined,
+  }),
   component: AdminCreditsPage,
 });
 
@@ -66,6 +69,13 @@ const CREDIT_SETTINGS = [
 ] as const;
 
 function AdminCreditsPage() {
+  const { clientId } = Route.useSearch();
+  const [activeTab, setActiveTab] = useState(clientId ? "clients" : "packages");
+
+  useEffect(() => {
+    if (clientId) setActiveTab("clients");
+  }, [clientId]);
+
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8">
       <PageHeader
@@ -73,7 +83,7 @@ function AdminCreditsPage() {
         description="ניהול חבילות, יתרות לקוחות והגדרות הקרדיטים והניקוד"
       />
 
-      <Tabs defaultValue="packages" dir="rtl">
+      <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl">
         <TabsList className="mb-4">
           <TabsTrigger value="packages">חבילות</TabsTrigger>
           <TabsTrigger value="clients">יתרות לקוחות</TabsTrigger>
@@ -83,7 +93,7 @@ function AdminCreditsPage() {
           <PackagesTab />
         </TabsContent>
         <TabsContent value="clients">
-          <ClientCreditsTab />
+          <ClientCreditsTab focusedClientId={clientId} />
         </TabsContent>
         <TabsContent value="settings">
           <CreditSettingsTab />
@@ -275,7 +285,7 @@ function PackageDialog({
   );
 }
 
-function ClientCreditsTab() {
+function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -333,6 +343,15 @@ function ClientCreditsTab() {
     () => (data ?? []).find((client) => client.user_id === selectedId) ?? null,
     [data, selectedId],
   );
+
+  useEffect(() => {
+    if (!focusedClientId || selectedId === focusedClientId) return;
+    const exists = (data ?? []).some((client) => client.user_id === focusedClientId);
+    if (exists) {
+      setSelectedId(focusedClientId);
+      setSearch("");
+    }
+  }, [data, focusedClientId, selectedId]);
 
   const { data: transactions, isLoading: transactionsLoading } = useQuery({
     queryKey: ["admin-client-credit-transactions", selectedId],
@@ -409,6 +428,11 @@ function ClientCreditsTab() {
           {isLoading && <Skeleton className="h-40" />}
           {!isLoading && filtered.length === 0 && (
             <p className="text-center text-muted-foreground py-10">לא נמצאו לקוחות</p>
+          )}
+          {focusedClientId && !isLoading && !selectedClient && (
+            <p className="rounded-md border p-3 text-sm text-muted-foreground">
+              לא נמצא לקוח תואם לקישור. אפשר לבחור לקוח מהרשימה.
+            </p>
           )}
           {!isLoading && filtered.length > 0 && (
             <div className="divide-y rounded-md border">

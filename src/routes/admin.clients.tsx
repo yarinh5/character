@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
@@ -114,6 +114,7 @@ type ClientDetails = {
 
 function ClientsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const listClients = useServerFn(adminListClients);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "inactive" | "today">("all");
@@ -263,7 +264,10 @@ function ClientsPage() {
           client={selected}
           onClose={() => setSelected(null)}
           onEdit={(client) => setEditing(client)}
-          onCredits={(client) => setCreditsClient(client)}
+          onCredits={(client) => {
+            setSelected(null);
+            navigate({ to: "/admin/credits", search: { clientId: client.user_id } });
+          }}
           onReset={(client) => setResetClient(client)}
           onArchive={(client) => setArchiveClient(client)}
           onPromote={(client) => setPromoteClient(client)}
