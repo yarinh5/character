@@ -10,6 +10,7 @@ import {
   Mail,
   Plus,
   RotateCcw,
+  Undo2,
   UserPlus,
   UserRoundPlus,
   UserX,
@@ -59,6 +60,7 @@ import {
   adminArchiveOperator,
   adminListOperators,
   adminPromoteClientToOperator,
+  adminRestoreOperator,
   adminUpdateOperator,
 } from "@/lib/admin-operators.functions";
 
@@ -98,13 +100,14 @@ function OperatorsPage() {
   const [performanceOp, setPerformanceOp] = useState<Operator | null>(null);
   const [resetOp, setResetOp] = useState<Operator | null>(null);
   const [archiveOp, setArchiveOp] = useState<Operator | null>(null);
+  const [restoreOp, setRestoreOp] = useState<Operator | null>(null);
   const [convertOp, setConvertOp] = useState<Operator | null>(null);
   const [createdInvite, setCreatedInvite] = useState<{ token: string; email: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin-operators", showArchived],
-    queryFn: async () => (await listOperators({ data: { include_archived: showArchived } })) as Operator[],
+    queryFn: async () => (await listOperators({ data: { show_archived_only: showArchived } })) as Operator[],
   });
 
   const refresh = () => {
@@ -137,10 +140,12 @@ function OperatorsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
             <div>
               <div className="text-sm font-medium">טבלת עובדים</div>
-              <div className="text-xs text-muted-foreground">עובדים שנמחקו/אורכבו מוסתרים כברירת מחדל.</div>
+              <div className="text-xs text-muted-foreground">
+                במצב רגיל מוצגים עובדים פעילים/לא פעילים בלבד. במצב ארכיון מוצגים רק עובדים שנמחקו.
+              </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <span>הצג עובדים שנמחקו</span>
+              <span>הצג עובדים שנמחקו בלבד</span>
               <Switch checked={showArchived} onCheckedChange={setShowArchived} />
             </label>
           </div>
@@ -153,58 +158,68 @@ function OperatorsPage() {
             <p className="text-center text-destructive py-12">טעינת רשימת העובדים נכשלה.</p>
           )}
           {!isLoading && !error && (data?.length ?? 0) === 0 && (
-            <p className="text-center text-muted-foreground py-12">אין עובדים עדיין</p>
+            <p className="text-center text-muted-foreground py-12">
+              {showArchived ? "אין עובדים שנמחקו" : "אין עובדים עדיין"}
+            </p>
           )}
           {!isLoading && !error && data && data.length > 0 && (
-            <div className="divide-y">
+            <div className="space-y-3 p-3">
               {data.map((operator) => (
-                <div key={operator.id} className="flex flex-wrap items-center gap-3 p-4">
-                  <div className="flex-1 min-w-[220px]">
-                    <div className="font-medium">{operator.full_name}</div>
-                    <div className="text-xs text-muted-foreground" dir="ltr">
+                <div
+                  key={operator.id}
+                  className="grid gap-4 rounded-lg border bg-background p-4 shadow-sm lg:grid-cols-[minmax(260px,1fr)_minmax(240px,auto)_auto] lg:items-center"
+                >
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <div className="font-medium truncate">{operator.full_name}</div>
+                      {operator.role === "admin" && (
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                          מנהל שפועל גם כעובד
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 break-all text-xs text-muted-foreground" dir="ltr">
                       {operator.email ?? "-"}
                     </div>
-                    {operator.role === "admin" && (
-                      <div className="mt-1 text-xs text-primary">מנהל שפועל גם כעובד</div>
-                    )}
                   </div>
-                  <div className="flex flex-wrap gap-2 items-center">
+
+                  <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 p-2 lg:justify-end">
                     <StatusBadge status={operator.availability_status} />
-                    {operator.deleted_at ? (
-                      <StatusBadge status="archived" />
-                    ) : (
-                      <OperatorActiveToggle operator={operator} onDone={refresh} />
-                    )}
+                    {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">{operator.chars} דמויות</span>
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">{operator.active} שיחות פעילות</span>
                   </div>
-                  <div className="hidden md:flex gap-4 text-xs text-muted-foreground">
-                    <span>{operator.chars} דמויות</span>
-                    <span>{operator.active} שיחות פעילות</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
+
+                  <div className="flex flex-wrap gap-2 md:justify-end">
+                    <Button size="icon" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
                       <BarChart3 className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
+                    <Button size="icon" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
                       <LinkIcon className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד">
+                    <Button size="icon" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד">
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה">
+                    <Button size="icon" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה">
                       <RotateCcw className="h-4 w-4" />
                     </Button>
+                    {operator.deleted_at && (
+                      <Button size="icon" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד">
+                        <Undo2 className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button
-                      size="sm"
+                      size="icon"
                       variant="ghost"
                       onClick={() => setArchiveOp(operator)}
                       disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
-                      title="השבתת עובד"
+                      title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
                     >
                       <UserX className="h-4 w-4" />
                     </Button>
                     {operator.role !== "admin" && !operator.deleted_at && (
                       <Button
-                        size="sm"
+                        size="icon"
                         variant="ghost"
                         onClick={() => setConvertOp(operator)}
                         title="הפוך ללקוח"
@@ -286,6 +301,16 @@ function OperatorsPage() {
           }}
         />
       )}
+      {restoreOp && (
+        <RestoreOperatorConfirm
+          operator={restoreOp}
+          onClose={() => setRestoreOp(null)}
+          onDone={() => {
+            setRestoreOp(null);
+            refresh();
+          }}
+        />
+      )}
       {convertOp && (
         <ConvertOperatorConfirm
           operator={convertOp}
@@ -357,10 +382,10 @@ function OperatorActiveToggle({ operator, onDone }: { operator: Operator; onDone
 
   return (
     <label
-      className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs"
+      className="inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-xs"
       title={isProtectedAdmin ? "לא ניתן להשבית מנהל" : undefined}
     >
-      <span>{operator.is_active ? "פעיל" : "לא פעיל"}</span>
+      <span className="min-w-12 whitespace-nowrap text-center">{operator.is_active ? "פעיל" : "לא פעיל"}</span>
       <Switch checked={operator.is_active} onCheckedChange={toggle} disabled={busy || isProtectedAdmin} />
     </label>
   );
@@ -807,7 +832,7 @@ function AssignCharactersDialog({
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
           <DialogTitle>שיוך דמויות - {operator.full_name}</DialogTitle>
-          <DialogDescription>השיוך הזה הוא מקור האמת ל־Shared Inbox.</DialogDescription>
+          <DialogDescription>השיוך הזה הוא מקור האמת ל-Shared Inbox.</DialogDescription>
         </DialogHeader>
         {isLoading && <Skeleton className="h-40" />}
         {!isLoading && data && <CharacterChecklist chars={data.chars} selected={current} onToggle={toggle} />}
@@ -893,13 +918,61 @@ function ArchiveOperatorConfirm({
         <AlertDialogHeader>
           <AlertDialogTitle>השבתת עובד</AlertDialogTitle>
           <AlertDialogDescription>
-            העובד {operator.full_name} יישאר בהיסטוריה, הודעות, ניקוד והערות, אבל לא יוכל לפעול כעובד פעיל.
+            העובד {operator.full_name} יישאר בהיסטוריה, בהודעות, בניקוד ובהערות, אבל לא יוכל לפעול כעובד פעיל.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>ביטול</AlertDialogCancel>
           <AlertDialogAction onClick={submit} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
             {busy ? "משבית..." : "השבת עובד"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function RestoreOperatorConfirm({
+  operator,
+  onClose,
+  onDone,
+}: {
+  operator: Operator;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const restore = useServerFn(adminRestoreOperator);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await restore({
+        data: { operator_id: operator.id },
+      });
+      toast.success("העובד שוחזר כלא פעיל");
+      onDone();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent dir="rtl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>שחזור עובד</AlertDialogTitle>
+          <AlertDialogDescription>
+            העובד {operator.full_name} יחזור לרשימת העובדים הרגילה, אך יישאר לא פעיל עד שתפעיל אותו ידנית.
+            כל ההיסטוריה, ההודעות, הניקוד וההערות נשמרים ללא שינוי.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={submit} disabled={busy}>
+            {busy ? "משחזר..." : "שחזר עובד"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

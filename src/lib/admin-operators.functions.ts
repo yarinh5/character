@@ -78,7 +78,7 @@ export const adminListOperators = createServerFn({ method: "GET" })
   .inputValidator((d) =>
     z
       .object({
-        include_archived: z.boolean().default(false),
+        show_archived_only: z.boolean().default(false),
       })
       .parse(d ?? {}),
   )
@@ -90,7 +90,9 @@ export const adminListOperators = createServerFn({ method: "GET" })
       .select("id, user_id, full_name, is_active, availability_status, created_at, deleted_at")
       .order("created_at", { ascending: false });
 
-    if (!data.include_archived) {
+    if (data.show_archived_only) {
+      query = query.not("deleted_at", "is", null);
+    } else {
       query = query.is("deleted_at", null);
     }
 
@@ -368,6 +370,32 @@ export const adminArchiveOperator = createServerFn({ method: "POST" })
 
     await logAudit(context.userId, "operator.archived", "operator", operator.id, {
       user_id: operator.user_id,
+    });
+
+    return { ok: true };
+  });
+
+export const adminRestoreOperator = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ operator_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await ensureAdmin(context.userId);
+
+    const { operator } = await getOperatorAdminContext(data.operator_id);
+
+    const { error } = await supabaseAdmin
+      .from("operators")
+      .update({
+        deleted_at: null,
+        is_active: false,
+        availability_status: "offline",
+      })
+      .eq("id", operator.id);
+    if (error) throw new Error(error.message);
+
+    await logAudit(context.userId, "operator.restored", "operator", operator.id, {
+      user_id: operator.user_id,
+      restored_as_active: false,
     });
 
     return { ok: true };
