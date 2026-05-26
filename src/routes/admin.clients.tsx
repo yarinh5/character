@@ -4,14 +4,17 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  Activity,
   Archive,
   Coins,
   Edit,
   Eye,
+  Flag,
   KeyRound,
   MessageCircle,
   RotateCcw,
   Search,
+  ShieldCheck,
   User,
   UserRoundPlus,
 } from "lucide-react";
@@ -107,6 +110,14 @@ type ClientDetails = {
     type: string;
     reason: string | null;
     created_at: string;
+  }>;
+  timeline: Array<{
+    id: string;
+    type: "signup" | "chat" | "credit" | "admin" | "report" | "analytics";
+    title: string;
+    description: string | null;
+    created_at: string;
+    conversation_id?: string | null;
   }>;
   activity: {
     conversations_count: number;
@@ -467,6 +478,8 @@ function ClientDetailsDialog({
               <Info label="שיחות" value={data.activity.conversations_count} />
               <Info label="הודעות לקוח" value={data.activity.client_messages_count} />
             </div>
+
+            <ActivityTimeline events={data.timeline ?? []} />
 
             {data.client_profile?.interests && data.client_profile.interests.length > 0 && (
               <div>
@@ -880,6 +893,66 @@ function PromoteClientConfirm({ client, onClose, onDone }: { client: ClientRow; 
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function ActivityTimeline({ events }: { events: ClientDetails["timeline"] }) {
+  const iconMap = {
+    signup: UserRoundPlus,
+    chat: MessageCircle,
+    credit: Coins,
+    admin: ShieldCheck,
+    report: Flag,
+    analytics: Activity,
+  };
+
+  return (
+    <section className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Timeline / Activity Feed</div>
+          <p className="text-xs text-muted-foreground">פעילות מרכזית של הלקוח לפי תאריך יורד</p>
+        </div>
+        <Activity className="h-4 w-4 text-muted-foreground" />
+      </div>
+
+      {events.length === 0 ? (
+        <div className="rounded-md bg-muted/40 p-4 text-sm text-muted-foreground">
+          אין עדיין פעילות להצגה עבור הלקוח הזה.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {events.map((event) => {
+            const Icon = iconMap[event.type] ?? Activity;
+            return (
+              <div key={event.id} className="relative flex gap-3 rounded-md border bg-card p-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="font-medium text-sm">{event.title}</div>
+                    <time className="text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(event.created_at).toLocaleString("he-IL")}
+                    </time>
+                  </div>
+                  {event.description && (
+                    <p className="mt-1 text-xs text-muted-foreground break-words">{event.description}</p>
+                  )}
+                  {event.conversation_id && (
+                    <Button asChild variant="link" size="sm" className="mt-1 h-auto p-0 text-xs">
+                      <Link to="/admin/conversations/$conversationId" params={{ conversationId: event.conversation_id }}>
+                        פתח שיחה קשורה
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

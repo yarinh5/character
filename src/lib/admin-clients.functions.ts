@@ -6,6 +6,27 @@ import { logAudit } from "@/lib/audit.server";
 
 type AppRole = "admin" | "operator" | "client";
 
+type ClientTimelineEvent = {
+  id: string;
+  type: "signup" | "chat" | "credit" | "admin" | "report" | "analytics";
+  title: string;
+  description: string | null;
+  created_at: string;
+  conversation_id?: string | null;
+};
+
+function previewText(value: unknown, max = 90) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function metadataValue(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : null;
+}
+
 async function ensureAdmin(userId: string) {
   const { data, error } = await supabaseAdmin
     .from("user_roles")
@@ -175,7 +196,7 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
         .limit(12),
       supabaseAdmin
         .from("credit_transactions")
-        .select("id, amount, balance_after, type, reason, created_at")
+        .select("id, amount, balance_after, type, reason, created_at, created_by")
         .eq("user_id", data.user_id)
         .order("created_at", { ascending: false })
         .limit(20),
@@ -193,12 +214,209 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
     if (transactions.error) throw new Error(transactions.error.message);
     if (messageCounts.error) throw new Error(messageCounts.error.message);
 
+    const conversationRows = conversations.data ?? [];
+    const conversationIds = conversationRows.map((conversation) => conversation.id);
+    const conversationMap = new Map(conversationRows.map((conversation: any) => [conversation.id, conversation]));
+
+    const [messages, deletedConversations, reports, auditLogs, analyticsEvents] = await Promise.all([
+      conversationIds.length
+        ? supabaseAdmin
+            .from("messages")
+            .select("id, conversation_id, sender_type, content, created_at, operator_id, operators(full_name)")
+            .in("conversation_id", conversationIds)
+            .order("created_at", { ascending: false })
+            .limit(60)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      conversationIds.length
+        ? supabaseAdmin
+            .from("client_conversation_deletions")
+            .select("conversation_id, deleted_at")
+            .eq("client_id", data.user_id)
+            .in("conversation_id", conversationIds)
+            .order("deleted_at", { ascending: false })
+            .limit(20)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      supabaseAdmin
+        .from("reports")
+        .select("id, conversation_id, reason, status, details, created_at")
+        .eq("reporter_id", data.user_id)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabaseAdmin
+        .from("audit_logs")
+        .select("id, action, actor_user_id, metadata, created_at")
+        .eq("entity_type", "user")
+        .eq("entity_id", data.user_id)
+        .order("created_at", { ascending: false })
+        .limit(40),
+      (supabaseAdmin as any)
+        .from("analytics_events")
+        .select("id, event_name, metadata, conversation_id, character_id, created_at")
+        .eq("actor_user_id", data.user_id)
+        .in("event_name", [
+          "signup_completed",
+          "onboarding_completed",
+          "character_viewed",
+          "conversation_started",
+          "first_message_sent",
+          "insufficient_credits_shown",
+          "packages_viewed",
+          "low_credits_reached",
+          "report_created",
+        ])
+        .order("created_at", { ascending: false })
+        .limit(40),
+    ]);
+
+    const actorIds = [
+      ...(transactions.data ?? []).map((transaction) => transaction.created_by).filter(Boolean),
+      ...(auditLogs.data ?? []).map((log) => log.actor_user_id).filter(Boolean),
+    ] as string[];
+    const { data: actorProfiles } = actorIds.length
+      ? await supabaseAdmin.from("profiles").select("user_id, display_name, email").in("user_id", [...new Set(actorIds)])
+      : { data: [] as { user_id: string; display_name: string | null; email: string | null }[] };
+    const actorMap = new Map(
+      (actorProfiles ?? []).map((actor) => [actor.user_id, actor.display_name || actor.email || actor.user_id.slice(0, 8)]),
+    );
+
+    const timeline: ClientTimelineEvent[] = [];
+
+    if (profile.data?.created_at) {
+      timeline.push({
+        id: `signup-${profile.data.user_id}`,
+        type: "signup",
+        title: "הרשמה / יצירת משתמש",
+        description: profile.data.email ?? profile.data.display_name ?? null,
+        created_at: profile.data.created_at,
+      });
+    }
+
+    conversationRows.forEach((conversation: any) => {
+      timeline.push({
+        id: `conversation-${conversation.id}`,
+        type: "chat",
+        title: "שיחה נפתחה",
+        description: conversation.characters?.name ? `דמות: ${conversation.characters.name}` : null,
+        created_at: conversation.created_at,
+        conversation_id: conversation.id,
+      });
+    });
+
+    (messages.data ?? []).forEach((message: any) => {
+      const conversation = conversationMap.get(message.conversation_id) as any;
+      const characterName = conversation?.characters?.name ? ` · ${conversation.characters.name}` : "";
+      const content = previewText(message.content);
+      timeline.push({
+        id: `message-${message.id}`,
+        type: "chat",
+        title: message.sender_type === "client" ? "הודעת לקוח נשלחה" : "הודעת עובד נשלחה ללקוח",
+        description:
+          message.sender_type === "client"
+            ? [content, characterName.trim()].filter(Boolean).join(" · ") || null
+            : [`${message.operators?.full_name ?? "עובד"}`, content, characterName.trim()].filter(Boolean).join(" · "),
+        created_at: message.created_at,
+        conversation_id: message.conversation_id,
+      });
+    });
+
+    (deletedConversations.data ?? []).forEach((deletion: any) => {
+      const conversation = conversationMap.get(deletion.conversation_id) as any;
+      timeline.push({
+        id: `client-delete-${deletion.conversation_id}-${deletion.deleted_at}`,
+        type: "chat",
+        title: "שיחה הוסתרה מצד הלקוח",
+        description: conversation?.characters?.name ? `דמות: ${conversation.characters.name}` : null,
+        created_at: deletion.deleted_at,
+        conversation_id: deletion.conversation_id,
+      });
+    });
+
+    (transactions.data ?? []).forEach((transaction) => {
+      const actor = transaction.created_by ? actorMap.get(transaction.created_by) : null;
+      timeline.push({
+        id: `credit-${transaction.id}`,
+        type: "credit",
+        title: transaction.amount >= 0 ? "קרדיטים נוספו" : "קרדיטים ירדו",
+        description: [
+          `${transaction.amount > 0 ? "+" : ""}${transaction.amount} קרדיטים`,
+          `יתרה: ${transaction.balance_after}`,
+          transaction.reason ?? transaction.type,
+          actor ? `בוצע על ידי: ${actor}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        created_at: transaction.created_at,
+      });
+    });
+
+    (auditLogs.data ?? []).forEach((log) => {
+      const actor = log.actor_user_id ? actorMap.get(log.actor_user_id) : null;
+      const status = metadataValue(log.metadata, "status") ?? metadataValue(log.metadata, "role");
+      const labels: Record<string, string> = {
+        "user.password_reset_sent": "איפוס סיסמה נשלח",
+        "user.password_reset": "איפוס סיסמה נשלח",
+        "client.status_changed": "סטטוס לקוח השתנה",
+        "user.status_changed": "סטטוס משתמש השתנה",
+        "client.archived": "לקוח אורכב",
+        "client.restored": "לקוח שוחזר",
+        "client.updated": "פרטי לקוח עודכנו",
+        "client.credits_adjusted": "קרדיטים עודכנו ידנית",
+        "user.promoted_to_operator": "לקוח הפך לעובד",
+        "user.role_changed": "תפקיד משתמש השתנה",
+        "user.soft_deleted": "משתמש אורכב",
+      };
+      timeline.push({
+        id: `audit-${log.id}`,
+        type: "admin",
+        title: labels[log.action] ?? log.action,
+        description: [status ? `ערך: ${status}` : null, actor ? `בוצע על ידי: ${actor}` : null].filter(Boolean).join(" · ") || null,
+        created_at: log.created_at,
+      });
+    });
+
+    (reports.data ?? []).forEach((report: any) => {
+      timeline.push({
+        id: `report-${report.id}`,
+        type: "report",
+        title: "דיווח נוצר",
+        description: [`סיבה: ${report.reason}`, `סטטוס: ${report.status}`, previewText(report.details)].filter(Boolean).join(" · "),
+        created_at: report.created_at,
+        conversation_id: report.conversation_id,
+      });
+    });
+
+    const analyticsLabels: Record<string, string> = {
+      signup_completed: "הרשמה הושלמה",
+      onboarding_completed: "אונבורדינג הושלם",
+      character_viewed: "צפייה בדמות",
+      conversation_started: "שיחה התחילה",
+      first_message_sent: "הודעה ראשונה נשלחה",
+      insufficient_credits_shown: "הוצגה הודעת חוסר קרדיטים",
+      packages_viewed: "צפייה במסך חבילות",
+      low_credits_reached: "יתרת קרדיטים נמוכה",
+      report_created: "דיווח נוצר",
+    };
+    ((analyticsEvents as any).data ?? []).forEach((event: any) => {
+      timeline.push({
+        id: `analytics-${event.id}`,
+        type: "analytics",
+        title: analyticsLabels[event.event_name] ?? event.event_name,
+        description: metadataValue(event.metadata, "source"),
+        created_at: event.created_at,
+        conversation_id: event.conversation_id,
+      });
+    });
+
     return {
       profile: profile.data,
       client_profile: clientProfile.data,
       wallet: wallet.data ?? { balance: 0, lifetime_earned: 0, lifetime_spent: 0, updated_at: null },
       conversations: conversations.data ?? [],
       transactions: transactions.data ?? [],
+      timeline: timeline
+        .filter((event) => Boolean(event.created_at))
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 80),
       activity: {
         conversations_count: conversations.count ?? (conversations.data ?? []).length,
         client_messages_count: (messageCounts.data ?? []).filter((message) => message.sender_type === "client").length,
