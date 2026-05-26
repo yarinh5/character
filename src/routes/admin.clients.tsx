@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Search,
   User,
+  UserRoundPlus,
 } from "lucide-react";
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,6 +55,7 @@ import {
   adminSetClientStatus,
   adminUpdateClient,
 } from "@/lib/admin-clients.functions";
+import { adminPromoteClientToOperator } from "@/lib/admin-operators.functions";
 import { adminSendPasswordReset } from "@/lib/impersonation.functions";
 
 export const Route = createFileRoute("/admin/clients")({
@@ -121,6 +123,7 @@ function ClientsPage() {
   const [creditsClient, setCreditsClient] = useState<ClientRow | null>(null);
   const [archiveClient, setArchiveClient] = useState<ClientRow | null>(null);
   const [resetClient, setResetClient] = useState<ClientRow | null>(null);
+  const [promoteClient, setPromoteClient] = useState<ClientRow | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["admin-clients", showArchived],
@@ -255,7 +258,18 @@ function ClientsPage() {
         </CardContent>
       </Card>
 
-      {selected && <ClientDetailsDialog client={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <ClientDetailsDialog
+          client={selected}
+          onClose={() => setSelected(null)}
+          onEdit={(client) => setEditing(client)}
+          onCredits={(client) => setCreditsClient(client)}
+          onReset={(client) => setResetClient(client)}
+          onArchive={(client) => setArchiveClient(client)}
+          onPromote={(client) => setPromoteClient(client)}
+          onDone={refresh}
+        />
+      )}
       {editing && (
         <EditClientDialog
           client={editing}
@@ -283,6 +297,17 @@ function ClientsPage() {
           onClose={() => setArchiveClient(null)}
           onDone={() => {
             setArchiveClient(null);
+            refresh();
+          }}
+        />
+      )}
+      {promoteClient && (
+        <PromoteClientConfirm
+          client={promoteClient}
+          onClose={() => setPromoteClient(null)}
+          onDone={() => {
+            setPromoteClient(null);
+            setSelected(null);
             refresh();
           }}
         />
@@ -317,14 +342,61 @@ function ClientActiveToggle({ client, onDone }: { client: ClientRow; onDone: () 
   );
 }
 
-function ClientDetailsDialog({ client, onClose }: { client: ClientRow; onClose: () => void }) {
+function ClientDetailsDialog({
+  client,
+  onClose,
+  onEdit,
+  onCredits,
+  onReset,
+  onArchive,
+  onPromote,
+  onDone,
+}: {
+  client: ClientRow;
+  onClose: () => void;
+  onEdit: (client: ClientRow) => void;
+  onCredits: (client: ClientRow) => void;
+  onReset: (client: ClientRow) => void;
+  onArchive: (client: ClientRow) => void;
+  onPromote: (client: ClientRow) => void;
+  onDone: () => void;
+}) {
+  const qc = useQueryClient();
   const getDetails = useServerFn(adminGetClientDetails);
+  const setStatus = useServerFn(adminSetClientStatus);
+  const [statusAction, setStatusAction] = useState<"block" | "activate" | null>(null);
+  const [busyStatus, setBusyStatus] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["admin-client-details", client.user_id],
     queryFn: async () => (await getDetails({ data: { user_id: client.user_id } })) as ClientDetails,
   });
+  const detailClient = data?.profile ?? client;
+  const isArchived = Boolean(detailClient.deleted_at);
+  const isBlocked = detailClient.status === "blocked";
+
+  const submitStatusAction = async () => {
+    if (!statusAction) return;
+    setBusyStatus(true);
+    try {
+      await setStatus({
+        data: {
+          user_id: client.user_id,
+          is_active: statusAction === "activate",
+        },
+      });
+      toast.success(statusAction === "activate" ? "הלקוח הוחזר לפעילות" : "הלקוח נחסם");
+      setStatusAction(null);
+      qc.invalidateQueries({ queryKey: ["admin-client-details", client.user_id] });
+      onDone();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusyStatus(false);
+    }
+  };
 
   return (
+    <>
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
@@ -336,6 +408,33 @@ function ClientDetailsDialog({ client, onClose }: { client: ClientRow; onClose: 
         {isError && <p className="text-center text-destructive py-8">{(error as Error)?.message ?? "טעינת פרטי לקוח נכשלה"}</p>}
         {!isLoading && data && (
           <div className="space-y-5">
+            <section className="rounded-lg border bg-muted/30 p-4">
+              <div className="mb-3 text-sm font-medium">פעולות מהירות</div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <Button variant="outline" onClick={() => onEdit(detailClient)} disabled={isArchived}>
+                  <Edit className="h-4 w-4 ml-1" /> עריכת לקוח
+                </Button>
+                <Button variant="outline" onClick={() => onReset(detailClient)} disabled={isArchived}>
+                  <KeyRound className="h-4 w-4 ml-1" /> שלח איפוס סיסמה
+                </Button>
+                <Button variant="outline" onClick={() => onCredits(detailClient)} disabled={isArchived}>
+                  <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setStatusAction(isBlocked ? "activate" : "block")}
+                  disabled={isArchived}
+                >
+                  {isBlocked ? "החזר לפעילות" : "חסום לקוח"}
+                </Button>
+                <Button variant="outline" onClick={() => onPromote(detailClient)} disabled={isArchived}>
+                  <UserRoundPlus className="h-4 w-4 ml-1" /> הפוך לעובד
+                </Button>
+                <Button variant="destructive" onClick={() => onArchive(detailClient)} disabled={isArchived}>
+                  <Archive className="h-4 w-4 ml-1" /> מחיקת לקוח
+                </Button>
+              </div>
+            </section>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Info label="אימייל" value={data.profile?.email ?? "-"} dir="ltr" />
               <Info label="סטטוס" value={<StatusBadge status={data.profile?.deleted_at ? "archived" : data.profile?.status === "blocked" ? "inactive" : data.profile?.status ?? "active"} />} />
@@ -409,6 +508,29 @@ function ClientDetailsDialog({ client, onClose }: { client: ClientRow; onClose: 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={Boolean(statusAction)} onOpenChange={(open) => !open && setStatusAction(null)}>
+      <AlertDialogContent dir="rtl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{statusAction === "activate" ? "החזרת לקוח לפעילות" : "חסימת לקוח"}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {statusAction === "activate"
+              ? "הלקוח יוכל להתחבר, לפתוח שיחות ולשלוח הודעות שוב."
+              : "הלקוח לא יוכל להתחבר, לפתוח שיחות או לשלוח הודעות. ההיסטוריה שלו תישמר ללא שינוי."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={submitStatusAction}
+            disabled={busyStatus}
+            className={statusAction === "block" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+          >
+            {busyStatus ? "שומר..." : statusAction === "activate" ? "החזר לפעילות" : "חסום לקוח"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
@@ -645,6 +767,56 @@ function ArchiveClientConfirm({ client, onClose, onDone }: { client: ClientRow; 
           <AlertDialogCancel>ביטול</AlertDialogCancel>
           <AlertDialogAction onClick={submit} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
             {busy ? "מאורכב..." : "ארכב לקוח"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function PromoteClientConfirm({ client, onClose, onDone }: { client: ClientRow; onClose: () => void; onDone: () => void }) {
+  const promote = useServerFn(adminPromoteClientToOperator);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!client.email) {
+      toast.error("לא ניתן להפוך לקוח בלי אימייל לעובד");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await promote({
+        data: {
+          email: client.email,
+          full_name: client.display_name?.trim() || client.email,
+          is_active: true,
+          character_ids: [],
+        },
+      });
+      toast.success("הלקוח הועבר לתפקיד עובד");
+      onDone();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent dir="rtl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>הפיכת לקוח לעובד</AlertDialogTitle>
+          <AlertDialogDescription>
+            הפעולה תסיר את הלקוח מרשימת הלקוחות הרגילה, תיצור או תפעיל רשומת עובד, ותעדכן את התפקיד בצורה עקבית.
+            ההיסטוריה, השיחות, הקרדיטים והדיווחים יישמרו ללא מחיקה.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogAction onClick={submit} disabled={busy}>
+            {busy ? "מעביר..." : "הפוך לעובד"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
