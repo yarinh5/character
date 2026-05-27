@@ -6,6 +6,7 @@ import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
 import { fetchReadSummary, type ReadSummary } from "@/lib/readStates";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
+import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -64,6 +65,8 @@ function ChatPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [clientAvatarUrl, setClientAvatarUrl] = useState<string | null>(null);
+  const [clientDisplayName, setClientDisplayName] = useState<string | null>(null);
   const [readSummary, setReadSummary] = useState<ReadSummary | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useActiveConversation(conversationId, "client");
@@ -79,7 +82,7 @@ function ChatPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [{ data: c, error: ce }, { data: m, error: me }, { data: deletion }, { data: wallet }] = await Promise.all([
+      const [{ data: c, error: ce }, { data: m, error: me }, { data: deletion }, { data: wallet }, { data: profile }] = await Promise.all([
         supabase
           .from("conversations")
           .select("id, client_id, status, characters(id, name, avatar_url, availability_status)")
@@ -96,6 +99,7 @@ function ChatPage() {
           .eq("conversation_id", conversationId)
           .maybeSingle(),
         supabase.from("credit_wallets").select("balance").maybeSingle(),
+        supabase.from("profiles").select("display_name, avatar_url").eq("user_id", user?.id ?? "").maybeSingle(),
       ]);
       if (cancelled) return;
       if (ce || !c || deletion) {
@@ -107,6 +111,8 @@ function ChatPage() {
       setConv(c as unknown as Conv);
       setMessages((m ?? []) as Msg[]);
       setCreditBalance(wallet?.balance ?? null);
+      setClientAvatarUrl(profile?.avatar_url ?? null);
+      setClientDisplayName(profile?.display_name ?? user?.email ?? null);
       setLoading(false);
       // mark read
       await supabase.rpc("mark_conversation_read", {
@@ -291,8 +297,11 @@ function ChatPage() {
               </div>
             );
           }
+          const avatarUrl = mine ? clientAvatarUrl : character?.avatar_url;
+          const avatarName = mine ? clientDisplayName : character?.name;
           return (
-            <div key={m.id} className={`flex ${mine ? "justify-start" : "justify-end"}`}>
+            <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-start" : "justify-end"}`}>
+              <ChatAvatar src={avatarUrl} name={avatarName} />
               <div
                 className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
                   mine

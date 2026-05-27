@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { ArrowRight, FileText, Info, Send } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
+import { ChatAvatar } from "@/components/common/ChatAvatar";
 
 export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
@@ -65,7 +66,7 @@ function ConvView() {
         { data: settings },
         { data: lock },
       ] = await Promise.all([
-          supabase.from("profiles").select("display_name, email, status").eq("user_id", conv.client_id).maybeSingle(),
+          supabase.from("profiles").select("display_name, email, status, avatar_url").eq("user_id", conv.client_id).maybeSingle(),
           supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
           supabase
             .from("messages")
@@ -376,14 +377,20 @@ function ConvView() {
               {data.msgs.length === 0 && (
                 <p className="text-sm text-center text-muted-foreground py-8">אין הודעות</p>
               )}
-              {data.msgs.map((m: any) => (
+              {data.msgs.map((m: any) => {
+                const isClientMessage = m.sender_type === "client";
+                return (
                 <div
                   key={m.id}
-                  className={`flex ${m.sender_type === "client" ? "justify-start" : "justify-end"}`}
+                  className={`flex items-end gap-2 ${isClientMessage ? "justify-start" : "justify-end"}`}
                 >
+                  <ChatAvatar
+                    src={isClientMessage ? data.client?.avatar_url : data.conv.characters?.avatar_url}
+                    name={isClientMessage ? data.client?.display_name ?? data.client?.email : data.conv.characters?.name}
+                  />
                   <div
                     className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                      m.sender_type === "client"
+                      isClientMessage
                         ? "bg-muted"
                         : m.sender_type === "operator"
                         ? "bg-primary text-primary-foreground"
@@ -406,7 +413,8 @@ function ConvView() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="border-t bg-card p-3">
               {canReply ? (

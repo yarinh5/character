@@ -94,6 +94,23 @@ function ProfilePage() {
     toast.success("נשמר");
   };
 
+  const updateAvatar = async (url: string | null) => {
+    setForm((current) => ({ ...current, avatar_url: url ?? "" }));
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ avatar_url: url })
+      .eq("user_id", user.id);
+
+    if (error) {
+      toast.error("שמירת תמונת הפרופיל נכשלה");
+      return;
+    }
+
+    toast.success(url ? "תמונת הפרופיל עודכנה" : "תמונת הפרופיל הוסרה");
+  };
+
   return (
     <>
       <div className="max-w-2xl mx-auto p-4 md:p-8 space-y-6">
@@ -149,7 +166,7 @@ function ProfilePage() {
                     bucket="user-avatars"
                     folder={user?.id}
                     value={form.avatar_url || null}
-                    onChange={(url) => setForm({ ...form, avatar_url: url ?? "" })}
+                    onChange={(url) => void updateAvatar(url)}
                     label="תמונת פרופיל"
                   />
 

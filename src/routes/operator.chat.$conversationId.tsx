@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
+import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -663,8 +664,11 @@ function OperatorChatPage() {
                 );
               }
               const isOps = m.sender_type === "operator" || m.sender_type === "admin";
+              const avatarUrl = isOps ? conv?.characters?.avatar_url : client?.avatar_url;
+              const avatarName = isOps ? conv?.characters?.name : client?.display_name ?? client?.email;
               return (
-                <div key={m.id} className={`flex ${isOps ? "justify-start" : "justify-end"}`}>
+                <div key={m.id} className={`flex items-end gap-2 ${isOps ? "justify-start" : "justify-end"}`}>
+                  <ChatAvatar src={avatarUrl} name={avatarName} />
                   <div
                     className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
                       isOps
