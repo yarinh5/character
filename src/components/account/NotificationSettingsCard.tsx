@@ -38,8 +38,7 @@ const DEFAULT_SETTINGS: NotificationSettings = {
 };
 
 const isMissingTableError = (error: SupabaseErrorLike) =>
-  error.code === "42P01" ||
-  error.code === "PGRST205";
+  error.code === "42P01" || error.code === "PGRST205";
 
 export function NotificationSettingsCard({ role }: { role: AppRole | null }) {
   const { user } = useAuth();
@@ -57,7 +56,7 @@ export function NotificationSettingsCard({ role }: { role: AppRole | null }) {
       setSettingsAvailable(true);
 
       const { data, error } = await supabase
-        .from("notification_settings" as any)
+        .from("notification_settings")
         .select(
           "in_app_enabled, email_enabled, new_message_enabled, new_report_enabled, credits_enabled, assignment_enabled, lock_enabled, system_enabled",
         )
@@ -82,7 +81,7 @@ export function NotificationSettingsCard({ role }: { role: AppRole | null }) {
       }
 
       if (!data) {
-        const { error: insertError } = await supabase.from("notification_settings" as any).upsert(
+        const { error: insertError } = await supabase.from("notification_settings").upsert(
           {
             user_id: user.id,
             ...DEFAULT_SETTINGS,
@@ -121,7 +120,7 @@ export function NotificationSettingsCard({ role }: { role: AppRole | null }) {
     const next = { ...settings, [key]: value };
     setSettings(next);
     setSavingKey(key);
-    const { error } = await supabase.from("notification_settings" as any).upsert(
+    const { error } = await supabase.from("notification_settings").upsert(
       {
         user_id: user.id,
         ...next,

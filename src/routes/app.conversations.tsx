@@ -49,20 +49,16 @@ function ConversationsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["conversations", "client"],
     queryFn: async () => {
-      const [{ data, error }, { data: deleted, error: deletedError }] = await Promise.all([
-        supabase
-          .from("conversations")
-          .select(
-            "id, status, last_message_at, last_message_preview, client_unread_count, characters(id, name, avatar_url)",
-          )
-          .order("last_message_at", { ascending: false, nullsFirst: false }),
-        supabase.from("client_conversation_deletions").select("conversation_id"),
-      ]);
+      const { data, error } = await supabase
+        .from("conversations")
+        .select(
+          "id, status, last_message_at, last_message_preview, client_unread_count, characters(id, name, avatar_url)",
+        )
+        .is("client_hidden_at", null)
+        .order("last_message_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
-      if (deletedError) throw deletedError;
 
-      const deletedIds = new Set((deleted ?? []).map((row) => row.conversation_id));
-      const rows = (data ?? []).filter((row) => !deletedIds.has(row.id)) as unknown as Row[];
+      const rows = (data ?? []) as unknown as Row[];
       const unread = await fetchUnreadCounts(rows.map((row) => row.id));
       return rows.map((row) => ({
         ...row,
@@ -78,11 +74,6 @@ function ConversationsPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "conversations" },
-        () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "client_conversation_deletions" },
         () => qc.invalidateQueries({ queryKey: ["conversations", "client"] }),
       )
       .on(

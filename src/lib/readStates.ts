@@ -16,7 +16,7 @@ export type ReadSummary = {
 export async function fetchUnreadCounts(conversationIds: string[]) {
   if (conversationIds.length === 0) return new Map<string, UnreadCountRow>();
 
-  const { data, error } = await (supabase as any).rpc("get_my_conversation_unread_counts", {
+  const { data, error } = await supabase.rpc("get_my_conversation_unread_counts", {
     _conversation_ids: conversationIds,
   });
   if (error) {
@@ -37,7 +37,7 @@ export async function fetchUnreadCounts(conversationIds: string[]) {
 }
 
 export async function fetchReadSummary(conversationId: string): Promise<ReadSummary | null> {
-  const { data, error } = await (supabase as any).rpc("get_conversation_read_summary", {
+  const { data, error } = await supabase.rpc("get_conversation_read_summary", {
     _conversation_id: conversationId,
   });
   if (error) {

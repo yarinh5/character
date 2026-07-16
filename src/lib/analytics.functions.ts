@@ -65,7 +65,7 @@ export const adminAnalytics = createServerFn({ method: "GET" })
         .from("credit_transactions")
         .select("amount, type"),
       supabaseAdmin
-        .from("operator_monthly_scores" as any)
+        .from("operator_monthly_scores")
         .select("operator_id, points, message_count, period_month")
         .eq("period_month", currentMonthKey)
         .order("points", { ascending: false }),
@@ -347,7 +347,7 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
         .gte("created_at", range.startIso)
         .lte("created_at", range.endIso)
         .limit(10000),
-      (supabaseAdmin as any)
+      supabaseAdmin
         .from("analytics_events")
         .select("event_name, actor_user_id, role, conversation_id, character_id, operator_id, created_at")
         .gte("created_at", range.startIso)
@@ -359,7 +359,7 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
         .gte("created_at", range.startIso)
         .lte("created_at", range.endIso)
         .limit(10000),
-      (supabaseAdmin as any)
+      supabaseAdmin
         .from("operator_score_events")
         .select("operator_id, points, created_at")
         .gte("created_at", range.startIso)

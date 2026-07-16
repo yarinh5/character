@@ -14,6 +14,64 @@ export type Database = {
   }
   public: {
     Tables: {
+      analytics_events: {
+        Row: {
+          actor_user_id: string | null
+          character_id: string | null
+          conversation_id: string | null
+          created_at: string
+          event_name: string
+          id: string
+          metadata: Json
+          operator_id: string | null
+          role: Database["public"]["Enums"]["app_role"] | null
+        }
+        Insert: {
+          actor_user_id?: string | null
+          character_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          event_name: string
+          id?: string
+          metadata?: Json
+          operator_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"] | null
+        }
+        Update: {
+          actor_user_id?: string | null
+          character_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          event_name?: string
+          id?: string
+          metadata?: Json
+          operator_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analytics_events_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analytics_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analytics_events_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
@@ -193,10 +251,101 @@ export type Database = {
         }
         Relationships: []
       }
+      conversation_locks: {
+        Row: {
+          conversation_id: string
+          expires_at: string
+          last_activity_at: string
+          locked_at: string
+          locked_by_operator_id: string
+          locked_by_user_id: string
+          metadata: Json
+          release_reason: string | null
+          released_at: string | null
+          released_by_user_id: string | null
+        }
+        Insert: {
+          conversation_id: string
+          expires_at: string
+          last_activity_at?: string
+          locked_at?: string
+          locked_by_operator_id: string
+          locked_by_user_id: string
+          metadata?: Json
+          release_reason?: string | null
+          released_at?: string | null
+          released_by_user_id?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          expires_at?: string
+          last_activity_at?: string
+          locked_at?: string
+          locked_by_operator_id?: string
+          locked_by_user_id?: string
+          metadata?: Json
+          release_reason?: string | null
+          released_at?: string | null
+          released_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_locks_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: true
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_locks_locked_by_operator_id_fkey"
+            columns: ["locked_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_read_states: {
+        Row: {
+          conversation_id: string
+          last_read_at: string
+          last_read_message_id: string | null
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          last_read_at?: string
+          last_read_message_id?: string | null
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          last_read_at?: string
+          last_read_message_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_read_states_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_read_states_last_read_message_id_fkey"
+            columns: ["last_read_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           assigned_operator_id: string | null
           character_id: string
+          client_hidden_at: string | null
           client_id: string
           client_unread_count: number
           created_at: string
@@ -210,6 +359,7 @@ export type Database = {
         Insert: {
           assigned_operator_id?: string | null
           character_id: string
+          client_hidden_at?: string | null
           client_id: string
           client_unread_count?: number
           created_at?: string
@@ -223,6 +373,7 @@ export type Database = {
         Update: {
           assigned_operator_id?: string | null
           character_id?: string
+          client_hidden_at?: string | null
           client_id?: string
           client_unread_count?: number
           created_at?: string
@@ -373,6 +524,57 @@ export type Database = {
         }
         Relationships: []
       }
+      customer_info_entries: {
+        Row: {
+          client_id: string
+          content: string
+          conversation_id: string | null
+          created_at: string
+          created_by_user_id: string
+          id: string
+          metadata: Json
+          operator_id: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          content: string
+          conversation_id?: string | null
+          created_at?: string
+          created_by_user_id: string
+          id?: string
+          metadata?: Json
+          operator_id: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          content?: string
+          conversation_id?: string | null
+          created_at?: string
+          created_by_user_id?: string
+          id?: string
+          metadata?: Json
+          operator_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_info_entries_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_info_entries_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_notes: {
         Row: {
           conversation_id: string
@@ -502,38 +704,193 @@ export type Database = {
           },
         ]
       }
+      notification_settings: {
+        Row: {
+          assignment_enabled: boolean
+          created_at: string
+          credits_enabled: boolean
+          email_enabled: boolean
+          in_app_enabled: boolean
+          lock_enabled: boolean
+          new_message_enabled: boolean
+          new_report_enabled: boolean
+          system_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          assignment_enabled?: boolean
+          created_at?: string
+          credits_enabled?: boolean
+          email_enabled?: boolean
+          in_app_enabled?: boolean
+          lock_enabled?: boolean
+          new_message_enabled?: boolean
+          new_report_enabled?: boolean
+          system_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          assignment_enabled?: boolean
+          created_at?: string
+          credits_enabled?: boolean
+          email_enabled?: boolean
+          in_app_enabled?: boolean
+          lock_enabled?: boolean
+          new_message_enabled?: boolean
+          new_report_enabled?: boolean
+          system_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           body: string | null
+          conversation_id: string | null
           created_at: string
           id: string
           is_read: boolean
           link: string | null
+          metadata: Json
           title: string
           type: string
           user_id: string
         }
         Insert: {
           body?: string | null
+          conversation_id?: string | null
           created_at?: string
           id?: string
           is_read?: boolean
           link?: string | null
+          metadata?: Json
           title: string
           type: string
           user_id: string
         }
         Update: {
           body?: string | null
+          conversation_id?: string | null
           created_at?: string
           id?: string
           is_read?: boolean
           link?: string | null
+          metadata?: Json
           title?: string
           type?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "notifications_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operator_monthly_scores: {
+        Row: {
+          message_count: number
+          operator_id: string
+          period_month: string
+          points: number
+          updated_at: string
+        }
+        Insert: {
+          message_count?: number
+          operator_id: string
+          period_month: string
+          points?: number
+          updated_at?: string
+        }
+        Update: {
+          message_count?: number
+          operator_id?: string
+          period_month?: string
+          points?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_monthly_scores_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operator_score_events: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          id: string
+          limit_applied: number | null
+          message_id: string | null
+          metadata: Json
+          operator_id: string
+          period_month: string
+          points: number
+          reason: string
+          streak_position: number | null
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          id?: string
+          limit_applied?: number | null
+          message_id?: string | null
+          metadata?: Json
+          operator_id: string
+          period_month: string
+          points?: number
+          reason?: string
+          streak_position?: number | null
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          limit_applied?: number | null
+          message_id?: string | null
+          metadata?: Json
+          operator_id?: string
+          period_month?: string
+          points?: number
+          reason?: string
+          streak_position?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_score_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_score_events_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_score_events_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       operators: {
         Row: {
@@ -666,6 +1023,38 @@ export type Database = {
         }
         Relationships: []
       }
+      user_active_conversations: {
+        Row: {
+          conversation_id: string
+          expires_at: string
+          last_seen_at: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          expires_at?: string
+          last_seen_at?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          expires_at?: string
+          last_seen_at?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_active_conversations_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -692,14 +1081,59 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      acquire_conversation_lock: {
+        Args: { _conversation_id: string }
+        Returns: Json
+      }
       admin_adjust_client_credits: {
         Args: { _amount: number; _reason: string; _user_id: string }
         Returns: Json
+      }
+      cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      create_notification: {
+        Args: {
+          _body?: string
+          _conversation_id?: string
+          _dedupe_window_seconds?: number
+          _link?: string
+          _metadata?: Json
+          _title: string
+          _type: string
+          _user_id: string
+        }
+        Returns: string
+      }
+      get_conversation_read_summary: {
+        Args: { _conversation_id: string }
+        Returns: Json
+      }
+      get_my_conversation_unread_counts: {
+        Args: { _conversation_ids: string[] }
+        Returns: {
+          conversation_id: string
+          last_read_at: string
+          unread_count: number
+        }[]
       }
       get_my_operator_id: { Args: never; Returns: string }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
+      }
+      get_sla_risk_conversations: {
+        Args: { _limit?: number; _notify?: boolean }
+        Returns: {
+          character_avatar_url: string
+          character_id: string
+          character_name: string
+          client_display_name: string
+          client_id: string
+          conversation_id: string
+          last_client_message_at: string
+          last_message_preview: string
+          minutes_waiting: number
+          status: Database["public"]["Enums"]["conversation_status"]
+        }[]
       }
       grant_signup_credits: { Args: never; Returns: Json }
       has_role: {
@@ -708,6 +1142,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      hide_conversation_for_client: {
+        Args: { _conversation_id: string }
+        Returns: undefined
       }
       is_admin: { Args: never; Returns: boolean }
       is_conversation_client: {
@@ -719,6 +1157,14 @@ export type Database = {
         Returns: boolean
       }
       is_operator: { Args: never; Returns: boolean }
+      is_operator_co_assigned: {
+        Args: { _operator_id: string }
+        Returns: boolean
+      }
+      leave_active_conversation: {
+        Args: { _conversation_id: string }
+        Returns: undefined
+      }
       mark_conversation_read: {
         Args: { _as: string; _conversation_id: string }
         Returns: undefined
@@ -726,6 +1172,10 @@ export type Database = {
       operator_can_access_character: {
         Args: { _character_id: string }
         Returns: boolean
+      }
+      release_conversation_lock: {
+        Args: { _conversation_id: string }
+        Returns: Json
       }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
@@ -737,6 +1187,21 @@ export type Database = {
       }
       start_or_get_conversation: {
         Args: { _character_id: string }
+        Returns: string
+      }
+      touch_active_conversation: {
+        Args: { _conversation_id: string; _role: string }
+        Returns: undefined
+      }
+      track_analytics_event: {
+        Args: {
+          _character_id?: string
+          _conversation_id?: string
+          _dedupe_seconds?: number
+          _event_name: string
+          _metadata?: Json
+          _operator_id?: string
+        }
         Returns: string
       }
     }

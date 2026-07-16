@@ -38,6 +38,7 @@ type Conv = {
   id: string;
   client_id: string;
   status: string;
+  client_hidden_at: string | null;
   characters: {
     id: string;
     name: string;
@@ -82,10 +83,10 @@ function ChatPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [{ data: c, error: ce }, { data: m, error: me }, { data: deletion }, { data: wallet }, { data: profile }] = await Promise.all([
+      const [{ data: c, error: ce }, { data: m, error: me }, { data: wallet }, { data: profile }] = await Promise.all([
         supabase
           .from("conversations")
-          .select("id, client_id, status, characters(id, name, avatar_url, availability_status)")
+          .select("id, client_id, status, client_hidden_at, characters(id, name, avatar_url, availability_status)")
           .eq("id", conversationId)
           .maybeSingle(),
         supabase
@@ -93,16 +94,11 @@ function ChatPage() {
           .select("*")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: true }),
-        supabase
-          .from("client_conversation_deletions")
-          .select("conversation_id")
-          .eq("conversation_id", conversationId)
-          .maybeSingle(),
         supabase.from("credit_wallets").select("balance").maybeSingle(),
         supabase.from("profiles").select("display_name, avatar_url").eq("user_id", user?.id ?? "").maybeSingle(),
       ]);
       if (cancelled) return;
-      if (ce || !c || deletion) {
+      if (ce || !c || c.client_hidden_at) {
         toast.error("שיחה לא נמצאה");
         navigate({ to: "/app/conversations" });
         return;
@@ -213,9 +209,8 @@ function ChatPage() {
     if (!user || deleting) return;
 
     setDeleting(true);
-    const { error } = await supabase.from("client_conversation_deletions").insert({
-      client_id: user.id,
-      conversation_id: conversationId,
+    const { error } = await supabase.rpc("hide_conversation_for_client", {
+      _conversation_id: conversationId,
     });
     setDeleting(false);
 

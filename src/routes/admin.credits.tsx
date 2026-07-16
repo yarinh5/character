@@ -285,7 +285,7 @@ function PackageDialog({
   );
 }
 
-function ClientCreditsTab() {
+function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -338,6 +338,12 @@ function ClientCreditsTab() {
       }) as ClientCreditRow[];
     },
   });
+
+  useEffect(() => {
+    if (focusedClientId && data?.some((client) => client.user_id === focusedClientId)) {
+      setSelectedId(focusedClientId);
+    }
+  }, [data, focusedClientId]);
 
   const selectedClient = useMemo(
     () => (data ?? []).find((client) => client.user_id === selectedId) ?? null,
@@ -544,7 +550,10 @@ function CreditSettingsTab() {
     const next: Record<string, string | number | boolean> = {};
     CREDIT_SETTINGS.forEach((setting) => {
       const stored = data.get(setting.key);
-      next[setting.key] = stored !== undefined && stored !== null ? (stored as any) : setting.default;
+      next[setting.key] =
+        typeof stored === "string" || typeof stored === "number" || typeof stored === "boolean"
+          ? stored
+          : setting.default;
     });
     setForm(next);
   }, [data]);
@@ -563,8 +572,9 @@ function CreditSettingsTab() {
       }
       toast.success("הגדרות הקרדיטים והניקוד נשמרו");
       qc.invalidateQueries({ queryKey: ["admin-credit-settings"] });
-    } catch (error: any) {
-      toast.error("שמירת הגדרות נכשלה: " + error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "שגיאה לא ידועה";
+      toast.error("שמירת הגדרות נכשלה: " + message);
     } finally {
       setBusy(false);
     }
@@ -603,7 +613,7 @@ function CreditSettingsTab() {
               <Input
                 type="number"
                 min={0}
-                value={form[setting.key] ?? ""}
+                value={String(form[setting.key] ?? "")}
                 onChange={(e) => setForm({ ...form, [setting.key]: Number(e.target.value) })}
               />
             )}
