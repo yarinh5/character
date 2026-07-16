@@ -192,6 +192,47 @@ export type Database = {
         }
         Relationships: []
       }
+      client_character_preferences: {
+        Row: {
+          character_id: string
+          client_id: string
+          created_at: string
+          favorited_at: string | null
+          is_favorite: boolean
+          swipe: string | null
+          swiped_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          character_id: string
+          client_id: string
+          created_at?: string
+          favorited_at?: string | null
+          is_favorite?: boolean
+          swipe?: string | null
+          swiped_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          character_id?: string
+          client_id?: string
+          created_at?: string
+          favorited_at?: string | null
+          is_favorite?: boolean
+          swipe?: string | null
+          swiped_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_character_preferences_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_conversation_deletions: {
         Row: {
           client_id: string
@@ -1107,6 +1148,24 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      get_discovery_characters: {
+        Args: {
+          _cursor_created_at?: string
+          _cursor_id?: string
+          _limit?: number
+        }
+        Returns: {
+          availability_status: Database["public"]["Enums"]["availability_status"]
+          avatar_url: string
+          category: string
+          created_at: string
+          fictional_age: number
+          id: string
+          interests: string[]
+          name: string
+          short_description: string
+        }[]
+      }
       get_my_conversation_unread_counts: {
         Args: { _conversation_ids: string[] }
         Returns: {
@@ -1183,6 +1242,14 @@ export type Database = {
       }
       send_operator_message: {
         Args: { _content: string; _conversation_id: string }
+        Returns: Json
+      }
+      set_character_favorite: {
+        Args: { _character_id: string; _is_favorite: boolean }
+        Returns: Json
+      }
+      set_character_swipe: {
+        Args: { _character_id: string; _swipe: string }
         Returns: Json
       }
       start_or_get_conversation: {
