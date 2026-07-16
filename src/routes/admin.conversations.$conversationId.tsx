@@ -19,6 +19,13 @@ import { ArrowRight, FileText, Info, Send } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
+import {
+  getOldestMessageCursor,
+  isNearScrollBottom,
+  mergeMessagesById,
+  MESSAGE_PAGE_SIZE,
+  sortMessagesAsc,
+} from "@/lib/messagePagination";
 
 export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
@@ -27,6 +34,17 @@ export const Route = createFileRoute("/admin/conversations/$conversationId")({
 function isActiveConversationLock(lock: any) {
   return !!lock && !lock.released_at && new Date(lock.expires_at).getTime() > Date.now();
 }
+
+type AdminMessage = {
+  id: string;
+  content: string;
+  sender_type: string;
+  sender_id: string | null;
+  operator_id: string | null;
+  created_at: string;
+  is_read: boolean;
+  operators?: { full_name: string | null; user_id?: string | null } | null;
+};
 
 function ConvView() {
   const { conversationId } = Route.useParams();
@@ -40,7 +58,80 @@ function ConvView() {
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [messages, setMessages] = useState<AdminMessage[]>([]);
+  const [adminOperatorUserIds, setAdminOperatorUserIds] = useState<string[]>([]);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const initialScrollDoneRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const messageRequestVersionRef = useRef(0);
   useActiveConversation(conversationId, "admin");
+
+  const loadLatestMessages = async (requestVersion: number) => {
+    const { data: msgs, error } = await supabase
+      .from("messages")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+    if (error) throw error;
+
+    const latestMessages = sortMessagesAsc((msgs ?? []) as AdminMessage[]);
+    const operatorUserIds = [
+      ...new Set(latestMessages.map((message) => message.operators?.user_id).filter(Boolean)),
+    ] as string[];
+    const { data: adminRoles } = operatorUserIds.length
+      ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
+      : { data: [] as { user_id: string }[] };
+
+    if (requestVersion !== messageRequestVersionRef.current) return;
+    setMessages(latestMessages);
+    setHasOlderMessages(latestMessages.length === MESSAGE_PAGE_SIZE);
+    setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
+  };
+
+  const loadOlderMessages = async () => {
+    if (loadingOlderRef.current || !hasOlderMessages) return;
+    const container = scrollRef.current;
+    const before = getOldestMessageCursor(messages);
+    if (!before || !container) return;
+
+    const requestVersion = messageRequestVersionRef.current;
+    loadingOlderRef.current = true;
+    setLoadingOlderMessages(true);
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
+      .eq("conversation_id", conversationId)
+      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+
+    if (requestVersion !== messageRequestVersionRef.current) return;
+    setLoadingOlderMessages(false);
+
+    if (error) {
+      loadingOlderRef.current = false;
+      toast.error("טעינת הודעות ישנות נכשלה");
+      return;
+    }
+
+    const olderMessages = sortMessagesAsc((data ?? []) as AdminMessage[]);
+    setHasOlderMessages(olderMessages.length === MESSAGE_PAGE_SIZE);
+    setMessages((prev) => mergeMessagesById(olderMessages, prev));
+    window.requestAnimationFrame(() => {
+      if (requestVersion !== messageRequestVersionRef.current) return;
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight - previousHeight + previousTop;
+      }
+      loadingOlderRef.current = false;
+    });
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-conv", conversationId, user?.id],
@@ -57,7 +148,6 @@ function ConvView() {
       const [
         { data: client },
         { data: cprof },
-        { data: msgs },
         { data: notes },
         { data: customerInfo },
         { data: reports },
@@ -68,11 +158,6 @@ function ConvView() {
       ] = await Promise.all([
           supabase.from("profiles").select("display_name, email, status, avatar_url").eq("user_id", conv.client_id).maybeSingle(),
           supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
-          supabase
-            .from("messages")
-            .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
-            .eq("conversation_id", conversationId)
-            .order("created_at", { ascending: true }),
           supabase
             .from("internal_notes")
             .select("id, note, created_at, operator_id, operators(full_name)")
@@ -108,13 +193,6 @@ function ConvView() {
             .eq("conversation_id", conversationId)
             .maybeSingle(),
         ]);
-      const operatorUserIds = [
-        ...new Set((msgs ?? []).map((message: any) => message.operators?.user_id).filter(Boolean)),
-      ] as string[];
-      const { data: adminRoles } = operatorUserIds.length
-        ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
-        : { data: [] as { user_id: string }[] };
-      const adminOperatorUserIds = (adminRoles ?? []).map((role) => role.user_id);
       const assignments = charOps ?? [];
       const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
       const mode = settingsMap.get("concurrency_mode");
@@ -123,8 +201,6 @@ function ConvView() {
         conv,
         client,
         cprof,
-        msgs: msgs ?? [],
-        adminOperatorUserIds,
         notes: notes ?? [],
         customerInfo: customerInfo ?? [],
         reports: reports ?? [],
@@ -144,6 +220,25 @@ function ConvView() {
   });
 
   useEffect(() => {
+    const requestVersion = ++messageRequestVersionRef.current;
+    initialScrollDoneRef.current = false;
+    shouldStickToBottomRef.current = true;
+    loadingOlderRef.current = false;
+    setMessages([]);
+    setAdminOperatorUserIds([]);
+    setHasOlderMessages(false);
+    setLoadingOlderMessages(false);
+    loadLatestMessages(requestVersion).catch((error) => {
+      if (requestVersion === messageRequestVersionRef.current) toast.error("טעינת הודעות נכשלה: " + error.message);
+    });
+    return () => {
+      if (messageRequestVersionRef.current === requestVersion) {
+        messageRequestVersionRef.current += 1;
+      }
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
     if (!user?.id) return;
     supabase.rpc("mark_conversation_read", {
       _conversation_id: conversationId,
@@ -158,13 +253,55 @@ function ConvView() {
         "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
-          if (payload.eventType === "INSERT" && (payload.new as any).sender_type === "client") {
+          const requestVersion = messageRequestVersionRef.current;
+          const nextMessage = payload.new as AdminMessage;
+          shouldStickToBottomRef.current = isNearScrollBottom(scrollRef.current);
+          if (payload.eventType === "UPDATE") {
+            if (requestVersion !== messageRequestVersionRef.current) return;
+            setMessages((prev) => prev.map((message) => (message.id === nextMessage.id ? { ...message, ...nextMessage } : message)));
+            return;
+          }
+          if (payload.eventType === "INSERT" && nextMessage.sender_type === "client") {
             supabase.rpc("mark_conversation_read", {
               _conversation_id: conversationId,
               _as: "admin",
             });
           }
-          qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+          if (nextMessage.operator_id) {
+            supabase
+              .from("operators")
+              .select("full_name, user_id")
+              .eq("id", nextMessage.operator_id)
+              .maybeSingle()
+              .then(async ({ data: operatorData }) => {
+                if (requestVersion !== messageRequestVersionRef.current) return;
+                if (operatorData?.user_id) {
+                  const { data: adminRole } = await supabase
+                    .from("user_roles")
+                    .select("user_id")
+                    .eq("user_id", operatorData.user_id)
+                    .eq("role", "admin")
+                    .maybeSingle();
+                  if (requestVersion !== messageRequestVersionRef.current) return;
+                  if (adminRole) {
+                    setAdminOperatorUserIds((prev) =>
+                      prev.includes(adminRole.user_id) ? prev : [...prev, adminRole.user_id],
+                    );
+                  }
+                }
+                const hydrated = {
+                  ...nextMessage,
+                  operators: operatorData
+                    ? { full_name: operatorData.full_name, user_id: operatorData.user_id }
+                    : null,
+                };
+                if (requestVersion !== messageRequestVersionRef.current) return;
+                setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+              });
+          } else {
+            if (requestVersion !== messageRequestVersionRef.current) return;
+            setMessages((prev) => mergeMessagesById(prev, [nextMessage]));
+          }
         },
       )
       .on(
@@ -199,8 +336,16 @@ function ConvView() {
   }, [conversationId, data?.conv.client_id, qc]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [data?.msgs.length]);
+    if (!scrollRef.current || loadingOlderRef.current) return;
+    if (!initialScrollDoneRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+      initialScrollDoneRef.current = true;
+      return;
+    }
+    if (shouldStickToBottomRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
+  }, [messages.length]);
 
   const reassign = async (opId: string) => {
     const { error } = await supabase
@@ -266,7 +411,17 @@ function ConvView() {
 
     const message = (result as { message?: any } | null)?.message;
     if (message) {
-      qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+      shouldStickToBottomRef.current = true;
+      setMessages((prev) =>
+        mergeMessagesById(prev, [
+          {
+            ...message,
+            operators: data.currentOperator
+              ? { full_name: data.currentOperator.full_name, user_id: user?.id ?? null }
+              : null,
+          },
+        ]),
+      );
     }
     setMessageInput("");
   };
@@ -373,11 +528,33 @@ function ConvView() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div ref={scrollRef} className="h-[55vh] overflow-y-auto p-4 space-y-2 bg-background/50">
-              {data.msgs.length === 0 && (
+            <div
+              ref={scrollRef}
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                shouldStickToBottomRef.current = isNearScrollBottom(target);
+                if (target.scrollTop < 80) void loadOlderMessages();
+              }}
+              className="h-[55vh] overflow-y-auto p-4 space-y-2 bg-background/50"
+            >
+              {hasOlderMessages && (
+                <div className="flex justify-center py-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void loadOlderMessages()}
+                    disabled={loadingOlderMessages}
+                    className="text-xs"
+                  >
+                    {loadingOlderMessages ? "טוען הודעות ישנות..." : "טען הודעות ישנות"}
+                  </Button>
+                </div>
+              )}
+              {messages.length === 0 && (
                 <p className="text-sm text-center text-muted-foreground py-8">אין הודעות</p>
               )}
-              {data.msgs.map((m: any) => {
+              {messages.map((m: any) => {
                 const isClientMessage = m.sender_type === "client";
                 return (
                 <div
@@ -401,7 +578,7 @@ function ConvView() {
                       {m.sender_type === "client"
                         ? "לקוח"
                         : m.sender_type === "operator"
-                          ? `${data.adminOperatorUserIds.includes(m.operators?.user_id) ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
+                          ? `${adminOperatorUserIds.includes(m.operators?.user_id) ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
                           : "אדמין"}
                     </div>
                     <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>

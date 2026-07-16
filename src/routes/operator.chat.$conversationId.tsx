@@ -4,6 +4,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
+import {
+  getOldestMessageCursor,
+  isNearScrollBottom,
+  mergeMessagesById,
+  MESSAGE_PAGE_SIZE,
+  sortMessagesAsc,
+} from "@/lib/messagePagination";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { Button } from "@/components/ui/button";
@@ -114,8 +121,13 @@ function OperatorChatPage() {
   const [lockBusy, setLockBusy] = useState(false);
   const [, setLockClock] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const initialScrollDoneRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
   useActiveConversation(conversationId, isAdmin ? "admin" : "operator");
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
@@ -124,9 +136,48 @@ function OperatorChatPage() {
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
   });
 
-  // Load conversation, messages, notes, client info
+  const loadOlderMessages = async () => {
+    if (loadingOlderRef.current || !hasOlderMessages) return;
+    const container = scrollRef.current;
+    const before = getOldestMessageCursor(messages);
+    if (!before || !container) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlderMessages(true);
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*, operators(full_name, user_id)")
+      .eq("conversation_id", conversationId)
+      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+    setLoadingOlderMessages(false);
+
+    if (error) {
+      loadingOlderRef.current = false;
+      toast.error("טעינת הודעות ישנות נכשלה");
+      return;
+    }
+
+    const olderMessages = sortMessagesAsc((data ?? []) as Msg[]);
+    setHasOlderMessages(olderMessages.length === MESSAGE_PAGE_SIZE);
+    setMessages((prev) => mergeMessagesById(olderMessages, prev));
+    window.requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight - previousHeight + previousTop;
+      }
+      loadingOlderRef.current = false;
+    });
+  };
+
+  // Load conversation, latest messages, notes, client info
   useEffect(() => {
     let cancelled = false;
+    initialScrollDoneRef.current = false;
+    shouldStickToBottomRef.current = true;
     (async () => {
       setLoading(true);
       const { data: c, error: ce } = await supabase
@@ -176,7 +227,9 @@ function OperatorChatPage() {
           .from("messages")
           .select("*, operators(full_name, user_id)")
           .eq("conversation_id", conversationId)
-          .order("created_at", { ascending: true }),
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(MESSAGE_PAGE_SIZE),
         supabase
           .from("internal_notes")
           .select("id, note, created_at, operator_id, operators(full_name)")
@@ -212,7 +265,7 @@ function OperatorChatPage() {
           .maybeSingle(),
       ]);
       if (cancelled) return;
-      const loadedMessages = (m ?? []) as Msg[];
+      const loadedMessages = sortMessagesAsc((m ?? []) as Msg[]);
       const operatorUserIds = [
         ...new Set(loadedMessages.map((message) => message.operators?.user_id).filter(Boolean)),
       ] as string[];
@@ -222,6 +275,7 @@ function OperatorChatPage() {
       if (cancelled) return;
       setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
       setMessages(loadedMessages);
+      setHasOlderMessages(loadedMessages.length === MESSAGE_PAGE_SIZE);
       setNotes((n ?? []) as unknown as Note[]);
       setCustomerInfoEntries((info ?? []) as unknown as CustomerInfoEntry[]);
       const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
@@ -266,6 +320,7 @@ function OperatorChatPage() {
         },
         (payload) => {
           const newMsg = payload.new as Msg;
+          shouldStickToBottomRef.current = isNearScrollBottom(scrollRef.current);
           if (payload.eventType === "UPDATE") {
             setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m)));
             return;
@@ -289,10 +344,10 @@ function OperatorChatPage() {
                   }
                 }
                 const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name, user_id: data.user_id } : null };
-                setMessages((prev) => (prev.some((m) => m.id === hydrated.id) ? prev : [...prev, hydrated]));
+                setMessages((prev) => mergeMessagesById(prev, [hydrated]));
               });
           } else {
-            setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
+            setMessages((prev) => mergeMessagesById(prev, [newMsg]));
           }
           if (newMsg.sender_type === "client") {
             supabase.rpc("mark_conversation_read", {
@@ -361,7 +416,15 @@ function OperatorChatPage() {
   }, [conversationId, conv?.client_id]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (!scrollRef.current || loadingOlderRef.current) return;
+    if (!initialScrollDoneRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+      initialScrollDoneRef.current = true;
+      return;
+    }
+    if (shouldStickToBottomRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
   }, [messages.length]);
 
   useEffect(() => {
@@ -476,7 +539,8 @@ function OperatorChatPage() {
         ...result.message,
         operators: operator ? { full_name: operator.full_name } : null,
       };
-      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+      shouldStickToBottomRef.current = true;
+      setMessages((prev) => mergeMessagesById(prev, [message]));
     }
     setInput("");
   };
@@ -649,7 +713,29 @@ function OperatorChatPage() {
       <div className="flex-1 flex min-h-0">
         {/* Messages */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
+          <div
+            ref={scrollRef}
+            onScroll={(event) => {
+              const target = event.currentTarget;
+              shouldStickToBottomRef.current = isNearScrollBottom(target);
+              if (target.scrollTop < 80) void loadOlderMessages();
+            }}
+            className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3"
+          >
+            {hasOlderMessages && (
+              <div className="flex justify-center py-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void loadOlderMessages()}
+                  disabled={loadingOlderMessages}
+                  className="text-xs"
+                >
+                  {loadingOlderMessages ? "טוען הודעות ישנות..." : "טען הודעות ישנות"}
+                </Button>
+              </div>
+            )}
             {messages.length === 0 && (
               <div className="text-center text-muted-foreground py-8 text-sm">אין הודעות עדיין</div>
             )}

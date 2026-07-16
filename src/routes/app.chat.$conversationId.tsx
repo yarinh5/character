@@ -6,6 +6,13 @@ import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
 import { fetchReadSummary, type ReadSummary } from "@/lib/readStates";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
+import {
+  getOldestMessageCursor,
+  isNearScrollBottom,
+  mergeMessagesById,
+  MESSAGE_PAGE_SIZE,
+  sortMessagesAsc,
+} from "@/lib/messagePagination";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,6 +69,8 @@ function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -70,6 +79,9 @@ function ChatPage() {
   const [clientDisplayName, setClientDisplayName] = useState<string | null>(null);
   const [readSummary, setReadSummary] = useState<ReadSummary | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const initialScrollDoneRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
   useActiveConversation(conversationId, "client");
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
@@ -78,9 +90,48 @@ function ChatPage() {
     displayName: user?.email?.split("@")[0] ?? "לקוח",
   });
 
-  // Load conversation + messages
+  const loadOlderMessages = async () => {
+    if (loadingOlderRef.current || !hasOlderMessages) return;
+    const container = scrollRef.current;
+    const before = getOldestMessageCursor(messages);
+    if (!before || !container) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlderMessages(true);
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+    setLoadingOlderMessages(false);
+
+    if (error) {
+      loadingOlderRef.current = false;
+      toast.error("טעינת הודעות ישנות נכשלה");
+      return;
+    }
+
+    const olderMessages = sortMessagesAsc((data ?? []) as Msg[]);
+    setHasOlderMessages(olderMessages.length === MESSAGE_PAGE_SIZE);
+    setMessages((prev) => mergeMessagesById(olderMessages, prev));
+    window.requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight - previousHeight + previousTop;
+      }
+      loadingOlderRef.current = false;
+    });
+  };
+
+  // Load conversation + latest messages
   useEffect(() => {
     let cancelled = false;
+    initialScrollDoneRef.current = false;
+    shouldStickToBottomRef.current = true;
     (async () => {
       setLoading(true);
       const [{ data: c, error: ce }, { data: m, error: me }, { data: wallet }, { data: profile }] = await Promise.all([
@@ -93,7 +144,9 @@ function ChatPage() {
           .from("messages")
           .select("*")
           .eq("conversation_id", conversationId)
-          .order("created_at", { ascending: true }),
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(MESSAGE_PAGE_SIZE),
         supabase.from("credit_wallets").select("balance").maybeSingle(),
         supabase.from("profiles").select("display_name, avatar_url").eq("user_id", user?.id ?? "").maybeSingle(),
       ]);
@@ -105,7 +158,9 @@ function ChatPage() {
       }
       if (me) toast.error("שגיאה בטעינת הודעות");
       setConv(c as unknown as Conv);
-      setMessages((m ?? []) as Msg[]);
+      const latestMessages = sortMessagesAsc((m ?? []) as Msg[]);
+      setMessages(latestMessages);
+      setHasOlderMessages(latestMessages.length === MESSAGE_PAGE_SIZE);
       setCreditBalance(wallet?.balance ?? null);
       setClientAvatarUrl(profile?.avatar_url ?? null);
       setClientDisplayName(profile?.display_name ?? user?.email ?? null);
@@ -136,12 +191,12 @@ function ChatPage() {
         },
         (payload) => {
           const newMsg = payload.new as Msg;
+          shouldStickToBottomRef.current = isNearScrollBottom(scrollRef.current);
           setMessages((prev) => {
             if (payload.eventType === "UPDATE") {
               return prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m));
             }
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
+            return mergeMessagesById(prev, [newMsg]);
           });
           if (newMsg.sender_type !== "client") {
             supabase.rpc("mark_conversation_read", {
@@ -158,9 +213,17 @@ function ChatPage() {
     };
   }, [conversationId]);
 
-  // Auto-scroll
+  // Auto-scroll only on initial load or when the user is already at the bottom.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (!scrollRef.current || loadingOlderRef.current) return;
+    if (!initialScrollDoneRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+      initialScrollDoneRef.current = true;
+      return;
+    }
+    if (shouldStickToBottomRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
   }, [messages.length]);
 
   const send = async () => {
@@ -200,7 +263,8 @@ function ChatPage() {
     const result = data as SendClientMessageResponse | null;
     if (typeof result?.balance === "number") setCreditBalance(result.balance);
     if (result?.message) {
-      setMessages((prev) => (prev.some((m) => m.id === result.message!.id) ? prev : [...prev, result.message!]));
+      shouldStickToBottomRef.current = true;
+      setMessages((prev) => mergeMessagesById(prev, [result.message!]));
     }
     setInput("");
   };
@@ -274,7 +338,29 @@ function ChatPage() {
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
+      <div
+        ref={scrollRef}
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          shouldStickToBottomRef.current = isNearScrollBottom(target);
+          if (target.scrollTop < 80) void loadOlderMessages();
+        }}
+        className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3"
+      >
+        {hasOlderMessages && (
+          <div className="flex justify-center py-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void loadOlderMessages()}
+              disabled={loadingOlderMessages}
+              className="text-xs"
+            >
+              {loadingOlderMessages ? "טוען הודעות ישנות..." : "טען הודעות ישנות"}
+            </Button>
+          </div>
+        )}
         {messages.length === 0 && (
           <div className="text-center text-muted-foreground py-8 text-sm">
             פתח את השיחה — שלח הודעה ראשונה
