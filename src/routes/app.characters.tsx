@@ -1,150 +1,152 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Heart, RefreshCw, Users } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
-import { Card, CardContent } from "@/components/ui/card";
+import { useDiscovery } from "@/hooks/useDiscovery";
+import { DiscoveryDeck } from "@/components/discovery/DiscoveryDeck";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MessageCirclePlus, Users } from "lucide-react";
-import { toast } from "sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const Route = createFileRoute("/app/characters")({
   component: CharactersPage,
 });
 
-function CharactersPage() {
-  const navigate = useNavigate();
-  const [startingId, setStartingId] = useState<string | null>(null);
+function errorMessage(error: unknown, fallback: string) {
+  return typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback;
+}
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["characters", "public"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("characters")
-        .select("id, name, avatar_url, fictional_age, short_description, category, interests, availability_status")
-        .eq("is_active", true)
-        .eq("is_visible", true)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
+function CharactersPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const discovery = useDiscovery(user?.id);
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const character = discovery.activeCharacter;
 
   useEffect(() => {
-    if (!data || data.length === 0) return;
-    data.forEach((character) => {
-      void trackAnalyticsEvent({
-        eventName: "character_viewed",
-        characterId: character.id,
-        metadata: { source: "client_characters_grid" },
-        dedupeSeconds: 3600,
-      });
+    if (!character) return;
+    void trackAnalyticsEvent({
+      eventName: "character_viewed",
+      characterId: character.id,
+      metadata: { source: "client_discovery" },
+      dedupeSeconds: 3600,
     });
-  }, [data]);
+  }, [character]);
 
-  const startChat = async (characterId: string) => {
-    setStartingId(characterId);
+  const handleSwipe = async (action: "like" | "pass") => {
+    if (!character || discovery.isSwipePending) return;
+    try {
+      await discovery.swipe(character.id, action);
+    } catch (error) {
+      toast.error(errorMessage(error, "עדכון הבחירה נכשל"));
+    }
+  };
+
+  const handleFavorite = async () => {
+    if (!character || discovery.isFavoritePending) return;
+    const nextFavorite = !discovery.isFavorite(character.id);
+    try {
+      await discovery.setFavorite(character.id, nextFavorite);
+    } catch (error) {
+      toast.error(errorMessage(error, "עדכון המועדפים נכשל"));
+    }
+  };
+
+  const startChat = async () => {
+    if (!character || startingId) return;
+    setStartingId(character.id);
     try {
       const { data, error } = await supabase.rpc("start_or_get_conversation", {
-        _character_id: characterId,
+        _character_id: character.id,
       });
       if (error) throw error;
-      navigate({ to: "/app/chat/$conversationId", params: { conversationId: data as string } });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "פתיחת שיחה נכשלה");
+      navigate({ to: "/app/chat/$conversationId", params: { conversationId: data } });
+    } catch (error) {
+      toast.error(errorMessage(error, "פתיחת שיחה נכשלה"));
     } finally {
       setStartingId(null);
     }
   };
 
+  const retry = () => {
+    void discovery.retry();
+  };
+
+  const deckBusy = discovery.isSwipePending || discovery.isFavoritePending || startingId === character?.id;
+
   return (
-    <>
-      <div className="max-w-6xl mx-auto p-4 md:p-8">
-        <header className="mb-6">
-          <h1 className="text-2xl md:text-3xl font-bold">דמויות</h1>
-          <p className="text-sm text-muted-foreground mt-1">בחר דמות והתחל שיחה</p>
+    <TooltipProvider>
+      <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-xl flex-col px-4 py-6 md:min-h-screen md:py-8" dir="rtl">
+        <header className="mb-6 space-y-1 text-center">
+          <h1 className="text-2xl font-bold">גלו דמויות</h1>
+          <p className="text-sm text-muted-foreground">החליקו כדי לדלג או לסמן אהבתי</p>
         </header>
 
-        {isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-72" />
-            ))}
-          </div>
-        )}
+        <div className="flex flex-1 items-center justify-center">
+          {discovery.isLoading && (
+            <div className="w-full max-w-md space-y-4">
+              <Skeleton className="aspect-[4/3] w-full" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          )}
 
-        {error && (
-          <div className="text-center py-12 text-destructive">שגיאה בטעינת דמויות</div>
-        )}
+          {!discovery.isLoading && discovery.isError && !character && (
+            <div className="space-y-4 text-center">
+              <p className="text-sm text-destructive">טעינת הדמויות נכשלה</p>
+              <Button variant="outline" onClick={retry}>
+                <RefreshCw className="h-4 w-4" />
+                נסה שוב
+              </Button>
+            </div>
+          )}
 
-        {!isLoading && !error && data && data.length === 0 && (
-          <div className="text-center py-16">
-            <Users className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">אין דמויות זמינות כרגע</p>
-          </div>
-        )}
+          {!discovery.isLoading && !discovery.isError && !character && discovery.isLoadingMore && (
+            <div className="w-full max-w-md space-y-4">
+              <Skeleton className="aspect-[4/3] w-full" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          )}
 
-        {!isLoading && data && data.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data.map((c) => (
-              <Card key={c.id} className="overflow-hidden flex flex-col">
-                <div className="aspect-[4/3] bg-muted relative">
-                  {c.avatar_url ? (
-                    <img src={c.avatar_url} alt={c.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-4xl font-bold text-muted-foreground">
-                      {c.name[0]}
-                    </div>
-                  )}
-                  <span
-                    className={`absolute top-3 left-3 px-2 py-1 rounded-full text-xs font-medium ${
-                      c.availability_status === "available"
-                        ? "bg-success text-success-foreground"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {c.availability_status === "available" ? "זמין" : "עסוק"}
-                  </span>
-                </div>
-                <CardContent className="p-4 flex-1 flex flex-col">
-                  <div className="flex items-baseline justify-between mb-1">
-                    <h3 className="font-semibold text-lg">{c.name}</h3>
-                    {c.fictional_age && (
-                      <span className="text-xs text-muted-foreground">גיל {c.fictional_age}</span>
-                    )}
-                  </div>
-                  {c.category && (
-                    <span className="text-xs text-primary mb-2">{c.category}</span>
-                  )}
-                  {c.short_description && (
-                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                      {c.short_description}
-                    </p>
-                  )}
-                  {c.interests && c.interests.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-4">
-                      {c.interests.slice(0, 3).map((i) => (
-                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-accent text-accent-foreground">
-                          {i}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <Button
-                    className="mt-auto w-full"
-                    onClick={() => startChat(c.id)}
-                    disabled={startingId === c.id}
-                  >
-                    <MessageCirclePlus className="h-4 w-4" />
-                    {startingId === c.id ? "פותח..." : "התחל שיחה"}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {!discovery.isLoading && !discovery.isError && !character && !discovery.isLoadingMore && (
+            <div className="space-y-4 text-center">
+              <Users className="mx-auto h-12 w-12 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">אין עוד דמויות לגלות כרגע</p>
+              {discovery.hasMore && (
+                <Button variant="outline" onClick={() => void discovery.loadMore()}>
+                  <RefreshCw className="h-4 w-4" />
+                  טען עוד
+                </Button>
+              )}
+            </div>
+          )}
+
+          {character && (
+            <DiscoveryDeck
+              character={character}
+              visibleCount={discovery.visibleCount}
+              isFavorite={discovery.isFavorite(character.id)}
+              disabled={deckBusy}
+              startingChat={startingId === character.id}
+              onPass={() => void handleSwipe("pass")}
+              onLike={() => void handleSwipe("like")}
+              onFavorite={() => void handleFavorite()}
+              onStartChat={() => void startChat()}
+            />
+          )}
+        </div>
+
+        {character && discovery.isLoadingMore && <p className="pt-4 text-center text-xs text-muted-foreground">טוען דמויות נוספות...</p>}
+        {character && discovery.isError && <p className="pt-4 text-center text-xs text-destructive">טעינת דמויות נוספות נכשלה</p>}
+        {character && discovery.isFavorite(character.id) && (
+          <p className="pt-4 text-center text-xs text-muted-foreground">
+            <Heart className="ml-1 inline h-3.5 w-3.5 fill-current text-rose-600" />
+            הדמות שמורה במועדפים
+          </p>
         )}
       </div>
-    </>
+    </TooltipProvider>
   );
 }
