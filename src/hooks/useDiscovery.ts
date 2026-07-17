@@ -1,97 +1,52 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { Database, Json } from "@/integrations/supabase/types";
-
-const DISCOVERY_PAGE_SIZE = 12;
+import type { Database } from "@/integrations/supabase/types";
 
 type DiscoveryCharacter = Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
-type DiscoveryCursor = Pick<DiscoveryCharacter, "created_at" | "id">;
-type DiscoveryPage = { items: DiscoveryCharacter[]; nextCursor?: DiscoveryCursor };
 type Swipe = "like" | "pass";
-type FavoriteRpcResult = { is_favorite?: boolean };
+type DismissedCard = Pick<DiscoveryCharacter, "id" | "cycle_id">;
+type FavoriteMutationContext = { previousValue: boolean | undefined };
+type SwipeMutationContext = { previousDismissedCard: DismissedCard | null };
 
 function isBusinessError(error: unknown, code: string) {
   return typeof error === "object" && error !== null && "message" in error && String(error.message).includes(code);
 }
 
-async function fetchDiscoveryPage(cursor: DiscoveryCursor | null): Promise<DiscoveryPage> {
-  const { data, error } = await supabase.rpc("get_discovery_characters", {
-    _limit: DISCOVERY_PAGE_SIZE,
-    _cursor_created_at: cursor?.created_at,
-    _cursor_id: cursor?.id,
-  });
+async function fetchDiscoveryCharacter(): Promise<DiscoveryCharacter | null> {
+  const { data, error } = await supabase.rpc("get_discovery_characters");
   if (error) throw error;
-
-  const items = (data ?? []) as DiscoveryCharacter[];
-  const lastItem = items.at(-1);
-  return {
-    items,
-    nextCursor: lastItem ? { created_at: lastItem.created_at, id: lastItem.id } : undefined,
-  };
+  return data?.[0] ?? null;
 }
 
 export function useDiscovery(userId?: string) {
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
-  const [favoriteOverrides, setFavoriteOverrides] = useState<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
+  const [dismissedCard, setDismissedCard] = useState<DismissedCard | null>(null);
+  const [favoriteOverride, setFavoriteOverride] = useState<boolean | undefined>();
+  const queryKey = ["discovery-card", userId] as const;
 
-  const discoveryQuery = useInfiniteQuery({
-    queryKey: ["discovery", userId],
+  const discoveryQuery = useQuery({
+    queryKey,
     enabled: Boolean(userId),
-    initialPageParam: null as DiscoveryCursor | null,
-    queryFn: ({ pageParam }) => fetchDiscoveryPage(pageParam),
-    getNextPageParam: (lastPage) =>
-      lastPage.items.length === DISCOVERY_PAGE_SIZE ? lastPage.nextCursor : undefined,
+    queryFn: fetchDiscoveryCharacter,
   });
 
-  const allCharacters = useMemo(() => {
-    const byId = new Map<string, DiscoveryCharacter>();
-    discoveryQuery.data?.pages.forEach((page) => {
-      page.items.forEach((character) => byId.set(character.id, character));
-    });
-    return [...byId.values()];
-  }, [discoveryQuery.data?.pages]);
-
-  const preferenceCharacterIds = useMemo(() => allCharacters.map((character) => character.id), [allCharacters]);
-  const preferencesQuery = useQuery({
-    queryKey: ["discovery-preferences", userId, preferenceCharacterIds],
-    enabled: Boolean(userId) && preferenceCharacterIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("client_character_preferences")
-        .select("character_id, is_favorite")
-        .in("character_id", preferenceCharacterIds);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  const storedFavorites = useMemo(
-    () => new Map((preferencesQuery.data ?? []).map((preference) => [preference.character_id, preference.is_favorite])),
-    [preferencesQuery.data],
-  );
-
-  const visibleCharacters = useMemo(
-    () => allCharacters.filter((character) => !dismissedIds.has(character.id)),
-    [allCharacters, dismissedIds],
-  );
-
-  const { fetchNextPage, hasNextPage, isFetchingNextPage } = discoveryQuery;
+  const fetchedCharacter = discoveryQuery.data ?? null;
+  const activeCharacter =
+    fetchedCharacter &&
+    !(dismissedCard?.id === fetchedCharacter.id && dismissedCard.cycle_id === fetchedCharacter.cycle_id)
+      ? fetchedCharacter
+      : null;
 
   useEffect(() => {
-    setDismissedIds(new Set());
-    setFavoriteOverrides({});
+    setDismissedCard(null);
+    setFavoriteOverride(undefined);
   }, [userId]);
 
   useEffect(() => {
-    if (
-      visibleCharacters.length <= 3 &&
-      hasNextPage &&
-      !isFetchingNextPage
-    ) {
-      void fetchNextPage();
-    }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, visibleCharacters.length]);
+    if (!fetchedCharacter) return;
+    setFavoriteOverride(undefined);
+  }, [fetchedCharacter?.cycle_id, fetchedCharacter?.id]);
 
   const swipeMutation = useMutation({
     mutationFn: async ({ characterId, swipe }: { characterId: string; swipe: Swipe }) => {
@@ -100,21 +55,22 @@ export function useDiscovery(userId?: string) {
         _swipe: swipe,
       });
       if (error) throw error;
-      return data as Json;
+      return data;
     },
-    onMutate: ({ characterId }) => {
-      setDismissedIds((previous) => new Set(previous).add(characterId));
+    onMutate: ({ characterId }): SwipeMutationContext => {
+      const previousDismissedCard = dismissedCard;
+      if (fetchedCharacter?.id === characterId) {
+        setDismissedCard({ id: fetchedCharacter.id, cycle_id: fetchedCharacter.cycle_id });
+      }
+      return { previousDismissedCard };
     },
-    onError: (error, { characterId }) => {
-      if (isBusinessError(error, "swipe_already_recorded")) {
-        void discoveryQuery.refetch();
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onError: (error, _variables, context) => {
+      if (isBusinessError(error, "character_not_available")) {
+        void queryClient.invalidateQueries({ queryKey });
         return;
       }
-      setDismissedIds((previous) => {
-        const next = new Set(previous);
-        next.delete(characterId);
-        return next;
-      });
+      setDismissedCard(context?.previousDismissedCard ?? null);
     },
   });
 
@@ -125,22 +81,15 @@ export function useDiscovery(userId?: string) {
         _is_favorite: isFavorite,
       });
       if (error) throw error;
-      return data as FavoriteRpcResult;
+      return data;
     },
-    onMutate: ({ characterId, isFavorite }) => {
-      const hadOverride = Object.hasOwn(favoriteOverrides, characterId);
-      const previousOverride = favoriteOverrides[characterId];
-      setFavoriteOverrides((previous) => ({ ...previous, [characterId]: isFavorite }));
-      return { characterId, hadOverride, previousOverride };
+    onMutate: ({ isFavorite }): FavoriteMutationContext => {
+      const previousValue = favoriteOverride;
+      setFavoriteOverride(isFavorite);
+      return { previousValue };
     },
     onError: (_error, _variables, context) => {
-      if (!context) return;
-      setFavoriteOverrides((previous) => {
-        const next = { ...previous };
-        if (context.hadOverride) next[context.characterId] = context.previousOverride;
-        else delete next[context.characterId];
-        return next;
-      });
+      setFavoriteOverride(context?.previousValue);
     },
   });
 
@@ -154,25 +103,18 @@ export function useDiscovery(userId?: string) {
     [favoriteMutation],
   );
 
-  const isFavorite = useCallback(
-    (characterId: string) => favoriteOverrides[characterId] ?? storedFavorites.get(characterId) ?? false,
-    [favoriteOverrides, storedFavorites],
-  );
-
   return {
-    activeCharacter: visibleCharacters[0] ?? null,
-    visibleCount: visibleCharacters.length,
-    isFavorite,
-    swipe,
-    setFavorite,
+    activeCharacter,
+    isFavorite: favoriteOverride ?? activeCharacter?.is_favorite ?? false,
     retry: discoveryQuery.refetch,
-    loadMore: discoveryQuery.fetchNextPage,
-    hasMore: Boolean(discoveryQuery.hasNextPage),
     isLoading: discoveryQuery.isLoading,
-    isLoadingMore: discoveryQuery.isFetchingNextPage,
+    isRefreshing: discoveryQuery.isFetching && !discoveryQuery.isLoading,
     isError: discoveryQuery.isError,
+    isEmpty: !discoveryQuery.isLoading && !discoveryQuery.isError && fetchedCharacter === null,
     isSwipePending: swipeMutation.isPending,
     isFavoritePending: favoriteMutation.isPending,
+    swipe,
+    setFavorite,
     error: discoveryQuery.error,
   };
 }

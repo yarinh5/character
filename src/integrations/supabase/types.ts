@@ -199,8 +199,9 @@ export type Database = {
           created_at: string
           favorited_at: string | null
           is_favorite: boolean
-          swipe: string | null
-          swiped_at: string | null
+          last_seen_at: string | null
+          liked_at: string | null
+          shown_count: number
           updated_at: string
         }
         Insert: {
@@ -209,8 +210,9 @@ export type Database = {
           created_at?: string
           favorited_at?: string | null
           is_favorite?: boolean
-          swipe?: string | null
-          swiped_at?: string | null
+          last_seen_at?: string | null
+          liked_at?: string | null
+          shown_count?: number
           updated_at?: string
         }
         Update: {
@@ -219,8 +221,9 @@ export type Database = {
           created_at?: string
           favorited_at?: string | null
           is_favorite?: boolean
-          swipe?: string | null
-          swiped_at?: string | null
+          last_seen_at?: string | null
+          liked_at?: string | null
+          shown_count?: number
           updated_at?: string
         }
         Relationships: [
@@ -258,6 +261,75 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      client_discovery_cycle_items: {
+        Row: {
+          acted_at: string | null
+          action: string | null
+          character_id: string
+          cycle_id: string
+          is_recycled: boolean
+          shown_at: string
+        }
+        Insert: {
+          acted_at?: string | null
+          action?: string | null
+          character_id: string
+          cycle_id: string
+          is_recycled?: boolean
+          shown_at?: string
+        }
+        Update: {
+          acted_at?: string | null
+          action?: string | null
+          character_id?: string
+          cycle_id?: string
+          is_recycled?: boolean
+          shown_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_discovery_cycle_items_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_discovery_cycle_items_cycle_id_fkey"
+            columns: ["cycle_id"]
+            isOneToOne: false
+            referencedRelation: "client_discovery_cycles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_discovery_cycles: {
+        Row: {
+          client_id: string
+          completed_at: string | null
+          cycle_number: number
+          filter_hash: string
+          id: string
+          started_at: string
+        }
+        Insert: {
+          client_id: string
+          completed_at?: string | null
+          cycle_number: number
+          filter_hash: string
+          id?: string
+          started_at?: string
+        }
+        Update: {
+          client_id?: string
+          completed_at?: string | null
+          cycle_number?: number
+          filter_hash?: string
+          id?: string
+          started_at?: string
+        }
+        Relationships: []
       }
       client_profiles: {
         Row: {
@@ -1149,19 +1221,21 @@ export type Database = {
         Returns: Json
       }
       get_discovery_characters: {
-        Args: {
-          _cursor_created_at?: string
-          _cursor_id?: string
-          _limit?: number
-        }
+        Args: never
         Returns: {
           availability_status: Database["public"]["Enums"]["availability_status"]
           avatar_url: string
           category: string
+          conversation_id: string
           created_at: string
+          cycle_id: string
+          cycle_number: number
           fictional_age: number
           id: string
           interests: string[]
+          is_favorite: boolean
+          is_liked: boolean
+          is_recycled: boolean
           name: string
           short_description: string
         }[]

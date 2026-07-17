@@ -10,6 +10,8 @@ type DiscoveryCardProps = {
   character: DiscoveryCharacter;
   headingRef: RefObject<HTMLHeadingElement | null>;
   isFavorite: boolean;
+  isLiked: boolean;
+  conversationId: string | null;
   disabled: boolean;
   startingChat: boolean;
   onPass: () => void;
@@ -22,6 +24,8 @@ export function DiscoveryCard({
   character,
   headingRef,
   isFavorite,
+  isLiked,
+  conversationId,
   disabled,
   startingChat,
   onPass,
@@ -76,6 +80,11 @@ export function DiscoveryCard({
         >
           {character.availability_status === "available" ? "זמינה" : "לא זמינה כרגע"}
         </span>
+        {isLiked && (
+          <span className="absolute right-3 top-3 rounded-full bg-rose-600 px-2 py-1 text-xs font-medium text-white">
+            אהבת
+          </span>
+        )}
       </div>
       <CardContent className="space-y-4 p-5">
         <div className="space-y-1">
@@ -99,6 +108,8 @@ export function DiscoveryCard({
         )}
         <DiscoveryActionBar
           isFavorite={isFavorite}
+          isLiked={isLiked}
+          conversationId={conversationId}
           disabled={disabled}
           startingChat={startingChat}
           onPass={onPass}

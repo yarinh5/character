@@ -6,8 +6,9 @@ type DiscoveryCharacter = Database["public"]["Functions"]["get_discovery_charact
 
 type DiscoveryDeckProps = {
   character: DiscoveryCharacter;
-  visibleCount: number;
   isFavorite: boolean;
+  isLiked: boolean;
+  conversationId: string | null;
   disabled: boolean;
   startingChat: boolean;
   onPass: () => void;
@@ -16,7 +17,7 @@ type DiscoveryDeckProps = {
   onStartChat: () => void;
 };
 
-export function DiscoveryDeck({ character, visibleCount, ...props }: DiscoveryDeckProps) {
+export function DiscoveryDeck({ character, ...props }: DiscoveryDeckProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export function DiscoveryDeck({ character, visibleCount, ...props }: DiscoveryDe
   return (
     <div className="mx-auto w-full max-w-md space-y-3">
       <p className="text-center text-xs text-muted-foreground" aria-live="polite">
-        {visibleCount > 1 ? `נשארו ${visibleCount} דמויות בטעינה הנוכחית` : "דמות אחרונה בטעינה הנוכחית"}
+        {character.is_recycled ? "דמות ממחזור קודם" : `מחזור גילוי ${character.cycle_number}`}
       </p>
       <DiscoveryCard character={character} headingRef={headingRef} {...props} />
     </div>

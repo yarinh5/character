@@ -47,9 +47,8 @@ function CharactersPage() {
 
   const handleFavorite = async () => {
     if (!character || discovery.isFavoritePending) return;
-    const nextFavorite = !discovery.isFavorite(character.id);
     try {
-      await discovery.setFavorite(character.id, nextFavorite);
+      await discovery.setFavorite(character.id, !discovery.isFavorite);
     } catch (error) {
       toast.error(errorMessage(error, "עדכון המועדפים נכשל"));
     }
@@ -71,10 +70,6 @@ function CharactersPage() {
     }
   };
 
-  const retry = () => {
-    void discovery.retry();
-  };
-
   const deckBusy = discovery.isSwipePending || discovery.isFavoritePending || startingId === character?.id;
 
   return (
@@ -86,7 +81,7 @@ function CharactersPage() {
         </header>
 
         <div className="flex flex-1 items-center justify-center">
-          {discovery.isLoading && (
+          {(discovery.isLoading || (!character && discovery.isRefreshing)) && (
             <div className="w-full max-w-md space-y-4">
               <Skeleton className="aspect-[4/3] w-full" />
               <Skeleton className="h-32 w-full" />
@@ -96,38 +91,26 @@ function CharactersPage() {
           {!discovery.isLoading && discovery.isError && !character && (
             <div className="space-y-4 text-center">
               <p className="text-sm text-destructive">טעינת הדמויות נכשלה</p>
-              <Button variant="outline" onClick={retry}>
+              <Button variant="outline" onClick={() => void discovery.retry()}>
                 <RefreshCw className="h-4 w-4" />
                 נסה שוב
               </Button>
             </div>
           )}
 
-          {!discovery.isLoading && !discovery.isError && !character && discovery.isLoadingMore && (
-            <div className="w-full max-w-md space-y-4">
-              <Skeleton className="aspect-[4/3] w-full" />
-              <Skeleton className="h-32 w-full" />
-            </div>
-          )}
-
-          {!discovery.isLoading && !discovery.isError && !character && !discovery.isLoadingMore && (
+          {discovery.isEmpty && (
             <div className="space-y-4 text-center">
               <Users className="mx-auto h-12 w-12 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">אין עוד דמויות לגלות כרגע</p>
-              {discovery.hasMore && (
-                <Button variant="outline" onClick={() => void discovery.loadMore()}>
-                  <RefreshCw className="h-4 w-4" />
-                  טען עוד
-                </Button>
-              )}
+              <p className="text-sm text-muted-foreground">אין דמויות זמינות כרגע</p>
             </div>
           )}
 
           {character && (
             <DiscoveryDeck
               character={character}
-              visibleCount={discovery.visibleCount}
-              isFavorite={discovery.isFavorite(character.id)}
+              isFavorite={discovery.isFavorite}
+              isLiked={character.is_liked}
+              conversationId={character.conversation_id || null}
               disabled={deckBusy}
               startingChat={startingId === character.id}
               onPass={() => void handleSwipe("pass")}
@@ -138,9 +121,7 @@ function CharactersPage() {
           )}
         </div>
 
-        {character && discovery.isLoadingMore && <p className="pt-4 text-center text-xs text-muted-foreground">טוען דמויות נוספות...</p>}
-        {character && discovery.isError && <p className="pt-4 text-center text-xs text-destructive">טעינת דמויות נוספות נכשלה</p>}
-        {character && discovery.isFavorite(character.id) && (
+        {character && discovery.isFavorite && (
           <p className="pt-4 text-center text-xs text-muted-foreground">
             <Heart className="ml-1 inline h-3.5 w-3.5 fill-current text-rose-600" />
             הדמות שמורה במועדפים

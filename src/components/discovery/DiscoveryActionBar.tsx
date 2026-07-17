@@ -1,10 +1,12 @@
 import type { ComponentProps } from "react";
-import { Heart, MessageCirclePlus, Star, X } from "lucide-react";
+import { Check, Heart, MessageCirclePlus, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type DiscoveryActionBarProps = {
   isFavorite: boolean;
+  isLiked: boolean;
+  conversationId: string | null;
   disabled: boolean;
   startingChat: boolean;
   onPass: () => void;
@@ -32,6 +34,8 @@ function IconAction({
 
 export function DiscoveryActionBar({
   isFavorite,
+  isLiked,
+  conversationId,
   disabled,
   startingChat,
   onPass,
@@ -60,16 +64,16 @@ export function DiscoveryActionBar({
         <Star className={`h-5 w-5 ${isFavorite ? "fill-amber-400 text-amber-500" : ""}`} />
       </IconAction>
       <IconAction
-        label="אהבתי"
+        label={isLiked ? "אהבת" : "אהבתי"}
         disabled={disabled}
         onClick={onLike}
         className="h-12 w-12 rounded-full bg-rose-600 text-white hover:bg-rose-700"
       >
-        <Heart className="h-5 w-5 fill-current" />
+        {isLiked ? <Check className="h-5 w-5" /> : <Heart className="h-5 w-5 fill-current" />}
       </IconAction>
       <Button variant="secondary" disabled={disabled || startingChat} onClick={onStartChat} className="h-12 px-4">
         <MessageCirclePlus className="h-4 w-4" />
-        {startingChat ? "פותח שיחה..." : "התחל שיחה"}
+        {startingChat ? "פותח שיחה..." : conversationId ? "המשך שיחה" : "התחל שיחה"}
       </Button>
     </div>
   );
