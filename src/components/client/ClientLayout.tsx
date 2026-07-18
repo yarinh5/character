@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Users, MessageCircle, User, LogOut, Coins } from "lucide-react";
+import { Users, MessageCircle, User, LogOut, Coins, Star } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 const NAV = [
   { to: "/app/characters", label: "דמויות", icon: Users },
+  { to: "/app/favorites", label: "מועדפים", icon: Star },
   { to: "/app/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/app/profile", label: "פרופיל", icon: User },
   { to: "/app/packages", label: "חבילות", icon: Coins },
@@ -64,7 +65,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {NAV.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}

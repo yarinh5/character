@@ -29,6 +29,7 @@ import { Route as OperatorAnalyticsRouteImport } from './routes/operator.analyti
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppPackagesRouteImport } from './routes/app.packages'
 import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
+import { Route as AppFavoritesRouteImport } from './routes/app.favorites'
 import { Route as AppConversationsRouteImport } from './routes/app.conversations'
 import { Route as AppCharactersRouteImport } from './routes/app.characters'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -146,6 +147,11 @@ const AppPackagesRoute = AppPackagesRouteImport.update({
 const AppOnboardingRoute = AppOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFavoritesRoute = AppFavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
   getParentRoute: () => AppRoute,
 } as any)
 const AppConversationsRoute = AppConversationsRouteImport.update({
@@ -267,6 +273,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
+  '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
@@ -303,6 +310,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
+  '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
@@ -344,6 +352,7 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
+  '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
@@ -386,6 +395,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
+    | '/app/favorites'
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
@@ -422,6 +432,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
+    | '/app/favorites'
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
@@ -462,6 +473,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
+    | '/app/favorites'
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
@@ -632,6 +644,13 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/app/onboarding'
       preLoaderRoute: typeof AppOnboardingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/favorites': {
+      id: '/app/favorites'
+      path: '/favorites'
+      fullPath: '/app/favorites'
+      preLoaderRoute: typeof AppFavoritesRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/conversations': {
@@ -811,6 +830,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface AppRouteChildren {
   AppCharactersRoute: typeof AppCharactersRoute
   AppConversationsRoute: typeof AppConversationsRoute
+  AppFavoritesRoute: typeof AppFavoritesRoute
   AppOnboardingRoute: typeof AppOnboardingRoute
   AppPackagesRoute: typeof AppPackagesRoute
   AppProfileRoute: typeof AppProfileRoute
@@ -821,6 +841,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppCharactersRoute: AppCharactersRoute,
   AppConversationsRoute: AppConversationsRoute,
+  AppFavoritesRoute: AppFavoritesRoute,
   AppOnboardingRoute: AppOnboardingRoute,
   AppPackagesRoute: AppPackagesRoute,
   AppProfileRoute: AppProfileRoute,

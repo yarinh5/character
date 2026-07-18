@@ -88,6 +88,9 @@ export function useDiscovery(userId?: string) {
       setFavoriteOverride(isFavorite);
       return { previousValue };
     },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["favorites", userId] });
+    },
     onError: (_error, _variables, context) => {
       setFavoriteOverride(context?.previousValue);
     },
