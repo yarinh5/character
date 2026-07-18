@@ -19,6 +19,7 @@ import { ArrowRight, FileText, Info, Send } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
+import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import {
   getOldestMessageCursor,
   isNearScrollBottom,
@@ -44,18 +45,10 @@ type AdminMessage = {
   created_at: string;
   is_read: boolean;
   operators?: { full_name: string | null; user_id?: string | null } | null;
-  message_attachments?: MessageAttachment[];
+  message_attachments?: MessageAttachmentData[];
 };
 
-type MessageAttachment = {
-  id: string;
-  message_id: string;
-  kind: string;
-  position: number;
-  caption: string | null;
-  metadata: unknown;
-  created_at: string;
-};
+type MessageAttachmentData = ChatMessageAttachment;
 
 function ConvView() {
   const { conversationId } = Route.useParams();
@@ -86,7 +79,7 @@ function ConvView() {
       .eq("message_id", message.id)
       .order("position", { ascending: true });
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
   };
 
   const loadLatestMessages = async (requestVersion: number) => {
@@ -585,6 +578,8 @@ function ConvView() {
               )}
               {messages.map((m: any) => {
                 const isClientMessage = m.sender_type === "client";
+                const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
+                const showContent = m.content !== "[image]" || !hasAttachments;
                 return (
                 <div
                   key={m.id}
@@ -610,7 +605,10 @@ function ConvView() {
                           ? `${adminOperatorUserIds.includes(m.operators?.user_id) ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
                           : "אדמין"}
                     </div>
-                    <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>
+                    {showContent && <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>}
+                    {m.message_attachments?.map((attachment: MessageAttachmentData) => (
+                      <MessageAttachment key={attachment.id} attachment={attachment} />
+                    ))}
                     <div className="text-[10px] opacity-60 mt-1">
                       {new Date(m.created_at).toLocaleTimeString("he-IL")}
                       {m.sender_type !== "client" && (

@@ -14,6 +14,7 @@ import {
   sortMessagesAsc,
 } from "@/lib/messagePagination";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
+import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -39,18 +40,10 @@ type Msg = {
   content: string;
   created_at: string;
   is_read: boolean;
-  message_attachments?: MessageAttachment[];
+  message_attachments?: MessageAttachmentData[];
 };
 
-type MessageAttachment = {
-  id: string;
-  message_id: string;
-  kind: string;
-  position: number;
-  caption: string | null;
-  metadata: unknown;
-  created_at: string;
-};
+type MessageAttachmentData = ChatMessageAttachment;
 
 type Conv = {
   id: string;
@@ -108,7 +101,7 @@ function ChatPage() {
       .eq("message_id", message.id)
       .order("position", { ascending: true });
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
   };
 
   const loadOlderMessages = async () => {
@@ -406,6 +399,8 @@ function ChatPage() {
           }
           const avatarUrl = mine ? clientAvatarUrl : character?.avatar_url;
           const avatarName = mine ? clientDisplayName : character?.name;
+          const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
+          const showContent = m.content !== "[image]" || !hasAttachments;
           return (
             <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-start" : "justify-end"}`}>
               <ChatAvatar src={avatarUrl} name={avatarName} />
@@ -416,7 +411,10 @@ function ChatPage() {
                     : "bg-card border border-border rounded-br-sm"
                 }`}
               >
-                <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
+                {m.message_attachments?.map((attachment) => (
+                  <MessageAttachment key={attachment.id} attachment={attachment} />
+                ))}
                 <p className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                   {new Date(m.created_at).toLocaleTimeString("he-IL", {
                     hour: "2-digit",

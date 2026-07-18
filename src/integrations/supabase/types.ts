@@ -1589,6 +1589,14 @@ export type Database = {
         Args: { _asset_id: string; _conversation_id: string }
         Returns: Json
       }
+      resolve_character_media_preview_path_for_server: {
+        Args: {
+          _actor_user_id: string
+          _target_id: string
+          _target_kind: string
+        }
+        Returns: string
+      }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
         Returns: Json
@@ -1651,7 +1659,6 @@ export type Database = {
     }
   }
 }
-
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]

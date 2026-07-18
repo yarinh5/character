@@ -13,6 +13,7 @@ import {
 } from "@/lib/messagePagination";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
+import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -40,18 +41,10 @@ type Msg = {
   created_at: string;
   is_read: boolean;
   operators?: { full_name: string; user_id?: string | null } | null;
-  message_attachments?: MessageAttachment[];
+  message_attachments?: MessageAttachmentData[];
 };
 
-type MessageAttachment = {
-  id: string;
-  message_id: string;
-  kind: string;
-  position: number;
-  caption: string | null;
-  metadata: unknown;
-  created_at: string;
-};
+type MessageAttachmentData = ChatMessageAttachment;
 
 type Conv = {
   id: string;
@@ -154,7 +147,7 @@ function OperatorChatPage() {
       .eq("message_id", message.id)
       .order("position", { ascending: true });
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
   };
 
   const loadOlderMessages = async () => {
@@ -779,6 +772,8 @@ function OperatorChatPage() {
               const isOps = m.sender_type === "operator" || m.sender_type === "admin";
               const avatarUrl = isOps ? conv?.characters?.avatar_url : client?.avatar_url;
               const avatarName = isOps ? conv?.characters?.name : client?.display_name ?? client?.email;
+              const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
+              const showContent = m.content !== "[image]" || !hasAttachments;
               return (
                 <div key={m.id} className={`flex items-end gap-2 ${isOps ? "justify-start" : "justify-end"}`}>
                   <ChatAvatar src={avatarUrl} name={avatarName} />
@@ -798,7 +793,10 @@ function OperatorChatPage() {
                             : "עובד"}
                       </p>
                     )}
-                    <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                    {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
+                    {m.message_attachments?.map((attachment) => (
+                      <MessageAttachment key={attachment.id} attachment={attachment} />
+                    ))}
                     <p className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                       {new Date(m.created_at).toLocaleTimeString("he-IL", {
                         hour: "2-digit",
