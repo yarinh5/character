@@ -102,6 +102,156 @@ export type Database = {
         }
         Relationships: []
       }
+      character_media_assets: {
+        Row: {
+          bucket_id: string
+          byte_size: number | null
+          character_id: string
+          content_type: string
+          created_at: string
+          created_by_user_id: string | null
+          disabled_at: string | null
+          disabled_by_user_id: string | null
+          disabled_reason: string | null
+          display_name: string | null
+          height: number | null
+          id: string
+          ingest_status: string
+          metadata: Json
+          preview_path: string | null
+          sha256: string | null
+          source_path: string
+          status: string
+          updated_at: string
+          updated_by_user_id: string | null
+          width: number | null
+        }
+        Insert: {
+          bucket_id?: string
+          byte_size?: number | null
+          character_id: string
+          content_type: string
+          created_at?: string
+          created_by_user_id?: string | null
+          disabled_at?: string | null
+          disabled_by_user_id?: string | null
+          disabled_reason?: string | null
+          display_name?: string | null
+          height?: number | null
+          id?: string
+          ingest_status?: string
+          metadata?: Json
+          preview_path?: string | null
+          sha256?: string | null
+          source_path: string
+          status?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          width?: number | null
+        }
+        Update: {
+          bucket_id?: string
+          byte_size?: number | null
+          character_id?: string
+          content_type?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          disabled_at?: string | null
+          disabled_by_user_id?: string | null
+          disabled_reason?: string | null
+          display_name?: string | null
+          height?: number | null
+          id?: string
+          ingest_status?: string
+          metadata?: Json
+          preview_path?: string | null
+          sha256?: string | null
+          source_path?: string
+          status?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_media_assets_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      character_media_reservations: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          ended_at: string | null
+          ended_by_user_id: string | null
+          ended_reason: string | null
+          expires_at: string
+          id: string
+          media_asset_id: string
+          metadata: Json
+          operator_id: string
+          previous_asset_status: string
+          reserved_by_user_id: string
+          state: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          ended_at?: string | null
+          ended_by_user_id?: string | null
+          ended_reason?: string | null
+          expires_at: string
+          id?: string
+          media_asset_id: string
+          metadata?: Json
+          operator_id: string
+          previous_asset_status: string
+          reserved_by_user_id: string
+          state?: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          ended_at?: string | null
+          ended_by_user_id?: string | null
+          ended_reason?: string | null
+          expires_at?: string
+          id?: string
+          media_asset_id?: string
+          metadata?: Json
+          operator_id?: string
+          previous_asset_status?: string
+          reserved_by_user_id?: string
+          state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_media_reservations_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_media_reservations_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "character_media_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_media_reservations_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       character_operator_assignments: {
         Row: {
           character_id: string
@@ -1238,6 +1388,18 @@ export type Database = {
         Returns: Json
       }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      complete_character_media_upload: {
+        Args: { _asset_id: string }
+        Returns: Json
+      }
+      create_character_media_upload_intent: {
+        Args: {
+          _character_id: string
+          _content_type: string
+          _display_name?: string
+        }
+        Returns: Json
+      }
       create_notification: {
         Args: {
           _body?: string
@@ -1287,6 +1449,22 @@ export type Database = {
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
+      }
+      get_operator_media_catalog: {
+        Args: { _conversation_id: string }
+        Returns: {
+          byte_size: number
+          content_type: string
+          display_name: string
+          height: number
+          id: string
+          ingest_status: string
+          is_reservable: boolean
+          reservation_expires_at: string
+          reservation_id: string
+          status: string
+          width: number
+        }[]
       }
       get_sla_risk_conversations: {
         Args: { _limit?: number; _notify?: boolean }
@@ -1341,8 +1519,16 @@ export type Database = {
         Args: { _character_id: string }
         Returns: boolean
       }
+      release_character_media_reservation: {
+        Args: { _reservation_id: string }
+        Returns: Json
+      }
       release_conversation_lock: {
         Args: { _conversation_id: string }
+        Returns: Json
+      }
+      reserve_character_media_asset: {
+        Args: { _asset_id: string; _conversation_id: string }
         Returns: Json
       }
       send_client_message: {
