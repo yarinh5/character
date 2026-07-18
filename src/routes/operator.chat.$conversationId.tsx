@@ -12,6 +12,7 @@ import {
   sortMessagesAsc,
 } from "@/lib/messagePagination";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
+import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { ArrowRight, Send, User, FileText, Lock, Unlock, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -117,6 +119,7 @@ function OperatorChatPage() {
   const [noteInput, setNoteInput] = useState("");
   const [customerInfoInput, setCustomerInfoInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
@@ -868,6 +871,25 @@ function OperatorChatPage() {
                     className="resize-none min-h-[40px] max-h-32"
                     disabled={sendBlockedByLock}
                   />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setMediaPickerOpen(true)}
+                          disabled={sendBlockedByLock}
+                          aria-label="בחירת מדיה לשליחה"
+                        >
+                          <ImagePlus className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "בחירת מדיה"}
+                    </TooltipContent>
+                  </Tooltip>
                   <Button onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
                     <Send className="h-4 w-4" />
                   </Button>
@@ -902,6 +924,11 @@ function OperatorChatPage() {
           </div>
         </aside>
       </div>
+      <OperatorMediaPicker
+        conversationId={conversationId}
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+      />
     </div>
   );
 }

@@ -1,0 +1,511 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Clock3, Image, LoaderCircle, RefreshCw, Send, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useMediaViewUrl } from "@/hooks/useMediaViewUrl";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { toast } from "sonner";
+
+type CatalogAsset =
+  Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number];
+
+type SelectedReservation = {
+  assetId: string;
+  displayName: string;
+  expiresAt: string;
+  reservationId: string;
+};
+
+type ReservationResponse = {
+  reservation_id?: unknown;
+  expires_at?: unknown;
+};
+
+type SendResponse = {
+  already_sent?: unknown;
+};
+
+function getErrorMessage(error: { message?: string } | null) {
+  return error?.message ?? "";
+}
+
+function showCatalogError(message: string) {
+  if (message.includes("conversation_locked_by_other_operator")) {
+    toast.error("השיחה נעולה כרגע לעובד אחר");
+    return;
+  }
+  if (message.includes("conversation_closed")) {
+    toast.error("לא ניתן לבחור מדיה בשיחה סגורה");
+    return;
+  }
+  toast.error("טעינת מאגר המדיה נכשלה");
+}
+
+function showReservationError(message: string) {
+  if (message.includes("conversation_locked_by_other_operator")) {
+    toast.error("השיחה נעולה כרגע לעובד אחר");
+    return;
+  }
+  if (message.includes("media_asset_not_reservable") || message.includes("media_asset_not_ready")) {
+    toast.error("המדיה כבר אינה זמינה לבחירה");
+    return;
+  }
+  toast.error("שמירת המדיה נכשלה");
+}
+
+function showSendError(message: string) {
+  if (message.includes("conversation_locked_by_other_operator")) {
+    toast.error("השיחה נעולה כרגע לעובד אחר");
+    return;
+  }
+  if (message.includes("media_reservation_expired")) {
+    toast.error("זמן הבחירה הסתיים. יש לבחור מדיה מחדש");
+    return;
+  }
+  if (
+    message.includes("media_reservation_released") ||
+    message.includes("media_reservation_not_owned")
+  ) {
+    toast.error("הבחירה אינה זמינה יותר");
+    return;
+  }
+  if (message.includes("media_not_available")) {
+    toast.error("תצוגת המדיה אינה זמינה כרגע");
+    return;
+  }
+  toast.error("שליחת המדיה נכשלה");
+}
+
+function formatBytes(byteSize: number) {
+  if (byteSize < 1024 * 1024) return `${Math.max(1, Math.round(byteSize / 1024))} KB`;
+  return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatRemaining(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function OperatorMediaPicker({
+  conversationId,
+  open,
+  onOpenChange,
+}: {
+  conversationId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const isMobile = useIsMobile();
+  const [catalog, setCatalog] = useState<CatalogAsset[]>([]);
+  const [catalogState, setCatalogState] = useState<"idle" | "loading" | "error" | "ready">("idle");
+  const [reservation, setReservation] = useState<SelectedReservation | null>(null);
+  const [caption, setCaption] = useState("");
+  const [reservingAssetId, setReservingAssetId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  const reservationRef = useRef<SelectedReservation | null>(null);
+  const releaseInFlightRef = useRef<string | null>(null);
+  const catalogRequestRef = useRef(0);
+  const preview = useMediaViewUrl("reserved_preview", reservation?.reservationId);
+
+  const clearReservation = useCallback(() => {
+    reservationRef.current = null;
+    setReservation(null);
+    setCaption("");
+  }, []);
+
+  const loadCatalog = useCallback(async () => {
+    const requestVersion = ++catalogRequestRef.current;
+    setCatalogState("loading");
+    const { data, error } = await supabase.rpc("get_operator_media_catalog", {
+      _conversation_id: conversationId,
+    });
+    if (requestVersion !== catalogRequestRef.current) return;
+
+    if (error) {
+      setCatalogState("error");
+      showCatalogError(getErrorMessage(error));
+      return;
+    }
+
+    const nextCatalog = data ?? [];
+    setCatalog(nextCatalog);
+    setCatalogState("ready");
+
+    const ownReservation = nextCatalog.find(
+      (asset) =>
+        asset.is_reserved_by_me && asset.my_reservation_id && asset.my_reservation_expires_at,
+    );
+    if (ownReservation && !reservationRef.current) {
+      const nextReservation = {
+        assetId: ownReservation.id,
+        displayName: ownReservation.display_name,
+        expiresAt: ownReservation.my_reservation_expires_at,
+        reservationId: ownReservation.my_reservation_id,
+      };
+      reservationRef.current = nextReservation;
+      setReservation(nextReservation);
+    }
+    if (!ownReservation && reservationRef.current) clearReservation();
+  }, [clearReservation, conversationId]);
+
+  const releaseReservation = useCallback(
+    async (reservationId: string, notify: boolean) => {
+      if (releaseInFlightRef.current === reservationId) return;
+      releaseInFlightRef.current = reservationId;
+      if (reservationRef.current?.reservationId === reservationId) clearReservation();
+
+      const { error } = await supabase.rpc("release_character_media_reservation", {
+        _reservation_id: reservationId,
+      });
+      releaseInFlightRef.current = null;
+
+      if (error) {
+        if (notify) toast.error("שחרור בחירת המדיה נכשל");
+        return;
+      }
+      void loadCatalog();
+      if (notify) toast.success("בחירת המדיה שוחררה");
+    },
+    [clearReservation, loadCatalog],
+  );
+
+  const closePicker = useCallback(() => {
+    if (sending) return;
+    const activeReservation = reservationRef.current;
+    if (activeReservation) void releaseReservation(activeReservation.reservationId, false);
+    onOpenChange(false);
+  }, [onOpenChange, releaseReservation, sending]);
+
+  useEffect(() => {
+    if (!open) return;
+    void loadCatalog();
+  }, [loadCatalog, open]);
+
+  useEffect(() => {
+    return () => {
+      const activeReservation = reservationRef.current;
+      if (activeReservation) void releaseReservation(activeReservation.reservationId, false);
+    };
+  }, [releaseReservation]);
+
+  useEffect(() => {
+    if (!reservation) return;
+    const interval = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [reservation]);
+
+  const remainingMilliseconds = useMemo(
+    () => (reservation ? new Date(reservation.expiresAt).getTime() - clock : 0),
+    [clock, reservation],
+  );
+
+  useEffect(() => {
+    if (!reservation || remainingMilliseconds > 0) return;
+    clearReservation();
+    void loadCatalog();
+    toast.error("זמן הבחירה הסתיים. יש לבחור מדיה מחדש");
+  }, [clearReservation, loadCatalog, remainingMilliseconds, reservation]);
+
+  const selectAsset = async (asset: CatalogAsset) => {
+    if (reservation || reservingAssetId) return;
+
+    if (asset.is_reserved_by_me && asset.my_reservation_id && asset.my_reservation_expires_at) {
+      const nextReservation = {
+        assetId: asset.id,
+        displayName: asset.display_name,
+        expiresAt: asset.my_reservation_expires_at,
+        reservationId: asset.my_reservation_id,
+      };
+      reservationRef.current = nextReservation;
+      setReservation(nextReservation);
+      return;
+    }
+
+    if (!asset.is_reservable) return;
+    setReservingAssetId(asset.id);
+    const { data, error } = await supabase.rpc("reserve_character_media_asset", {
+      _asset_id: asset.id,
+      _conversation_id: conversationId,
+    });
+    setReservingAssetId(null);
+
+    if (error) {
+      showReservationError(getErrorMessage(error));
+      void loadCatalog();
+      return;
+    }
+
+    const payload = (data ?? {}) as ReservationResponse;
+    if (typeof payload.reservation_id !== "string" || typeof payload.expires_at !== "string") {
+      toast.error("לא התקבל אישור תקין לבחירת המדיה");
+      void loadCatalog();
+      return;
+    }
+    const reservationId = payload.reservation_id;
+    const expiresAt = payload.expires_at;
+
+    const nextReservation = {
+      assetId: asset.id,
+      displayName: asset.display_name,
+      expiresAt,
+      reservationId,
+    };
+    reservationRef.current = nextReservation;
+    setReservation(nextReservation);
+    setCatalog((current) =>
+      current.map((currentAsset) =>
+        currentAsset.id === asset.id
+          ? {
+              ...currentAsset,
+              is_reservable: false,
+              is_reserved_by_me: true,
+              my_reservation_id: reservationId,
+              my_reservation_expires_at: expiresAt,
+              status: "reserved",
+            }
+          : currentAsset,
+      ),
+    );
+  };
+
+  const sendMedia = async () => {
+    if (!reservation || sending) return;
+    if (remainingMilliseconds <= 0) {
+      clearReservation();
+      void loadCatalog();
+      toast.error("זמן הבחירה הסתיים. יש לבחור מדיה מחדש");
+      return;
+    }
+    if (preview.status !== "ready" || !preview.url) {
+      toast.error("אי אפשר לשלוח לפני שהתצוגה המקדימה נטענת בהצלחה");
+      return;
+    }
+
+    setSending(true);
+    const { data, error } = await supabase.rpc("send_operator_media_message", {
+      _reservation_id: reservation.reservationId,
+      _caption: caption.trim() || undefined,
+    });
+    setSending(false);
+
+    if (error) {
+      const message = getErrorMessage(error);
+      showSendError(message);
+      if (
+        message.includes("media_reservation_expired") ||
+        message.includes("media_reservation_released") ||
+        message.includes("media_reservation_not_owned")
+      ) {
+        clearReservation();
+        void loadCatalog();
+      }
+      return;
+    }
+
+    const result = (data ?? {}) as SendResponse;
+    clearReservation();
+    onOpenChange(false);
+    toast.success(result.already_sent === true ? "המדיה כבר נשלחה" : "המדיה נשלחה");
+  };
+
+  const pickerContent = (
+    <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4">
+      {reservation ? (
+        <section
+          className="space-y-3 rounded-md border border-border bg-muted/30 p-3"
+          aria-live="polite"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{reservation.displayName}</p>
+              <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock3 className="h-3.5 w-3.5" />
+                שמור לשליחה לעוד {formatRemaining(remainingMilliseconds)}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void releaseReservation(reservation.reservationId, true)}
+              disabled={sending}
+              aria-label="ביטול בחירת המדיה"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {preview.status === "loading" && (
+            <div
+              className="aspect-[4/3] w-full animate-pulse rounded-md bg-muted"
+              role="status"
+              aria-label="טוען תצוגה מקדימה"
+            />
+          )}
+          {preview.status === "error" && (
+            <div className="flex aspect-[4/3] w-full items-center justify-center rounded-md border border-border bg-muted/40 px-4 text-center text-sm text-muted-foreground">
+              התצוגה המקדימה אינה זמינה. אי אפשר לשלוח עד לטעינה תקינה או לבחירה חדשה.
+            </div>
+          )}
+          {preview.status === "ready" && preview.url && (
+            <img
+              src={preview.url}
+              alt="תצוגה מקדימה של המדיה שנבחרה"
+              className="aspect-[4/3] w-full rounded-md object-cover"
+              referrerPolicy="no-referrer"
+              onError={preview.retryAfterImageError}
+            />
+          )}
+
+          <Textarea
+            value={caption}
+            onChange={(event) => setCaption(event.target.value)}
+            placeholder="כיתוב אופציונלי"
+            maxLength={1000}
+            rows={2}
+            disabled={sending}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">{caption.length}/1000</span>
+            <Button
+              type="button"
+              onClick={() => void sendMedia()}
+              disabled={
+                sending ||
+                remainingMilliseconds <= 0 ||
+                preview.status !== "ready" ||
+                !preview.url
+              }
+            >
+              {sending ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              שלח מדיה
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <section className="min-h-0 flex-1 overflow-y-auto" aria-live="polite">
+          {catalogState === "loading" && (
+            <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+              <LoaderCircle className="me-2 h-4 w-4 animate-spin" /> טוען מאגר מדיה
+            </div>
+          )}
+          {catalogState === "error" && (
+            <div className="flex h-32 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+              <span>לא ניתן לטעון את מאגר המדיה כרגע.</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadCatalog()}>
+                <RefreshCw className="h-4 w-4" /> נסה שוב
+              </Button>
+            </div>
+          )}
+          {catalogState === "ready" && catalog.length === 0 && (
+            <div className="flex h-32 items-center justify-center text-center text-sm text-muted-foreground">
+              אין מדיה זמינה עבור הדמות בשלב זה.
+            </div>
+          )}
+          {catalogState === "ready" && catalog.length > 0 && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {catalog.map((asset) => {
+                const reserving = reservingAssetId === asset.id;
+                const available = asset.is_reservable || asset.is_reserved_by_me;
+                return (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    onClick={() => void selectAsset(asset)}
+                    disabled={!available || Boolean(reservingAssetId)}
+                    aria-pressed={asset.is_reserved_by_me}
+                    className="flex min-h-24 items-center gap-3 rounded-md border border-border bg-card p-3 text-right transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                      {reserving ? (
+                        <LoaderCircle className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Image className="h-5 w-5" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {asset.display_name}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {asset.content_type.replace("image/", "").toUpperCase()} ·{" "}
+                        {formatBytes(asset.byte_size)}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {asset.is_reserved_by_me
+                          ? "נבחרה עבורך"
+                          : asset.is_reservable
+                            ? "זמינה"
+                            : "לא זמינה"}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+      <div className="flex justify-end border-t border-border pt-3">
+        <Button type="button" variant="outline" onClick={closePicker} disabled={sending}>
+          ביטול
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Sheet
+        open={open}
+        onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : closePicker())}
+      >
+        <SheetContent side="bottom" className="flex max-h-[92dvh] flex-col" dir="rtl">
+          <SheetHeader>
+            <SheetTitle>בחירת מדיה</SheetTitle>
+            <SheetDescription>בחירת תמונה מהמאגר של הדמות לשליחה בשיחה.</SheetDescription>
+          </SheetHeader>
+          {pickerContent}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : closePicker())}
+    >
+      <DialogContent className="flex max-h-[88vh] max-w-2xl flex-col" dir="rtl">
+        <DialogHeader>
+          <DialogTitle>בחירת מדיה</DialogTitle>
+          <DialogDescription>בחירת תמונה מהמאגר של הדמות לשליחה בשיחה.</DialogDescription>
+        </DialogHeader>
+        {pickerContent}
+      </DialogContent>
+    </Dialog>
+  );
+}
