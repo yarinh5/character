@@ -144,6 +144,7 @@ export type Database = {
           avatar_url: string | null
           category: string | null
           created_at: string
+          discovery_city_id: string | null
           fictional_age: number | null
           full_description: string | null
           gallery_images: string[] | null
@@ -161,6 +162,7 @@ export type Database = {
           avatar_url?: string | null
           category?: string | null
           created_at?: string
+          discovery_city_id?: string | null
           fictional_age?: number | null
           full_description?: string | null
           gallery_images?: string[] | null
@@ -178,6 +180,7 @@ export type Database = {
           avatar_url?: string | null
           category?: string | null
           created_at?: string
+          discovery_city_id?: string | null
           fictional_age?: number | null
           full_description?: string | null
           gallery_images?: string[] | null
@@ -190,7 +193,15 @@ export type Database = {
           short_description?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "characters_discovery_city_id_fkey"
+            columns: ["discovery_city_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_cities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       client_character_preferences: {
         Row: {
@@ -687,6 +698,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      discovery_cities: {
+        Row: {
+          created_at: string
+          display_name_he: string
+          id: string
+          is_active: boolean
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          display_name_he: string
+          id?: string
+          is_active?: boolean
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          display_name_he?: string
+          id?: string
+          is_active?: boolean
+          slug?: string
+        }
+        Relationships: []
       }
       internal_notes: {
         Row: {
@@ -1221,7 +1256,7 @@ export type Database = {
         Returns: Json
       }
       get_discovery_characters: {
-        Args: never
+        Args: { _filters?: Json }
         Returns: {
           availability_status: Database["public"]["Enums"]["availability_status"]
           avatar_url: string
@@ -1323,7 +1358,12 @@ export type Database = {
         Returns: Json
       }
       set_character_swipe: {
-        Args: { _character_id: string; _swipe: string }
+        Args: {
+          _character_id: string
+          _cycle_id: string
+          _filters: Json
+          _swipe: string
+        }
         Returns: Json
       }
       start_or_get_conversation: {

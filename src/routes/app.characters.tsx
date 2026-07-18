@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
-import { useDiscovery } from "@/hooks/useDiscovery";
+import { EMPTY_DISCOVERY_FILTERS, type DiscoveryFilters as DiscoveryFiltersState, useDiscovery } from "@/hooks/useDiscovery";
+import { DiscoveryFilters } from "@/components/discovery/DiscoveryFilters";
 import { DiscoveryDeck } from "@/components/discovery/DiscoveryDeck";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,7 +23,8 @@ function errorMessage(error: unknown, fallback: string) {
 function CharactersPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const discovery = useDiscovery(user?.id);
+  const [filters, setFilters] = useState<DiscoveryFiltersState>(EMPTY_DISCOVERY_FILTERS);
+  const discovery = useDiscovery(user?.id, filters);
   const [startingId, setStartingId] = useState<string | null>(null);
   const character = discovery.activeCharacter;
 
@@ -39,7 +41,7 @@ function CharactersPage() {
   const handleSwipe = async (action: "like" | "pass") => {
     if (!character || discovery.isSwipePending) return;
     try {
-      await discovery.swipe(character.id, action);
+      await discovery.swipe(character, action);
     } catch (error) {
       toast.error(errorMessage(error, "עדכון הבחירה נכשל"));
     }
@@ -79,6 +81,8 @@ function CharactersPage() {
           <h1 className="text-2xl font-bold">גלו דמויות</h1>
           <p className="text-sm text-muted-foreground">החליקו כדי לדלג או לסמן אהבתי</p>
         </header>
+
+        <DiscoveryFilters filters={filters} onChange={setFilters} />
 
         <div className="flex flex-1 items-center justify-center">
           {(discovery.isLoading || (!character && discovery.isRefreshing)) && (
