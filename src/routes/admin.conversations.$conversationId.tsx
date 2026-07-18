@@ -44,6 +44,17 @@ type AdminMessage = {
   created_at: string;
   is_read: boolean;
   operators?: { full_name: string | null; user_id?: string | null } | null;
+  message_attachments?: MessageAttachment[];
+};
+
+type MessageAttachment = {
+  id: string;
+  message_id: string;
+  kind: string;
+  position: number;
+  caption: string | null;
+  metadata: unknown;
+  created_at: string;
 };
 
 function ConvView() {
@@ -68,10 +79,20 @@ function ConvView() {
   const messageRequestVersionRef = useRef(0);
   useActiveConversation(conversationId, "admin");
 
+  const hydrateMessageAttachments = async (message: AdminMessage) => {
+    const { data } = await supabase
+      .from("message_attachments")
+      .select("id, message_id, kind, position, caption, metadata, created_at")
+      .eq("message_id", message.id)
+      .order("position", { ascending: true });
+
+    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+  };
+
   const loadLatestMessages = async (requestVersion: number) => {
     const { data: msgs, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -105,7 +126,7 @@ function ConvView() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id)")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -297,10 +318,18 @@ function ConvView() {
                 };
                 if (requestVersion !== messageRequestVersionRef.current) return;
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+                void hydrateMessageAttachments(hydrated).then((attachmentHydrated) => {
+                  if (requestVersion !== messageRequestVersionRef.current) return;
+                  setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
+                });
               });
           } else {
             if (requestVersion !== messageRequestVersionRef.current) return;
             setMessages((prev) => mergeMessagesById(prev, [nextMessage]));
+            void hydrateMessageAttachments(nextMessage).then((hydrated) => {
+              if (requestVersion !== messageRequestVersionRef.current) return;
+              setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+            });
           }
         },
       )

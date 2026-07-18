@@ -40,6 +40,17 @@ type Msg = {
   created_at: string;
   is_read: boolean;
   operators?: { full_name: string; user_id?: string | null } | null;
+  message_attachments?: MessageAttachment[];
+};
+
+type MessageAttachment = {
+  id: string;
+  message_id: string;
+  kind: string;
+  position: number;
+  caption: string | null;
+  metadata: unknown;
+  created_at: string;
 };
 
 type Conv = {
@@ -136,6 +147,16 @@ function OperatorChatPage() {
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
   });
 
+  const hydrateMessageAttachments = async (message: Msg) => {
+    const { data } = await supabase
+      .from("message_attachments")
+      .select("id, message_id, kind, position, caption, metadata, created_at")
+      .eq("message_id", message.id)
+      .order("position", { ascending: true });
+
+    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+  };
+
   const loadOlderMessages = async () => {
     if (loadingOlderRef.current || !hasOlderMessages) return;
     const container = scrollRef.current;
@@ -148,7 +169,7 @@ function OperatorChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*, operators(full_name, user_id)")
+      .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -225,7 +246,7 @@ function OperatorChatPage() {
       ] = await Promise.all([
         supabase
           .from("messages")
-          .select("*, operators(full_name, user_id)")
+          .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -345,9 +366,15 @@ function OperatorChatPage() {
                 }
                 const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name, user_id: data.user_id } : null };
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+                void hydrateMessageAttachments(hydrated).then((attachmentHydrated) => {
+                  setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
+                });
               });
           } else {
             setMessages((prev) => mergeMessagesById(prev, [newMsg]));
+            void hydrateMessageAttachments(newMsg).then((hydrated) => {
+              setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+            });
           }
           if (newMsg.sender_type === "client") {
             supabase.rpc("mark_conversation_read", {

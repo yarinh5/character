@@ -39,6 +39,17 @@ type Msg = {
   content: string;
   created_at: string;
   is_read: boolean;
+  message_attachments?: MessageAttachment[];
+};
+
+type MessageAttachment = {
+  id: string;
+  message_id: string;
+  kind: string;
+  position: number;
+  caption: string | null;
+  metadata: unknown;
+  created_at: string;
 };
 
 type Conv = {
@@ -90,6 +101,16 @@ function ChatPage() {
     displayName: user?.email?.split("@")[0] ?? "לקוח",
   });
 
+  const hydrateMessageAttachments = async (message: Msg) => {
+    const { data } = await supabase
+      .from("message_attachments")
+      .select("id, message_id, kind, position, caption, metadata, created_at")
+      .eq("message_id", message.id)
+      .order("position", { ascending: true });
+
+    return { ...message, message_attachments: (data ?? []) as MessageAttachment[] };
+  };
+
   const loadOlderMessages = async () => {
     if (loadingOlderRef.current || !hasOlderMessages) return;
     const container = scrollRef.current;
@@ -102,7 +123,7 @@ function ChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*")
+      .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -142,7 +163,7 @@ function ChatPage() {
           .maybeSingle(),
         supabase
           .from("messages")
-          .select("*")
+          .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -198,6 +219,11 @@ function ChatPage() {
             }
             return mergeMessagesById(prev, [newMsg]);
           });
+          if (payload.eventType !== "UPDATE") {
+            void hydrateMessageAttachments(newMsg).then((hydrated) => {
+              setMessages((prev) => mergeMessagesById(prev, [hydrated]));
+            });
+          }
           if (newMsg.sender_type !== "client") {
             supabase.rpc("mark_conversation_read", {
               _conversation_id: conversationId,

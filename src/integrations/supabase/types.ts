@@ -954,6 +954,64 @@ export type Database = {
         }
         Relationships: []
       }
+      message_attachments: {
+        Row: {
+          caption: string | null
+          created_at: string
+          id: string
+          kind: string
+          media_asset_id: string
+          message_id: string
+          metadata: Json
+          position: number
+          reservation_id: string
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          media_asset_id: string
+          message_id: string
+          metadata?: Json
+          position?: number
+          reservation_id: string
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          media_asset_id?: string
+          message_id?: string
+          metadata?: Json
+          position?: number
+          reservation_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_attachments_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "character_media_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachments_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: true
+            referencedRelation: "character_media_reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
@@ -1533,6 +1591,10 @@ export type Database = {
       }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
+        Returns: Json
+      }
+      send_operator_media_message: {
+        Args: { _caption?: string; _reservation_id: string }
         Returns: Json
       }
       send_operator_message: {
