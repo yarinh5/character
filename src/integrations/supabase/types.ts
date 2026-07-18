@@ -1518,8 +1518,9 @@ export type Database = {
           id: string
           ingest_status: string
           is_reservable: boolean
-          reservation_expires_at: string
-          reservation_id: string
+          is_reserved_by_me: boolean
+          my_reservation_expires_at: string
+          my_reservation_id: string
           status: string
           width: number
         }[]
