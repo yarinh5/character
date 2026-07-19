@@ -117,6 +117,11 @@ export type Database = {
           height: number | null
           id: string
           ingest_status: string
+          locked_delivery_path: string | null
+          locked_derivative_error_code: string | null
+          locked_derivatives_generated_at: string | null
+          locked_price_credits: number | null
+          locked_teaser_path: string | null
           metadata: Json
           preview_generated_at: string | null
           preview_path: string | null
@@ -145,6 +150,11 @@ export type Database = {
           height?: number | null
           id?: string
           ingest_status?: string
+          locked_delivery_path?: string | null
+          locked_derivative_error_code?: string | null
+          locked_derivatives_generated_at?: string | null
+          locked_price_credits?: number | null
+          locked_teaser_path?: string | null
           metadata?: Json
           preview_generated_at?: string | null
           preview_path?: string | null
@@ -173,6 +183,11 @@ export type Database = {
           height?: number | null
           id?: string
           ingest_status?: string
+          locked_delivery_path?: string | null
+          locked_derivative_error_code?: string | null
+          locked_derivatives_generated_at?: string | null
+          locked_price_credits?: number | null
+          locked_teaser_path?: string | null
           metadata?: Json
           preview_generated_at?: string | null
           preview_path?: string | null
@@ -736,6 +751,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          message_attachment_id: string | null
           message_id: string | null
           metadata: Json
           package_id: string | null
@@ -749,6 +765,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          message_attachment_id?: string | null
           message_id?: string | null
           metadata?: Json
           package_id?: string | null
@@ -762,6 +779,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          message_attachment_id?: string | null
           message_id?: string | null
           metadata?: Json
           package_id?: string | null
@@ -770,6 +788,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "credit_transactions_message_attachment_id_fkey"
+            columns: ["message_attachment_id"]
+            isOneToOne: false
+            referencedRelation: "message_attachments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "credit_transactions_message_id_fkey"
             columns: ["message_id"]
@@ -969,8 +994,73 @@ export type Database = {
         }
         Relationships: []
       }
+      message_attachment_unlocks: {
+        Row: {
+          attachment_id: string
+          charged_transaction_id: string
+          client_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          refund_transaction_id: string | null
+          refunded_at: string | null
+          revoked_at: string | null
+          revoked_reason: string | null
+          unlocked_at: string
+        }
+        Insert: {
+          attachment_id: string
+          charged_transaction_id: string
+          client_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          refund_transaction_id?: string | null
+          refunded_at?: string | null
+          revoked_at?: string | null
+          revoked_reason?: string | null
+          unlocked_at?: string
+        }
+        Update: {
+          attachment_id?: string
+          charged_transaction_id?: string
+          client_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          refund_transaction_id?: string | null
+          refunded_at?: string | null
+          revoked_at?: string | null
+          revoked_reason?: string | null
+          unlocked_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_attachment_unlocks_attachment_id_fkey"
+            columns: ["attachment_id"]
+            isOneToOne: false
+            referencedRelation: "message_attachments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachment_unlocks_charged_transaction_id_fkey"
+            columns: ["charged_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachment_unlocks_refund_transaction_id_fkey"
+            columns: ["refund_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_attachments: {
         Row: {
+          access_mode: string
           caption: string | null
           created_at: string
           id: string
@@ -979,9 +1069,11 @@ export type Database = {
           message_id: string
           metadata: Json
           position: number
+          price_credits_snapshot: number | null
           reservation_id: string
         }
         Insert: {
+          access_mode?: string
           caption?: string | null
           created_at?: string
           id?: string
@@ -990,9 +1082,11 @@ export type Database = {
           message_id: string
           metadata?: Json
           position?: number
+          price_credits_snapshot?: number | null
           reservation_id: string
         }
         Update: {
+          access_mode?: string
           caption?: string | null
           created_at?: string
           id?: string
@@ -1001,6 +1095,7 @@ export type Database = {
           message_id?: string
           metadata?: Json
           position?: number
+          price_credits_snapshot?: number | null
           reservation_id?: string
         }
         Relationships: [
@@ -1471,6 +1566,10 @@ export type Database = {
         }[]
       }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      configure_character_media_asset_locked: {
+        Args: { _asset_id: string; _price_credits?: number }
+        Returns: Json
+      }
       create_character_media_upload_intent_for_server: {
         Args: {
           _actor_user_id: string
@@ -1559,6 +1658,16 @@ export type Database = {
           is_recycled: boolean
           name: string
           short_description: string
+        }[]
+      }
+      get_message_attachment_access: {
+        Args: { _attachment_ids: string[] }
+        Returns: {
+          access_mode: string
+          attachment_id: string
+          is_unlocked: boolean
+          price_credits_snapshot: number
+          render_state: string
         }[]
       }
       get_my_conversation_unread_counts: {
@@ -1672,6 +1781,10 @@ export type Database = {
         Args: { _content: string; _conversation_id: string }
         Returns: Json
       }
+      send_operator_locked_media_message: {
+        Args: { _caption?: string; _reservation_id: string }
+        Returns: Json
+      }
       send_operator_media_message: {
         Args: { _caption?: string; _reservation_id: string }
         Returns: Json
@@ -1711,6 +1824,10 @@ export type Database = {
           _operator_id?: string
         }
         Returns: string
+      }
+      unlock_locked_message_attachment: {
+        Args: { _attachment_id: string; _idempotency_key: string }
+        Returns: Json
       }
     }
     Enums: {
