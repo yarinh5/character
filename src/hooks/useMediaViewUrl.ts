@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-type MediaViewKind = "message_attachment" | "reserved_preview";
+type MediaViewKind = "message_attachment" | "reserved_preview" | "admin_asset_preview";
 
 type ViewState =
   | { status: "idle" | "loading"; url: null }
@@ -33,7 +33,9 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string) {
       body:
         kind === "message_attachment"
           ? { kind, attachment_id: targetId }
-          : { kind, reservation_id: targetId },
+          : kind === "reserved_preview"
+            ? { kind, reservation_id: targetId }
+            : { kind, asset_id: targetId },
     });
     if (requestVersion !== requestVersionRef.current) return;
 

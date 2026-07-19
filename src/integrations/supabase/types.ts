@@ -118,10 +118,15 @@ export type Database = {
           id: string
           ingest_status: string
           metadata: Json
+          preview_generated_at: string | null
           preview_path: string | null
+          processing_attempts: number
+          processing_error_code: string | null
+          processing_started_at: string | null
           sha256: string | null
           source_path: string
           status: string
+          status_before_disabled: string | null
           updated_at: string
           updated_by_user_id: string | null
           width: number | null
@@ -141,10 +146,15 @@ export type Database = {
           id?: string
           ingest_status?: string
           metadata?: Json
+          preview_generated_at?: string | null
           preview_path?: string | null
+          processing_attempts?: number
+          processing_error_code?: string | null
+          processing_started_at?: string | null
           sha256?: string | null
           source_path: string
           status?: string
+          status_before_disabled?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
           width?: number | null
@@ -164,10 +174,15 @@ export type Database = {
           id?: string
           ingest_status?: string
           metadata?: Json
+          preview_generated_at?: string | null
           preview_path?: string | null
+          processing_attempts?: number
+          processing_error_code?: string | null
+          processing_started_at?: string | null
           sha256?: string | null
           source_path?: string
           status?: string
+          status_before_disabled?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
           width?: number | null
@@ -1445,18 +1460,29 @@ export type Database = {
         Args: { _amount: number; _reason: string; _user_id: string }
         Returns: Json
       }
-      cleanup_expired_conversation_locks: { Args: never; Returns: number }
-      complete_character_media_upload: {
-        Args: { _asset_id: string }
-        Returns: Json
+      begin_character_media_processing_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
+        Returns: {
+          already_ready: boolean
+          asset_id: string
+          content_type: string
+          preview_path: string
+          source_path: string
+        }[]
       }
-      create_character_media_upload_intent: {
+      cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      create_character_media_upload_intent_for_server: {
         Args: {
+          _actor_user_id: string
           _character_id: string
           _content_type: string
           _display_name?: string
         }
-        Returns: Json
+        Returns: {
+          asset_id: string
+          content_type: string
+          source_path: string
+        }[]
       }
       create_notification: {
         Args: {
@@ -1470,6 +1496,46 @@ export type Database = {
           _user_id: string
         }
         Returns: string
+      }
+      disable_character_media_asset: {
+        Args: { _asset_id: string; _reason?: string }
+        Returns: Json
+      }
+      fail_character_media_ingest_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
+        Returns: Json
+      }
+      finalize_character_media_ingest_for_server: {
+        Args: {
+          _actor_user_id: string
+          _asset_id: string
+          _byte_size: number
+          _height: number
+          _sha256: string
+          _width: number
+        }
+        Returns: Json
+      }
+      get_admin_character_media_assets: {
+        Args: { _character_id: string }
+        Returns: {
+          byte_size: number
+          content_type: string
+          created_at: string
+          disabled_at: string
+          disabled_reason: string
+          display_name: string
+          height: number
+          id: string
+          ingest_status: string
+          preview_available: boolean
+          processing_attempts: number
+          processing_error_code: string
+          processing_started_at: string
+          status: string
+          updated_at: string
+          width: number
+        }[]
       }
       get_conversation_read_summary: {
         Args: { _conversation_id: string }
@@ -1598,6 +1664,10 @@ export type Database = {
         }
         Returns: string
       }
+      restore_character_media_asset: {
+        Args: { _asset_id: string }
+        Returns: Json
+      }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
         Returns: Json
@@ -1660,6 +1730,7 @@ export type Database = {
     }
   }
 }
+
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]

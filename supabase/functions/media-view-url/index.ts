@@ -3,7 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 type Target =
   | { targetKind: "message_attachment"; targetId: string; ttlSeconds: 60 }
-  | { targetKind: "reserved_preview"; targetId: string; ttlSeconds: 30 };
+  | { targetKind: "reserved_preview"; targetId: string; ttlSeconds: 30 }
+  | { targetKind: "admin_asset_preview"; targetId: string; ttlSeconds: 60 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -44,6 +45,14 @@ function parseTarget(body: unknown): Target | null {
     UUID_PATTERN.test(value.reservation_id)
   ) {
     return { targetKind: "reserved_preview", targetId: value.reservation_id, ttlSeconds: 30 };
+  }
+
+  if (
+    value.kind === "admin_asset_preview" &&
+    typeof value.asset_id === "string" &&
+    UUID_PATTERN.test(value.asset_id)
+  ) {
+    return { targetKind: "admin_asset_preview", targetId: value.asset_id, ttlSeconds: 60 };
   }
 
   return null;

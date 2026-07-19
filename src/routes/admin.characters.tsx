@@ -25,8 +25,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Edit, Eye, EyeOff } from "lucide-react";
+import { Plus, Edit, Eye, EyeOff, Images } from "lucide-react";
 import { AvatarUpload } from "@/components/common/AvatarUpload";
+import { CharacterMediaDialog } from "@/components/admin/CharacterMediaDialog";
 
 export const Route = createFileRoute("/admin/characters")({
   component: CharactersPage,
@@ -64,6 +65,7 @@ const empty: Partial<CharRow> = {
 function CharactersPage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Partial<CharRow> | null>(null);
+  const [mediaCharacter, setMediaCharacter] = useState<{ id: string; name: string } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-characters"],
@@ -164,6 +166,9 @@ function CharactersPage() {
                   <Button size="sm" variant="ghost" onClick={() => toggle(c, "is_visible")} title={c.is_visible ? "הסתר" : "הצג"}>
                     {c.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setMediaCharacter({ id: c.id, name: c.name })} title="ניהול מדיה">
+                    <Images className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -181,6 +186,7 @@ function CharactersPage() {
           }}
         />
       )}
+      {mediaCharacter && <CharacterMediaDialog character={mediaCharacter} onClose={() => setMediaCharacter(null)} />}
     </div>
   );
 }
