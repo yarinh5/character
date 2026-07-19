@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { ImagePlus, LoaderCircle, RefreshCw, RotateCcw, ShieldOff } from "lucide-react";
+import { ImagePlus, LoaderCircle, LockKeyhole, RefreshCw, RotateCcw, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 
 type MediaAsset = Database["public"]["Functions"]["get_admin_character_media_assets"]["Returns"][number];
 
@@ -53,19 +54,44 @@ function AssetPreview({ asset }: { asset: MediaAsset }) {
   return <Skeleton className="aspect-square w-full" />;
 }
 
+function LockedAssetPreview({ asset }: { asset: MediaAsset }) {
+  const preview = useMediaViewUrl(
+    "admin_locked_teaser_preview",
+    asset.locked_preview_available ? asset.id : undefined,
+  );
+
+  if (!asset.locked_preview_available) return null;
+  if (preview.status === "ready" && preview.url) {
+    return (
+      <img
+        src={preview.url}
+        alt=""
+        className="aspect-square w-full object-cover bg-muted"
+        onError={preview.retryAfterImageError}
+      />
+    );
+  }
+  return <Skeleton className="aspect-square w-full" />;
+}
+
 function AssetCard({
   asset,
   busy,
   onDisable,
   onRestore,
   onRetry,
+  onPrepareLocked,
+  onConfigureLocked,
 }: {
   asset: MediaAsset;
   busy: boolean;
   onDisable: () => void;
   onRestore: () => void;
   onRetry: () => void;
+  onPrepareLocked: () => void;
+  onConfigureLocked: (priceCredits: number | null) => void;
 }) {
+  const [price, setPrice] = useState(asset.locked_price_credits?.toString() ?? "");
   const details = [asset.content_type.replace("image/", ""), formatBytes(asset.byte_size), asset.width && asset.height ? `${asset.width} x ${asset.height}` : null]
     .filter(Boolean)
     .join(" · ");
@@ -82,7 +108,20 @@ function AssetCard({
           <span className="text-muted-foreground">·</span>
           <span className="capitalize">{asset.status}</span>
         </div>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <LockKeyhole className="h-3.5 w-3.5" />
+          <span>
+            נעול: {asset.locked_derivative_status}
+            {asset.locked_price_credits ? ` · ${asset.locked_price_credits} קרדיטים` : ""}
+          </span>
+        </div>
         {asset.processing_error_code && <div className="text-xs text-destructive">העיבוד נכשל</div>}
+        {asset.locked_derivative_error_code && <div className="text-xs text-destructive">יצירת נגזרות נעולות נכשלה</div>}
+        {asset.locked_preview_available && (
+          <div className="overflow-hidden rounded-md border border-border">
+            <LockedAssetPreview asset={asset} />
+          </div>
+        )}
         <div className="flex gap-1 pt-1">
           {disabled ? (
             <Button size="sm" variant="outline" className="flex-1" onClick={onRestore} disabled={busy}>
@@ -99,6 +138,44 @@ function AssetCard({
             </Button>
           )}
         </div>
+        {!disabled && asset.ingest_status === "ready" && (
+          <div className="space-y-2 border-t border-border pt-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={onPrepareLocked}
+              disabled={busy || asset.locked_derivative_status === "processing"}
+            >
+              {asset.locked_derivative_status === "ready" ? "נגזרות נעולות מוכנות" : "הכן נגזרות נעולות"}
+            </Button>
+            <div className="flex gap-1">
+              <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={price}
+                onChange={(event) => setPrice(event.target.value)}
+                placeholder="מחיר בקרדיטים"
+                disabled={busy || asset.locked_derivative_status !== "ready"}
+              />
+              <Button
+                size="sm"
+                onClick={() => {
+                  const parsed = price.trim() === "" ? null : Number(price);
+                  if (parsed !== null && (!Number.isInteger(parsed) || parsed <= 0)) {
+                    toast.error("יש להזין מחיר חיובי במספר שלם");
+                    return;
+                  }
+                  onConfigureLocked(parsed);
+                }}
+                disabled={busy || asset.locked_derivative_status !== "ready"}
+              >
+                שמור
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -129,9 +206,26 @@ export function CharacterMediaDialog({
     await queryClient.invalidateQueries({ queryKey });
   };
 
-  const processAsset = async (assetId: string) => {
-    const { error } = await supabase.functions.invoke("process-character-media", { body: { asset_id: assetId } });
+  const processAsset = async (assetId: string, mode: "standard" | "locked" = "standard") => {
+    const { error } = await supabase.functions.invoke("process-character-media", { body: { asset_id: assetId, mode } });
     if (error) throw error;
+  };
+
+  const configureLocked = async (assetId: string, priceCredits: number | null) => {
+    setBusyAssetId(assetId);
+    try {
+      const { error } = await supabase.rpc("configure_character_media_asset_locked", {
+        _asset_id: assetId,
+        _price_credits: priceCredits ?? undefined,
+      });
+      if (error) throw error;
+      await refresh();
+      toast.success(priceCredits === null ? "הגדרת המדיה הנעולה הוסרה" : "מחיר המדיה הנעולה נשמר");
+    } catch {
+      toast.error("לא ניתן לשמור את הגדרת המדיה הנעולה");
+    } finally {
+      setBusyAssetId(null);
+    }
   };
 
   const uploadFile = async (file: File) => {
@@ -232,6 +326,15 @@ export function CharacterMediaDialog({
                 onDisable={() => void runAssetAction(asset, "disable")}
                 onRestore={() => void runAssetAction(asset, "restore")}
                 onRetry={() => void runAssetAction(asset, "retry")}
+                onPrepareLocked={() => {
+                  setBusyAssetId(asset.id);
+                  void processAsset(asset.id, "locked")
+                    .then(refresh)
+                    .then(() => toast.success("נגזרות נעולות הוכנו"))
+                    .catch(() => toast.error("לא ניתן להכין נגזרות נעולות"))
+                    .finally(() => setBusyAssetId(null));
+                }}
+                onConfigureLocked={(priceCredits) => void configureLocked(asset.id, priceCredits)}
               />
             ))}
           </div>

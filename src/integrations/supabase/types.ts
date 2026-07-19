@@ -118,7 +118,11 @@ export type Database = {
           id: string
           ingest_status: string
           locked_delivery_path: string | null
+          locked_derivative_completed_at: string | null
           locked_derivative_error_code: string | null
+          locked_derivative_processing_by_user_id: string | null
+          locked_derivative_processing_started_at: string | null
+          locked_derivative_status: string
           locked_derivatives_generated_at: string | null
           locked_price_credits: number | null
           locked_teaser_path: string | null
@@ -151,7 +155,11 @@ export type Database = {
           id?: string
           ingest_status?: string
           locked_delivery_path?: string | null
+          locked_derivative_completed_at?: string | null
           locked_derivative_error_code?: string | null
+          locked_derivative_processing_by_user_id?: string | null
+          locked_derivative_processing_started_at?: string | null
+          locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
           locked_teaser_path?: string | null
@@ -184,7 +192,11 @@ export type Database = {
           id?: string
           ingest_status?: string
           locked_delivery_path?: string | null
+          locked_derivative_completed_at?: string | null
           locked_derivative_error_code?: string | null
+          locked_derivative_processing_by_user_id?: string | null
+          locked_derivative_processing_started_at?: string | null
+          locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
           locked_teaser_path?: string | null
@@ -221,6 +233,7 @@ export type Database = {
           ended_reason: string | null
           expires_at: string
           id: string
+          intended_access_mode: string
           media_asset_id: string
           metadata: Json
           operator_id: string
@@ -236,6 +249,7 @@ export type Database = {
           ended_reason?: string | null
           expires_at: string
           id?: string
+          intended_access_mode?: string
           media_asset_id: string
           metadata?: Json
           operator_id: string
@@ -251,6 +265,7 @@ export type Database = {
           ended_reason?: string | null
           expires_at?: string
           id?: string
+          intended_access_mode?: string
           media_asset_id?: string
           metadata?: Json
           operator_id?: string
@@ -1565,6 +1580,17 @@ export type Database = {
           source_path: string
         }[]
       }
+      begin_locked_media_derivative_processing_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
+        Returns: {
+          already_ready: boolean
+          asset_id: string
+          content_type: string
+          locked_delivery_path: string
+          locked_teaser_path: string
+          source_path: string
+        }[]
+      }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
       configure_character_media_asset_locked: {
         Args: { _asset_id: string; _price_credits?: number }
@@ -1604,6 +1630,10 @@ export type Database = {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
         Returns: Json
       }
+      fail_locked_media_derivative_processing_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
+        Returns: Json
+      }
       finalize_character_media_ingest_for_server: {
         Args: {
           _actor_user_id: string
@@ -1612,6 +1642,15 @@ export type Database = {
           _height: number
           _sha256: string
           _width: number
+        }
+        Returns: Json
+      }
+      finalize_locked_media_derivatives_for_server: {
+        Args: {
+          _actor_user_id: string
+          _asset_id: string
+          _locked_delivery_path: string
+          _locked_teaser_path: string
         }
         Returns: Json
       }
@@ -1627,6 +1666,11 @@ export type Database = {
           height: number
           id: string
           ingest_status: string
+          locked_derivative_error_code: string
+          locked_derivative_status: string
+          locked_derivatives_generated_at: string
+          locked_preview_available: boolean
+          locked_price_credits: number
           preview_available: boolean
           processing_attempts: number
           processing_error_code: string
@@ -1692,8 +1736,13 @@ export type Database = {
           height: number
           id: string
           ingest_status: string
+          is_locked_reservable: boolean
           is_reservable: boolean
           is_reserved_by_me: boolean
+          locked_derivative_status: string
+          locked_images_enabled: boolean
+          locked_price_credits: number
+          my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string
           status: string
@@ -1763,6 +1812,14 @@ export type Database = {
       }
       reserve_character_media_asset: {
         Args: { _asset_id: string; _conversation_id: string }
+        Returns: Json
+      }
+      reserve_character_media_for_delivery: {
+        Args: {
+          _asset_id: string
+          _conversation_id: string
+          _intended_access_mode: string
+        }
         Returns: Json
       }
       resolve_character_media_preview_path_for_server: {

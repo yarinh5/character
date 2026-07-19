@@ -6,8 +6,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_SOURCE_PIXELS = 20_000_000;
 const MAX_PREVIEW_EDGE = 1600;
+const MAX_LOCKED_TEASER_EDGE = 640;
+const LOCKED_TEASER_SAMPLE_EDGE = 48;
 
-type ProcessRequest = { asset_id?: unknown };
+type ProcessMode = "standard" | "locked";
+type ProcessRequest = { asset_id?: unknown; mode?: unknown };
 
 let imageMagickReady: Promise<void> | null = null;
 
@@ -75,6 +78,35 @@ function processingErrorCode(error: unknown) {
   return "preview_generation_failed";
 }
 
+function renderImage(sourceBytes: Uint8Array, mode: "preview" | "locked_teaser" | "locked_delivery") {
+  return ImageMagick.read(sourceBytes, (image) => {
+    const width = image.width;
+    const height = image.height;
+    if (width <= 0 || height <= 0 || width * height > MAX_SOURCE_PIXELS) {
+      throw new Error("source_dimensions_invalid");
+    }
+
+    image.strip();
+    if (mode === "locked_teaser") {
+      image.resize(LOCKED_TEASER_SAMPLE_EDGE, LOCKED_TEASER_SAMPLE_EDGE);
+      image.resize(MAX_LOCKED_TEASER_EDGE, MAX_LOCKED_TEASER_EDGE);
+    } else if (width > MAX_PREVIEW_EDGE || height > MAX_PREVIEW_EDGE) {
+      image.resize(MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE);
+    }
+
+    return {
+      width,
+      height,
+      bytes: image.write(MagickFormat.Webp, (result) => result),
+    };
+  });
+}
+
+function parseMode(value: unknown): ProcessMode | null {
+  if (value === undefined || value === "standard") return "standard";
+  return value === "locked" ? "locked" : null;
+}
+
 Deno.serve(async (request) => {
   const origin = request.headers.get("Origin");
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: headers(origin) });
@@ -89,7 +121,8 @@ Deno.serve(async (request) => {
   } catch {
     return response(400, { code: "invalid_request" }, origin);
   }
-  if (typeof body.asset_id !== "string" || !UUID_PATTERN.test(body.asset_id)) {
+  const mode = parseMode(body.mode);
+  if (typeof body.asset_id !== "string" || !UUID_PATTERN.test(body.asset_id) || !mode) {
     return response(400, { code: "invalid_request" }, origin);
   }
 
@@ -111,85 +144,148 @@ Deno.serve(async (request) => {
   const trusted = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data: beginRows, error: beginError } = await trusted.rpc("begin_character_media_processing_for_server", {
-    _actor_user_id: userData.user.id,
-    _asset_id: body.asset_id,
-  });
-  const begin = Array.isArray(beginRows) ? beginRows[0] : null;
-  if (beginError) {
-    const code = beginError.message.includes("media_processing_in_progress")
-      ? "media_processing_in_progress"
-      : "media_processing_not_available";
-    return response(code === "media_processing_in_progress" ? 409 : 404, { code }, origin);
-  }
-  if (!begin || typeof begin.asset_id !== "string") return response(404, { code: "media_processing_not_available" }, origin);
-  if (begin.already_ready === true) {
-    return response(200, { asset_id: begin.asset_id, ingest_status: "ready", already_ready: true }, origin);
-  }
-  if (typeof begin.source_path !== "string" || typeof begin.preview_path !== "string" || typeof begin.content_type !== "string") {
-    return response(404, { code: "media_processing_not_available" }, origin);
-  }
 
-  let previewUploaded = false;
+  let uploadedPaths: string[] = [];
+  let activePaths: { sourcePath: string; previewPath?: string; teaserPath?: string; deliveryPath?: string; contentType: string } | null = null;
   try {
-    const { data: sourceBlob, error: downloadError } = await trusted.storage
-      .from("character-media")
-      .download(begin.source_path);
+    if (mode === "standard") {
+      const { data: beginRows, error: beginError } = await trusted.rpc("begin_character_media_processing_for_server", {
+        _actor_user_id: userData.user.id,
+        _asset_id: body.asset_id,
+      });
+      const begin = Array.isArray(beginRows) ? beginRows[0] : null;
+      if (beginError) {
+        const code = beginError.message.includes("media_processing_in_progress")
+          ? "media_processing_in_progress"
+          : "media_processing_not_available";
+        return response(code === "media_processing_in_progress" ? 409 : 404, { code }, origin);
+      }
+      if (!begin || typeof begin.asset_id !== "string") return response(404, { code: "media_processing_not_available" }, origin);
+      if (begin.already_ready === true) {
+        return response(200, { asset_id: begin.asset_id, ingest_status: "ready", already_ready: true }, origin);
+      }
+      if (typeof begin.source_path !== "string" || typeof begin.preview_path !== "string" || typeof begin.content_type !== "string") {
+        return response(404, { code: "media_processing_not_available" }, origin);
+      }
+      activePaths = { sourcePath: begin.source_path, previewPath: begin.preview_path, contentType: begin.content_type };
+    } else {
+      const { data: beginRows, error: beginError } = await trusted.rpc("begin_locked_media_derivative_processing_for_server", {
+        _actor_user_id: userData.user.id,
+        _asset_id: body.asset_id,
+      });
+      const begin = Array.isArray(beginRows) ? beginRows[0] : null;
+      if (beginError) {
+        const code = beginError.message.includes("locked_derivative_processing_in_progress")
+          ? "locked_derivative_processing_in_progress"
+          : "locked_derivative_processing_not_available";
+        return response(code.endsWith("_in_progress") ? 409 : 404, { code }, origin);
+      }
+      if (!begin || typeof begin.asset_id !== "string") return response(404, { code: "locked_derivative_processing_not_available" }, origin);
+      if (begin.already_ready === true) {
+        return response(200, { asset_id: begin.asset_id, locked_derivative_status: "ready", already_ready: true }, origin);
+      }
+      if (
+        typeof begin.source_path !== "string" ||
+        typeof begin.locked_teaser_path !== "string" ||
+        typeof begin.locked_delivery_path !== "string" ||
+        typeof begin.content_type !== "string"
+      ) {
+        return response(404, { code: "locked_derivative_processing_not_available" }, origin);
+      }
+      activePaths = {
+        sourcePath: begin.source_path,
+        teaserPath: begin.locked_teaser_path,
+        deliveryPath: begin.locked_delivery_path,
+        contentType: begin.content_type,
+      };
+    }
+
+    const { data: sourceBlob, error: downloadError } = await trusted.storage.from("character-media").download(activePaths.sourcePath);
     if (downloadError || !sourceBlob) throw new Error("source_mime_invalid");
     if (sourceBlob.size <= 0 || sourceBlob.size > MAX_SOURCE_BYTES) throw new Error("source_too_large");
 
     const sourceBytes = new Uint8Array(await sourceBlob.arrayBuffer());
-    if (detectImageMime(sourceBytes) !== begin.content_type) throw new Error("source_mime_invalid");
+    if (detectImageMime(sourceBytes) !== activePaths.contentType) throw new Error("source_mime_invalid");
     await initializeImageProcessor();
 
-    const processed = ImageMagick.read(sourceBytes, (image) => {
-      const width = image.width;
-      const height = image.height;
-      if (width <= 0 || height <= 0 || width * height > MAX_SOURCE_PIXELS) {
-        throw new Error("source_dimensions_invalid");
-      }
-      image.strip();
-      if (width > MAX_PREVIEW_EDGE || height > MAX_PREVIEW_EDGE) image.resize(MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE);
-      const previewBytes = image.write(MagickFormat.Webp, (bytes) => bytes);
-      return { width, height, previewBytes };
-    });
+    if (mode === "standard" && activePaths.previewPath) {
+      const processed = renderImage(sourceBytes, "preview");
+      const { error: uploadError } = await trusted.storage.from("character-media").upload(activePaths.previewPath, processed.bytes, {
+        contentType: "image/webp",
+        cacheControl: "0",
+        upsert: true,
+      });
+      if (uploadError) throw new Error("preview_upload_failed");
+      uploadedPaths = [activePaths.previewPath];
 
-    const { error: uploadError } = await trusted.storage.from("character-media").upload(begin.preview_path, processed.previewBytes, {
-      contentType: "image/webp",
-      cacheControl: "0",
-      upsert: true,
-    });
-    if (uploadError) throw new Error("preview_upload_failed");
-    previewUploaded = true;
-
-    const { data: finalized, error: finalizeError } = await trusted.rpc("finalize_character_media_ingest_for_server", {
-      _actor_user_id: userData.user.id,
-      _asset_id: begin.asset_id,
-      _byte_size: sourceBytes.byteLength,
-      _width: processed.width,
-      _height: processed.height,
-      _sha256: await sha256(sourceBytes),
-    });
-    if (finalizeError) throw new Error("finalize_failed");
-
-    const result = (finalized ?? {}) as { asset_id?: string; ingest_status?: string; already_ready?: boolean };
-    return response(
-      200,
-      {
-        asset_id: result.asset_id ?? begin.asset_id,
+      const { data: finalized, error: finalizeError } = await trusted.rpc("finalize_character_media_ingest_for_server", {
+        _actor_user_id: userData.user.id,
+        _asset_id: body.asset_id,
+        _byte_size: sourceBytes.byteLength,
+        _width: processed.width,
+        _height: processed.height,
+        _sha256: await sha256(sourceBytes),
+      });
+      if (finalizeError) throw new Error("finalize_failed");
+      const result = (finalized ?? {}) as { asset_id?: string; ingest_status?: string; already_ready?: boolean };
+      return response(200, {
+        asset_id: result.asset_id ?? body.asset_id,
         ingest_status: result.ingest_status ?? "ready",
         already_ready: result.already_ready === true,
-      },
-      origin,
-    );
+      }, origin);
+    }
+
+    if (mode === "locked" && activePaths.teaserPath && activePaths.deliveryPath) {
+      const teaser = renderImage(sourceBytes, "locked_teaser");
+      const delivery = renderImage(sourceBytes, "locked_delivery");
+      const teaserUpload = await trusted.storage.from("character-media").upload(activePaths.teaserPath, teaser.bytes, {
+        contentType: "image/webp",
+        cacheControl: "0",
+        upsert: true,
+      });
+      if (teaserUpload.error) throw new Error("locked_teaser_upload_failed");
+      uploadedPaths = [activePaths.teaserPath];
+
+      const deliveryUpload = await trusted.storage.from("character-media").upload(activePaths.deliveryPath, delivery.bytes, {
+        contentType: "image/webp",
+        cacheControl: "0",
+        upsert: true,
+      });
+      if (deliveryUpload.error) throw new Error("locked_delivery_upload_failed");
+      uploadedPaths = [activePaths.teaserPath, activePaths.deliveryPath];
+
+      const { data: finalized, error: finalizeError } = await trusted.rpc("finalize_locked_media_derivatives_for_server", {
+        _actor_user_id: userData.user.id,
+        _asset_id: body.asset_id,
+        _locked_teaser_path: activePaths.teaserPath,
+        _locked_delivery_path: activePaths.deliveryPath,
+      });
+      if (finalizeError) throw new Error("locked_derivative_finalize_failed");
+      const result = (finalized ?? {}) as { asset_id?: string; locked_derivative_status?: string; already_ready?: boolean };
+      return response(200, {
+        asset_id: result.asset_id ?? body.asset_id,
+        locked_derivative_status: result.locked_derivative_status ?? "ready",
+        already_ready: result.already_ready === true,
+      }, origin);
+    }
+
+    throw new Error("media_processing_not_available");
   } catch (error) {
-    if (previewUploaded) await trusted.storage.from("character-media").remove([begin.preview_path]);
-    const code = processingErrorCode(error);
-    await trusted.rpc("fail_character_media_ingest_for_server", {
+    if (uploadedPaths.length) await trusted.storage.from("character-media").remove(uploadedPaths);
+    if (mode === "standard") {
+      await trusted.rpc("fail_character_media_ingest_for_server", {
+        _actor_user_id: userData.user.id,
+        _asset_id: body.asset_id,
+        _error_code: processingErrorCode(error),
+      });
+      return response(422, { code: "media_processing_failed" }, origin);
+    }
+
+    await trusted.rpc("fail_locked_media_derivative_processing_for_server", {
       _actor_user_id: userData.user.id,
-      _asset_id: begin.asset_id,
-      _error_code: code,
+      _asset_id: body.asset_id,
+      _error_code: processingErrorCode(error),
     });
-    return response(422, { code: "media_processing_failed" }, origin);
+    return response(422, { code: "locked_derivative_processing_failed" }, origin);
   }
 });

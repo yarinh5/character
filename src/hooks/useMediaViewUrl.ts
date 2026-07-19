@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-type MediaViewKind = "message_attachment" | "reserved_preview" | "admin_asset_preview";
+type MediaViewKind =
+  | "message_attachment"
+  | "reserved_preview"
+  | "admin_asset_preview"
+  | "admin_locked_teaser_preview"
+  | "admin_locked_delivery_preview";
 
 type ViewState =
   | { status: "idle" | "loading"; url: null }
@@ -66,5 +71,5 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string) {
     void load();
   }, [load]);
 
-  return { ...state, retryAfterImageError };
+  return { ...state, retryAfterImageError, refresh: load };
 }

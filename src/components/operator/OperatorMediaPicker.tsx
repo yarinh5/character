@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, Image, LoaderCircle, RefreshCw, Send, X } from "lucide-react";
+import { Clock3, Image, LoaderCircle, LockKeyhole, RefreshCw, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,22 +24,29 @@ import { toast } from "sonner";
 
 type CatalogAsset =
   Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number];
+type DeliveryMode = "standard" | "locked";
 
 type SelectedReservation = {
   assetId: string;
   displayName: string;
   expiresAt: string;
   reservationId: string;
+  accessMode: DeliveryMode;
 };
 
 type ReservationResponse = {
   reservation_id?: unknown;
   expires_at?: unknown;
+  intended_access_mode?: unknown;
 };
 
 type SendResponse = {
   already_sent?: unknown;
 };
+
+function toDeliveryMode(value: unknown): DeliveryMode {
+  return value === "locked" ? "locked" : "standard";
+}
 
 function getErrorMessage(error: { message?: string } | null) {
   return error?.message ?? "";
@@ -58,6 +65,10 @@ function showCatalogError(message: string) {
 }
 
 function showReservationError(message: string) {
+  if (message.includes("locked_images_disabled")) {
+    toast.error("מדיה נעולה אינה פעילה כרגע");
+    return;
+  }
   if (message.includes("conversation_locked_by_other_operator")) {
     toast.error("השיחה נעולה כרגע לעובד אחר");
     return;
@@ -70,6 +81,10 @@ function showReservationError(message: string) {
 }
 
 function showSendError(message: string) {
+  if (message.includes("locked_images_disabled")) {
+    toast.error("מדיה נעולה אינה פעילה כרגע");
+    return;
+  }
   if (message.includes("conversation_locked_by_other_operator")) {
     toast.error("השיחה נעולה כרגע לעובד אחר");
     return;
@@ -160,6 +175,7 @@ export function OperatorMediaPicker({
         displayName: ownReservation.display_name,
         expiresAt: ownReservation.my_reservation_expires_at,
         reservationId: ownReservation.my_reservation_id,
+        accessMode: toDeliveryMode(ownReservation.my_reservation_access_mode),
       };
       reservationRef.current = nextReservation;
       setReservation(nextReservation);
@@ -225,7 +241,7 @@ export function OperatorMediaPicker({
     toast.error("זמן הבחירה הסתיים. יש לבחור מדיה מחדש");
   }, [clearReservation, loadCatalog, remainingMilliseconds, reservation]);
 
-  const selectAsset = async (asset: CatalogAsset) => {
+  const selectAsset = async (asset: CatalogAsset, accessMode: DeliveryMode) => {
     if (reservation || reservingAssetId) return;
 
     if (asset.is_reserved_by_me && asset.my_reservation_id && asset.my_reservation_expires_at) {
@@ -234,17 +250,19 @@ export function OperatorMediaPicker({
         displayName: asset.display_name,
         expiresAt: asset.my_reservation_expires_at,
         reservationId: asset.my_reservation_id,
+        accessMode: toDeliveryMode(asset.my_reservation_access_mode),
       };
       reservationRef.current = nextReservation;
       setReservation(nextReservation);
       return;
     }
 
-    if (!asset.is_reservable) return;
+    if (accessMode === "locked" ? !asset.is_locked_reservable : !asset.is_reservable) return;
     setReservingAssetId(asset.id);
-    const { data, error } = await supabase.rpc("reserve_character_media_asset", {
+    const { data, error } = await supabase.rpc("reserve_character_media_for_delivery", {
       _asset_id: asset.id,
       _conversation_id: conversationId,
+      _intended_access_mode: accessMode,
     });
     setReservingAssetId(null);
 
@@ -255,19 +273,25 @@ export function OperatorMediaPicker({
     }
 
     const payload = (data ?? {}) as ReservationResponse;
-    if (typeof payload.reservation_id !== "string" || typeof payload.expires_at !== "string") {
+    if (
+      typeof payload.reservation_id !== "string" ||
+      typeof payload.expires_at !== "string" ||
+      (payload.intended_access_mode !== "standard" && payload.intended_access_mode !== "locked")
+    ) {
       toast.error("לא התקבל אישור תקין לבחירת המדיה");
       void loadCatalog();
       return;
     }
     const reservationId = payload.reservation_id;
     const expiresAt = payload.expires_at;
+    const reservationAccessMode = toDeliveryMode(payload.intended_access_mode);
 
     const nextReservation = {
       assetId: asset.id,
       displayName: asset.display_name,
       expiresAt,
       reservationId,
+      accessMode: reservationAccessMode,
     };
     reservationRef.current = nextReservation;
     setReservation(nextReservation);
@@ -277,9 +301,11 @@ export function OperatorMediaPicker({
           ? {
               ...currentAsset,
               is_reservable: false,
+              is_locked_reservable: false,
               is_reserved_by_me: true,
               my_reservation_id: reservationId,
               my_reservation_expires_at: expiresAt,
+              my_reservation_access_mode: reservationAccessMode,
               status: "reserved",
             }
           : currentAsset,
@@ -301,10 +327,13 @@ export function OperatorMediaPicker({
     }
 
     setSending(true);
-    const { data, error } = await supabase.rpc("send_operator_media_message", {
+    const { data, error } = await supabase.rpc(
+      reservation.accessMode === "locked" ? "send_operator_locked_media_message" : "send_operator_media_message",
+      {
       _reservation_id: reservation.reservationId,
       _caption: caption.trim() || undefined,
-    });
+      },
+    );
     setSending(false);
 
     if (error) {
@@ -337,6 +366,11 @@ export function OperatorMediaPicker({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{reservation.displayName}</p>
+              {reservation.accessMode === "locked" && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <LockKeyhole className="h-3.5 w-3.5" /> תצוגת teaser נעולה
+                </p>
+              )}
               <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock3 className="h-3.5 w-3.5" />
                 שמור לשליחה לעוד {formatRemaining(remainingMilliseconds)}
@@ -429,12 +463,15 @@ export function OperatorMediaPicker({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {catalog.map((asset) => {
                 const reserving = reservingAssetId === asset.id;
-                const available = asset.is_reservable || asset.is_reserved_by_me;
+                const accessMode: DeliveryMode = asset.is_locked_reservable ? "locked" : "standard";
+                const available =
+                  asset.is_reserved_by_me ||
+                  (accessMode === "locked" ? asset.is_locked_reservable : asset.is_reservable);
                 return (
                   <button
                     key={asset.id}
                     type="button"
-                    onClick={() => void selectAsset(asset)}
+                    onClick={() => void selectAsset(asset, accessMode)}
                     disabled={!available || Boolean(reservingAssetId)}
                     aria-pressed={asset.is_reserved_by_me}
                     className="flex min-h-24 items-center gap-3 rounded-md border border-border bg-card p-3 text-right transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus:ring-2 focus:ring-ring"
@@ -447,7 +484,8 @@ export function OperatorMediaPicker({
                       )}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
+                      <span className="flex items-center gap-1 truncate text-sm font-medium">
+                        {asset.locked_price_credits !== null && <LockKeyhole className="h-3.5 w-3.5 shrink-0" />}
                         {asset.display_name}
                       </span>
                       <span className="mt-1 block text-xs text-muted-foreground">
@@ -457,8 +495,12 @@ export function OperatorMediaPicker({
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {asset.is_reserved_by_me
                           ? "נבחרה עבורך"
-                          : asset.is_reservable
+                          : asset.is_locked_reservable
+                            ? `מדיה נעולה · ${asset.locked_price_credits} קרדיטים`
+                            : asset.is_reservable
                             ? "זמינה"
+                            : asset.locked_price_credits !== null && !asset.locked_images_enabled
+                              ? "מדיה נעולה אינה פעילה"
                             : "לא זמינה"}
                       </span>
                     </span>
