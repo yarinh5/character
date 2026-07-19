@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import type {
+  MessageAttachmentAccess,
+  MessageAttachmentAccessStatus,
+} from "@/hooks/useMessageAttachmentAccessMap";
 import { useMessageAttachmentUrl } from "@/hooks/useMessageAttachmentUrl";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -15,45 +19,20 @@ export type ChatMessageAttachment = {
   created_at: string;
 };
 
-type AttachmentAccess = {
-  access_mode: string;
-  render_state: string;
-  price_credits_snapshot: number | null;
-  is_unlocked: boolean | null;
+type MessageAttachmentProps = {
+  attachment: ChatMessageAttachment;
+  access: MessageAttachmentAccess | null;
+  accessStatus: MessageAttachmentAccessStatus;
+  refreshAccess: () => Promise<MessageAttachmentAccess | null>;
 };
 
-function useMessageAttachmentAccess(attachmentId: string) {
-  const [state, setState] = useState<
-    | { status: "loading"; data: null }
-    | { status: "ready"; data: AttachmentAccess | null }
-    | { status: "error"; data: null }
-  >({ status: "loading", data: null });
-
-  const refresh = useCallback(async () => {
-    setState({ status: "loading", data: null });
-    const { data, error } = await supabase.rpc("get_message_attachment_access", {
-      _attachment_ids: [attachmentId],
-    });
-    if (error) {
-      setState({ status: "error", data: null });
-      return null;
-    }
-    const access = Array.isArray(data) ? data[0] : null;
-    const resolvedAccess = (access ?? null) as AttachmentAccess | null;
-    setState({ status: "ready", data: resolvedAccess });
-    return resolvedAccess;
-  }, [attachmentId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  return { ...state, refresh };
-}
-
-export function MessageAttachment({ attachment }: { attachment: ChatMessageAttachment }) {
+export function MessageAttachment({
+  attachment,
+  access,
+  accessStatus,
+  refreshAccess,
+}: MessageAttachmentProps) {
   const preview = useMessageAttachmentUrl(attachment.id);
-  const access = useMessageAttachmentAccess(attachment.id);
   const [unlocking, setUnlocking] = useState(false);
   const unlockIdempotencyKeyRef = useRef<string | null>(null);
 
@@ -64,16 +43,14 @@ export function MessageAttachment({ attachment }: { attachment: ChatMessageAttac
   if (attachment.kind !== "image") return null;
 
   const lockedDisabled =
-    access.status === "ready" &&
-    access.data?.access_mode === "locked" &&
-    access.data.render_state === "disabled";
+    accessStatus === "ready" && access?.access_mode === "locked" && access.render_state === "disabled";
   const canUnlock =
-    access.status === "ready" &&
-    access.data?.access_mode === "locked" &&
-    access.data.render_state === "teaser" &&
-    typeof access.data.price_credits_snapshot === "number" &&
-    access.data.is_unlocked === false;
-  const unlockPrice = canUnlock ? access.data?.price_credits_snapshot ?? null : null;
+    accessStatus === "ready" &&
+    access?.access_mode === "locked" &&
+    access.render_state === "teaser" &&
+    typeof access.price_credits_snapshot === "number" &&
+    access.is_unlocked === false;
+  const unlockPrice = canUnlock ? access?.price_credits_snapshot ?? null : null;
 
   const unlock = async () => {
     if (!canUnlock || unlocking) return;
@@ -88,7 +65,7 @@ export function MessageAttachment({ attachment }: { attachment: ChatMessageAttac
       });
       if (error) {
         toast.error("פתיחת התמונה לא הושלמה. בודקים את סטטוס הפתיחה.");
-        const refreshedAccess = await access.refresh();
+        const refreshedAccess = await refreshAccess();
         if (refreshedAccess?.is_unlocked) {
           unlockIdempotencyKeyRef.current = null;
           await preview.refresh();
@@ -97,7 +74,7 @@ export function MessageAttachment({ attachment }: { attachment: ChatMessageAttac
       }
 
       unlockIdempotencyKeyRef.current = null;
-      await access.refresh();
+      await refreshAccess();
       await preview.refresh();
     } finally {
       setUnlocking(false);
@@ -112,7 +89,7 @@ export function MessageAttachment({ attachment }: { attachment: ChatMessageAttac
     );
   }
 
-  if (preview.status === "loading" || access.status === "loading") {
+  if (preview.status === "loading" || accessStatus === "loading") {
     return (
       <div
         className="mt-2 aspect-[4/3] w-full min-w-48 animate-pulse rounded-md bg-muted/60"
@@ -122,7 +99,7 @@ export function MessageAttachment({ attachment }: { attachment: ChatMessageAttac
     );
   }
 
-  if (preview.status === "error" || !preview.url || access.status === "error") {
+  if (preview.status === "error" || !preview.url || accessStatus === "error" || !access) {
     return (
       <div className="mt-2 flex aspect-[4/3] w-full min-w-48 items-center justify-center rounded-md border border-border bg-muted/40 px-3 text-center text-xs text-muted-foreground">
         המדיה אינה זמינה כרגע

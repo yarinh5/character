@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import {
   getOldestMessageCursor,
   isNearScrollBottom,
@@ -70,6 +71,12 @@ function ConvView() {
   const shouldStickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const messageRequestVersionRef = useRef(0);
+  const attachmentIds = useMemo(
+    () =>
+      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+    [messages],
+  );
+  const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
   useActiveConversation(conversationId, "admin");
 
   const hydrateMessageAttachments = async (message: AdminMessage) => {
@@ -607,7 +614,13 @@ function ConvView() {
                     </div>
                     {showContent && <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>}
                     {m.message_attachments?.map((attachment: MessageAttachmentData) => (
-                      <MessageAttachment key={attachment.id} attachment={attachment} />
+                      <MessageAttachment
+                        key={attachment.id}
+                        attachment={attachment}
+                        access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
+                        accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
+                        refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                      />
                     ))}
                     <div className="text-[10px] opacity-60 mt-1">
                       {new Date(m.created_at).toLocaleTimeString("he-IL")}

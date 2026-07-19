@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/messagePagination";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -86,6 +87,12 @@ function ChatPage() {
   const initialScrollDoneRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
+  const attachmentIds = useMemo(
+    () =>
+      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+    [messages],
+  );
+  const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
   useActiveConversation(conversationId, "client");
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
@@ -413,7 +420,13 @@ function ChatPage() {
               >
                 {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
                 {m.message_attachments?.map((attachment) => (
-                  <MessageAttachment key={attachment.id} attachment={attachment} />
+                  <MessageAttachment
+                    key={attachment.id}
+                    attachment={attachment}
+                    access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
+                    accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
+                    refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                  />
                 ))}
                 <p className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                   {new Date(m.created_at).toLocaleTimeString("he-IL", {

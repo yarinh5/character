@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
@@ -15,6 +15,7 @@ import { useOperator, ConversationStatusBadge } from "@/components/operator/Oper
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -135,6 +136,12 @@ function OperatorChatPage() {
   const initialScrollDoneRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
+  const attachmentIds = useMemo(
+    () =>
+      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+    [messages],
+  );
+  const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
   useActiveConversation(conversationId, isAdmin ? "admin" : "operator");
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
@@ -798,7 +805,13 @@ function OperatorChatPage() {
                     )}
                     {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
                     {m.message_attachments?.map((attachment) => (
-                      <MessageAttachment key={attachment.id} attachment={attachment} />
+                      <MessageAttachment
+                        key={attachment.id}
+                        attachment={attachment}
+                        access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
+                        accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
+                        refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                      />
                     ))}
                     <p className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                       {new Date(m.created_at).toLocaleTimeString("he-IL", {
