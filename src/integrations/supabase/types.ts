@@ -1137,6 +1137,48 @@ export type Database = {
           },
         ]
       }
+      message_stickers: {
+        Row: {
+          collection_name_snapshot: string
+          created_at: string
+          id: string
+          message_id: string
+          sticker_id: string
+          sticker_name_snapshot: string
+        }
+        Insert: {
+          collection_name_snapshot: string
+          created_at?: string
+          id?: string
+          message_id: string
+          sticker_id: string
+          sticker_name_snapshot: string
+        }
+        Update: {
+          collection_name_snapshot?: string
+          created_at?: string
+          id?: string
+          message_id?: string
+          sticker_id?: string
+          sticker_name_snapshot?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_stickers_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: true
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_stickers_sticker_id_fkey"
+            columns: ["sticker_id"]
+            isOneToOne: false
+            referencedRelation: "stickers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
@@ -1483,6 +1525,124 @@ export type Database = {
           },
         ]
       }
+      sticker_collections: {
+        Row: {
+          character_id: string | null
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          slug: string
+          sort_order: number
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          slug: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          slug?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sticker_collections_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stickers: {
+        Row: {
+          bucket_id: string
+          byte_size: number
+          collection_id: string
+          content_type: string
+          created_at: string
+          created_by_user_id: string | null
+          height: number
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          object_path: string
+          slug: string
+          sort_order: number
+          updated_at: string
+          updated_by_user_id: string | null
+          width: number
+        }
+        Insert: {
+          bucket_id?: string
+          byte_size: number
+          collection_id: string
+          content_type?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          height: number
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          object_path: string
+          slug: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+          width: number
+        }
+        Update: {
+          bucket_id?: string
+          byte_size?: number
+          collection_id?: string
+          content_type?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          height?: number
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          object_path?: string
+          slug?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+          width?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stickers_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "sticker_collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       system_settings: {
         Row: {
           id: string
@@ -1684,6 +1844,17 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      get_conversation_stickers: {
+        Args: { _conversation_id: string }
+        Returns: {
+          collection_id: string
+          collection_name: string
+          name: string
+          scope: string
+          sort_order: number
+          sticker_id: string
+        }[]
+      }
       get_discovery_characters: {
         Args: { _filters?: Json }
         Returns: {
@@ -1830,12 +2001,24 @@ export type Database = {
         }
         Returns: string
       }
+      resolve_sticker_object_path_for_server: {
+        Args: { _actor_user_id: string; _message_sticker_id: string }
+        Returns: string
+      }
       restore_character_media_asset: {
         Args: { _asset_id: string }
         Returns: Json
       }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
+        Returns: Json
+      }
+      send_client_sticker_message: {
+        Args: {
+          _conversation_id: string
+          _idempotency_key: string
+          _sticker_id: string
+        }
         Returns: Json
       }
       send_operator_locked_media_message: {
@@ -1848,6 +2031,14 @@ export type Database = {
       }
       send_operator_message: {
         Args: { _content: string; _conversation_id: string }
+        Returns: Json
+      }
+      send_operator_sticker_message: {
+        Args: {
+          _conversation_id: string
+          _idempotency_key: string
+          _sticker_id: string
+        }
         Returns: Json
       }
       set_character_favorite: {
