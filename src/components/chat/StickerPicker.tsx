@@ -20,7 +20,7 @@ import { useStickerSend, type StickerSendResult } from "@/hooks/useStickerSend";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 
-type StickerPickerRole = "client" | "operator";
+type StickerPickerRole = "client" | "operator" | "admin";
 
 function describeSendError(errorCode: string) {
   if (errorCode.includes("stickers_disabled")) return "Stickers are not available.";

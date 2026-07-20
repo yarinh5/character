@@ -15,12 +15,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowRight, FileText, Info, Send } from "lucide-react";
+import { ArrowRight, FileText, ImagePlus, Info, Send, Smile } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import { StickerPicker } from "@/components/chat/StickerPicker";
+import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
+import type { StickerSendResult } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import {
   getOldestMessageCursor,
@@ -66,6 +69,8 @@ function ConvView() {
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [adminOperatorUserIds, setAdminOperatorUserIds] = useState<string[]>([]);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -468,6 +473,23 @@ function ConvView() {
     setMessageInput("");
   };
 
+  const handleStickerSent = (result: StickerSendResult) => {
+    if (!result.message) return;
+    shouldStickToBottomRef.current = true;
+    setMessages((current) =>
+      mergeMessagesById(current, [
+        {
+          ...(result.message as unknown as AdminMessage),
+          operator_id: data?.currentOperator?.id ?? null,
+          operators: data?.currentOperator
+            ? { full_name: data.currentOperator.full_name, user_id: user?.id ?? null }
+            : null,
+          message_stickers: result.message_sticker ?? null,
+        },
+      ]),
+    );
+  };
+
   const saveNote = async () => {
     const text = noteInput.trim();
     if (!text || savingNote) return;
@@ -678,11 +700,36 @@ function ConvView() {
                         placeholder={`כתוב בשם ${data.conv.characters?.name ?? "הדמות"}...`}
                         rows={1}
                         maxLength={2000}
-                        className="min-h-10 max-h-32 resize-none"
+                        className="min-h-10 max-h-32 min-w-0 flex-1 resize-none"
                         disabled={composerDisabled}
                       />
                       <Button
+                        type="button"
                         size="icon"
+                        variant="outline"
+                        className="h-10 w-10 shrink-0"
+                        onClick={() => setMediaPickerOpen(true)}
+                        disabled={composerDisabled}
+                        title="בחירת מדיה"
+                        aria-label="בחירת מדיה"
+                      >
+                        <ImagePlus className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-10 w-10 shrink-0"
+                        onClick={() => setStickerPickerOpen(true)}
+                        disabled={composerDisabled}
+                        title="בחירת סטיקר"
+                        aria-label="בחירת סטיקר"
+                      >
+                        <Smile className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        className="h-10 w-10 shrink-0"
                         onClick={sendMessage}
                         disabled={composerDisabled || !messageInput.trim()}
                         title="שליחת הודעה"
@@ -861,6 +908,19 @@ function ConvView() {
           )}
         </div>
       </div>
+      <OperatorMediaPicker
+        actor="admin"
+        conversationId={conversationId}
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+      />
+      <StickerPicker
+        conversationId={conversationId}
+        open={stickerPickerOpen}
+        onOpenChange={setStickerPickerOpen}
+        role="admin"
+        onSent={handleStickerSent}
+      />
     </div>
   );
 }

@@ -1921,6 +1921,28 @@ export type Database = {
           width: number
         }[]
       }
+      get_admin_media_catalog: {
+        Args: { _conversation_id: string }
+        Returns: {
+          byte_size: number
+          content_type: string
+          display_name: string
+          height: number
+          id: string
+          ingest_status: string
+          is_locked_reservable: boolean
+          is_reservable: boolean
+          is_reserved_by_me: boolean
+          locked_derivative_status: string
+          locked_images_enabled: boolean
+          locked_price_credits: number
+          my_reservation_access_mode: string
+          my_reservation_expires_at: string
+          my_reservation_id: string
+          status: string
+          width: number
+        }[]
+      }
       get_admin_sticker_catalog: {
         Args: never
         Returns: {
@@ -2078,12 +2100,20 @@ export type Database = {
         Args: { _character_id: string }
         Returns: boolean
       }
+      release_admin_character_media_reservation: {
+        Args: { _reservation_id: string }
+        Returns: Json
+      }
       release_character_media_reservation: {
         Args: { _reservation_id: string }
         Returns: Json
       }
       release_conversation_lock: {
         Args: { _conversation_id: string }
+        Returns: Json
+      }
+      reserve_admin_character_media_asset: {
+        Args: { _asset_id: string; _conversation_id: string }
         Returns: Json
       }
       reserve_character_media_asset: {
@@ -2124,6 +2154,18 @@ export type Database = {
       }
       restore_character_media_asset: {
         Args: { _asset_id: string }
+        Returns: Json
+      }
+      send_admin_media_message: {
+        Args: { _caption?: string; _reservation_id: string }
+        Returns: Json
+      }
+      send_admin_sticker_message: {
+        Args: {
+          _conversation_id: string
+          _idempotency_key: string
+          _sticker_id: string
+        }
         Returns: Json
       }
       send_client_message: {

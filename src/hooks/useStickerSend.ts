@@ -26,7 +26,7 @@ export type StickerSendResult = {
   already_sent?: boolean;
 };
 
-type StickerSendRole = "client" | "operator";
+type StickerSendRole = "client" | "operator" | "admin";
 const SERVER_COOLDOWN_MS = 2000;
 
 function createIdempotencyKey() {
@@ -62,14 +62,16 @@ export function useStickerSend(conversationId: string, role: StickerSendRole) {
       setSendingStickerId(stickerId);
 
       try {
-        const { data, error } = await supabase.rpc(
-          role === "client" ? "send_client_sticker_message" : "send_operator_sticker_message",
-          {
-            _conversation_id: conversationId,
-            _sticker_id: stickerId,
-            _idempotency_key: idempotencyKey,
-          },
-        );
+        const args = {
+          _conversation_id: conversationId,
+          _sticker_id: stickerId,
+          _idempotency_key: idempotencyKey,
+        };
+        const { data, error } = role === "client"
+          ? await supabase.rpc("send_client_sticker_message", args)
+          : role === "admin"
+            ? await supabase.rpc("send_admin_sticker_message", args)
+            : await supabase.rpc("send_operator_sticker_message", args);
 
         if (error) {
           const errorCode = error.message || "sticker_send_failed";
