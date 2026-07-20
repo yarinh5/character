@@ -1596,6 +1596,7 @@ export type Database = {
           processing_started_at: string | null
           slug: string
           sort_order: number
+          source_content_type: string
           source_path: string | null
           updated_at: string
           updated_by_user_id: string | null
@@ -1621,6 +1622,7 @@ export type Database = {
           processing_started_at?: string | null
           slug: string
           sort_order?: number
+          source_content_type?: string
           source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
@@ -1646,6 +1648,7 @@ export type Database = {
           processing_started_at?: string | null
           slug?: string
           sort_order?: number
+          source_content_type?: string
           source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
@@ -1829,6 +1832,7 @@ export type Database = {
           _character_id: string
           _collection_name: string
           _collection_slug: string
+          _source_content_type?: string
           _sticker_name: string
           _sticker_slug: string
         }
