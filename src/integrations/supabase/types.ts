@@ -1578,60 +1578,78 @@ export type Database = {
       stickers: {
         Row: {
           bucket_id: string
-          byte_size: number
+          byte_size: number | null
           collection_id: string
           content_type: string
           created_at: string
           created_by_user_id: string | null
-          height: number
+          failed_at: string | null
+          failure_code: string | null
+          height: number | null
           id: string
+          ingest_status: string
           is_active: boolean
           metadata: Json
           name: string
           object_path: string
+          processed_at: string | null
+          processing_started_at: string | null
           slug: string
           sort_order: number
+          source_path: string | null
           updated_at: string
           updated_by_user_id: string | null
-          width: number
+          width: number | null
         }
         Insert: {
           bucket_id?: string
-          byte_size: number
+          byte_size?: number | null
           collection_id: string
           content_type?: string
           created_at?: string
           created_by_user_id?: string | null
-          height: number
+          failed_at?: string | null
+          failure_code?: string | null
+          height?: number | null
           id?: string
+          ingest_status?: string
           is_active?: boolean
           metadata?: Json
           name: string
           object_path: string
+          processed_at?: string | null
+          processing_started_at?: string | null
           slug: string
           sort_order?: number
+          source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
-          width: number
+          width?: number | null
         }
         Update: {
           bucket_id?: string
-          byte_size?: number
+          byte_size?: number | null
           collection_id?: string
           content_type?: string
           created_at?: string
           created_by_user_id?: string | null
-          height?: number
+          failed_at?: string | null
+          failure_code?: string | null
+          height?: number | null
           id?: string
+          ingest_status?: string
           is_active?: boolean
           metadata?: Json
           name?: string
           object_path?: string
+          processed_at?: string | null
+          processing_started_at?: string | null
           slug?: string
           sort_order?: number
+          source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
-          width?: number
+          width?: number | null
         }
         Relationships: [
           {
@@ -1751,7 +1769,30 @@ export type Database = {
           source_path: string
         }[]
       }
+      begin_sticker_processing_for_server: {
+        Args: { _actor_user_id: string; _sticker_id: string }
+        Returns: {
+          already_ready: boolean
+          object_path: string
+          source_path: string
+          sticker_id: string
+        }[]
+      }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      complete_sticker_processing_for_server: {
+        Args: {
+          _actor_user_id: string
+          _byte_size: number
+          _height: number
+          _sticker_id: string
+          _width: number
+        }
+        Returns: {
+          already_ready: boolean
+          ingest_status: string
+          sticker_id: string
+        }[]
+      }
       configure_character_media_asset_locked: {
         Args: { _asset_id: string; _price_credits?: number }
         Returns: Json
@@ -1782,6 +1823,20 @@ export type Database = {
         }
         Returns: string
       }
+      create_sticker_upload_intent_for_server: {
+        Args: {
+          _actor_user_id: string
+          _character_id: string
+          _collection_name: string
+          _collection_slug: string
+          _sticker_name: string
+          _sticker_slug: string
+        }
+        Returns: {
+          source_path: string
+          sticker_id: string
+        }[]
+      }
       disable_character_media_asset: {
         Args: { _asset_id: string; _reason?: string }
         Returns: Json
@@ -1793,6 +1848,14 @@ export type Database = {
       fail_locked_media_derivative_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
         Returns: Json
+      }
+      fail_sticker_processing_for_server: {
+        Args: {
+          _actor_user_id: string
+          _failure_code: string
+          _sticker_id: string
+        }
+        Returns: undefined
       }
       finalize_character_media_ingest_for_server: {
         Args: {
@@ -1836,6 +1899,27 @@ export type Database = {
           processing_error_code: string
           processing_started_at: string
           status: string
+          updated_at: string
+          width: number
+        }[]
+      }
+      get_admin_sticker_catalog: {
+        Args: never
+        Returns: {
+          byte_size: number
+          character_id: string
+          collection_id: string
+          collection_is_active: boolean
+          collection_name: string
+          collection_slug: string
+          created_at: string
+          failure_code: string
+          height: number
+          id: string
+          ingest_status: string
+          is_active: boolean
+          name: string
+          slug: string
           updated_at: string
           width: number
         }[]
@@ -1993,6 +2077,10 @@ export type Database = {
         }
         Returns: Json
       }
+      resolve_admin_sticker_object_path_for_server: {
+        Args: { _actor_user_id: string; _sticker_id: string }
+        Returns: string
+      }
       resolve_character_media_preview_path_for_server: {
         Args: {
           _actor_user_id: string
@@ -2061,6 +2149,10 @@ export type Database = {
           _swipe: string
         }
         Returns: Json
+      }
+      set_sticker_active: {
+        Args: { _is_active: boolean; _sticker_id: string }
+        Returns: undefined
       }
       start_or_get_conversation: {
         Args: { _character_id: string }

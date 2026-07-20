@@ -10,6 +10,7 @@ import {
   ScrollText,
   Settings,
   Sparkles,
+  Sticker,
   UserCog,
   Users,
 } from "lucide-react";
@@ -30,7 +31,8 @@ type NavTo =
   | "/admin/analytics"
   | "/admin/reports"
   | "/admin/audit-logs"
-  | "/admin/settings";
+  | "/admin/settings"
+  | "/admin/stickers";
 
 const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] = [
   { to: "/admin", label: "דשבורד", icon: LayoutDashboard, exact: true },
@@ -38,6 +40,7 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/clients", label: "לקוחות", icon: Users },
   { to: "/admin/operators", label: "עובדים", icon: UserCog },
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
+  { to: "/admin/stickers", label: "Stickers", icon: Sticker },
   { to: "/admin/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },

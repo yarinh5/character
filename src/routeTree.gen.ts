@@ -33,6 +33,7 @@ import { Route as AppFavoritesRouteImport } from './routes/app.favorites'
 import { Route as AppConversationsRouteImport } from './routes/app.conversations'
 import { Route as AppCharactersRouteImport } from './routes/app.characters'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminStickersRouteImport } from './routes/admin.stickers'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
@@ -169,6 +170,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminStickersRoute = AdminStickersRouteImport.update({
+  id: '/stickers',
+  path: '/stickers',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -270,6 +276,7 @@ export interface FileRoutesByFullPath {
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
@@ -307,6 +314,7 @@ export interface FileRoutesByTo {
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
@@ -349,6 +357,7 @@ export interface FileRoutesById {
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRoute
   '/app/conversations': typeof AppConversationsRoute
@@ -392,6 +401,7 @@ export interface FileRouteTypes {
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
+    | '/admin/stickers'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -429,6 +439,7 @@ export interface FileRouteTypes {
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
+    | '/admin/stickers'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -470,6 +481,7 @@ export interface FileRouteTypes {
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
+    | '/admin/stickers'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -674,6 +686,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/stickers': {
+      id: '/admin/stickers'
+      path: '/stickers'
+      fullPath: '/admin/stickers'
+      preLoaderRoute: typeof AdminStickersRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/settings': {
       id: '/admin/settings'
       path: '/settings'
@@ -806,6 +825,7 @@ interface AdminRouteChildren {
   AdminOperatorsRoute: typeof AdminOperatorsRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
+  AdminStickersRoute: typeof AdminStickersRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -821,6 +841,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminOperatorsRoute: AdminOperatorsRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
+  AdminStickersRoute: AdminStickersRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
