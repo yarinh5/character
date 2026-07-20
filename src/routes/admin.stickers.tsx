@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { ImagePlus, LoaderCircle, Power, Sticker } from "lucide-react";
+import { ImagePlus, LoaderCircle, Power, RefreshCw, Sticker, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -18,6 +18,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useMediaViewUrl } from "@/hooks/useMediaViewUrl";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/admin/stickers")({
   component: AdminStickersPage,
@@ -25,9 +35,10 @@ export const Route = createFileRoute("/admin/stickers")({
 
 type StickerRow = Database["public"]["Functions"]["get_admin_sticker_catalog"]["Returns"][number];
 type UploadIntent = { sticker_id?: unknown; upload_url?: unknown };
-type StickerSourceContentType = "image/webp" | "image/png" | "image/jpeg";
 
-const SOURCE_LIMIT_BYTES = 5 * 1024 * 1024;
+const SOURCE_LIMIT_BYTES = 10 * 1024 * 1024;
+const MAX_RENDER_BYTES = 512 * 1024;
+const MAX_RENDER_SIDE = 768;
 
 function slug(value: string) {
   return value
@@ -38,16 +49,48 @@ function slug(value: string) {
     .slice(0, 64);
 }
 
-function sourceContentType(file: File): StickerSourceContentType | null {
+function isSupportedStickerSource(file: File) {
   if (file.type === "image/webp" || file.type === "image/png" || file.type === "image/jpeg") {
-    return file.type;
+    return true;
   }
 
   const name = file.name.toLowerCase();
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  return null;
+  return name.endsWith(".webp") || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg");
+}
+
+function canvasToWebp(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("render_conversion_failed"));
+    }, "image/webp", quality);
+  });
+}
+
+async function createRenderReadySticker(file: File) {
+  const image = await createImageBitmap(file, { imageOrientation: "from-image" });
+  try {
+    const scale = Math.min(1, MAX_RENDER_SIDE / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("render_conversion_failed");
+    context.drawImage(image, 0, 0, width, height);
+
+    for (const quality of [0.9, 0.82, 0.74, 0.66]) {
+      const render = await canvasToWebp(canvas, quality);
+      if (render.size <= MAX_RENDER_BYTES) {
+        return new File([render], "sticker-render.webp", { type: "image/webp" });
+      }
+    }
+
+    throw new Error("render_too_large");
+  } finally {
+    image.close();
+  }
 }
 
 async function functionErrorCode(error: unknown) {
@@ -83,6 +126,7 @@ function AdminStickersPage() {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StickerRow | null>(null);
   const [collectionName, setCollectionName] = useState("");
   const [stickerName, setStickerName] = useState("");
   const [characterId, setCharacterId] = useState("global");
@@ -107,9 +151,8 @@ function AdminStickersPage() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin-stickers"] });
 
   const upload = async (file: File) => {
-    const contentType = sourceContentType(file);
     if (
-      !contentType ||
+      !isSupportedStickerSource(file) ||
       file.size < 1 ||
       file.size > SOURCE_LIMIT_BYTES ||
       !collectionName.trim() ||
@@ -121,6 +164,7 @@ function AdminStickersPage() {
 
     setBusy(true);
     try {
+      const render = await createRenderReadySticker(file);
       const { data, error } = await supabase.functions.invoke("admin-sticker-upload-intent", {
         body: {
           collection_slug: slug(collectionName),
@@ -128,7 +172,7 @@ function AdminStickersPage() {
           character_id: characterId === "global" ? null : characterId,
           sticker_slug: slug(stickerName),
           sticker_name: stickerName.trim(),
-          content_type: contentType,
+          content_type: "image/webp",
         },
       });
       const intent = (data ?? {}) as UploadIntent;
@@ -138,28 +182,20 @@ function AdminStickersPage() {
 
       const put = await fetch(intent.upload_url, {
         method: "PUT",
-        headers: { "Content-Type": contentType, "x-upsert": "false" },
-        body: file,
+        headers: { "Content-Type": "image/webp", "x-upsert": "false" },
+        body: render,
       });
       if (!put.ok) throw new Error("sticker_upload_failed");
 
       const { error: processError } = await supabase.functions.invoke("process-sticker-media", {
         body: { sticker_id: intent.sticker_id },
       });
-      if (processError) {
-        const code = await functionErrorCode(processError);
-        if (code === "source_dimensions_unsafe") throw new Error(code);
-        throw processError;
-      }
+      if (processError) throw processError;
 
       toast.success("Sticker is ready for activation.");
       setStickerName("");
     } catch (error) {
-      toast.error(
-        error instanceof Error && error.message === "source_dimensions_unsafe"
-          ? "התמונה גדולה מדי לעיבוד, נסה קובץ קטן יותר"
-          : "Sticker upload or processing failed.",
-      );
+      toast.error("Sticker upload or processing failed.");
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -182,6 +218,52 @@ function AdminStickersPage() {
 
     await refresh();
     toast.success("Sticker state updated.");
+  };
+
+  const retry = async (row: StickerRow) => {
+    setBusy(true);
+    try {
+      const { error } = await supabase.functions.invoke("process-sticker-media", {
+        body: { sticker_id: row.id },
+      });
+      if (error) {
+        const code = await functionErrorCode(error);
+        throw new Error(code ?? "sticker_processing_failed");
+      }
+      toast.success("Sticker processing restarted.");
+    } catch (error) {
+      toast.error(error instanceof Error && error.message === "sticker_processing_in_progress" ? "Sticker is still processing." : "Sticker retry failed.");
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  };
+
+  const remove = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.functions.invoke("delete-sticker-media", {
+        body: { sticker_id: deleteTarget.id },
+      });
+      if (error) {
+        const code = await functionErrorCode(error);
+        throw new Error(code ?? "sticker_delete_not_available");
+      }
+      toast.success("Sticker deleted.");
+      setDeleteTarget(null);
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message === "sticker_in_use"
+          ? "Sticker is already in use and cannot be deleted."
+          : error instanceof Error && error.message === "sticker_delete_not_available"
+            ? "Sticker delete is not available until its secure backend is deployed."
+            : "Sticker delete failed. Try again.",
+      );
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
   };
 
   return (
@@ -233,7 +315,7 @@ function AdminStickersPage() {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground md:col-span-4">
-            WebP, PNG, or JPEG up to 10 MB.
+            WebP, PNG, or JPEG up to 10 MB. Recommended: square image, 512×512 px or 768×768 px.
           </p>
         </CardContent>
       </Card>
@@ -253,16 +335,40 @@ function AdminStickersPage() {
                 {row.ingest_status}
                 {row.is_active ? " - active" : " - inactive"}
               </div>
+              {row.is_processing_stuck && <div className="text-xs text-destructive">Processing stuck</div>}
+              {row.deletion_started_at && <div className="text-xs text-destructive">Delete cleanup pending</div>}
               {row.failure_code && <div className="text-xs text-destructive">{row.failure_code}</div>}
+              {(row.ingest_status === "failed" || row.is_processing_stuck) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy || Boolean(row.deletion_started_at)}
+                  onClick={() => void retry(row)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Retry
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
                 className="w-full"
-                disabled={busy || row.ingest_status !== "ready"}
+                disabled={busy || row.ingest_status !== "ready" || Boolean(row.deletion_started_at)}
                 onClick={() => void toggle(row)}
               >
                 <Power className="h-3.5 w-3.5" />
                 {row.is_active ? "Deactivate" : "Activate"}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="w-full"
+                disabled={busy}
+                onClick={() => setDeleteTarget(row)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
               </Button>
             </CardContent>
           </Card>
@@ -275,6 +381,28 @@ function AdminStickersPage() {
           No QA stickers yet.
         </div>
       )}
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete sticker permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the sticker record and its private source and render files. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => void remove()}
+            >
+              {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1583,6 +1583,7 @@ export type Database = {
           content_type: string
           created_at: string
           created_by_user_id: string | null
+          deletion_started_at: string | null
           failed_at: string | null
           failure_code: string | null
           height: number | null
@@ -1596,7 +1597,7 @@ export type Database = {
           processing_started_at: string | null
           slug: string
           sort_order: number
-          source_content_type: string
+          source_content_type: string | null
           source_path: string | null
           updated_at: string
           updated_by_user_id: string | null
@@ -1609,6 +1610,7 @@ export type Database = {
           content_type?: string
           created_at?: string
           created_by_user_id?: string | null
+          deletion_started_at?: string | null
           failed_at?: string | null
           failure_code?: string | null
           height?: number | null
@@ -1622,7 +1624,7 @@ export type Database = {
           processing_started_at?: string | null
           slug: string
           sort_order?: number
-          source_content_type?: string
+          source_content_type?: string | null
           source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
@@ -1635,6 +1637,7 @@ export type Database = {
           content_type?: string
           created_at?: string
           created_by_user_id?: string | null
+          deletion_started_at?: string | null
           failed_at?: string | null
           failure_code?: string | null
           height?: number | null
@@ -1648,7 +1651,7 @@ export type Database = {
           processing_started_at?: string | null
           slug?: string
           sort_order?: number
-          source_content_type?: string
+          source_content_type?: string | null
           source_path?: string | null
           updated_at?: string
           updated_by_user_id?: string | null
@@ -1772,16 +1775,27 @@ export type Database = {
           source_path: string
         }[]
       }
+      begin_sticker_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _sticker_id: string }
+        Returns: {
+          object_path: string
+          source_paths: string[]
+          sticker_id: string
+        }[]
+      }
       begin_sticker_processing_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: {
           already_ready: boolean
           object_path: string
-          source_path: string
           sticker_id: string
         }[]
       }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      complete_sticker_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _sticker_id: string }
+        Returns: undefined
+      }
       complete_sticker_processing_for_server: {
         Args: {
           _actor_user_id: string
@@ -1837,7 +1851,7 @@ export type Database = {
           _sticker_slug: string
         }
         Returns: {
-          source_path: string
+          object_path: string
           sticker_id: string
         }[]
       }
@@ -1917,12 +1931,15 @@ export type Database = {
           collection_name: string
           collection_slug: string
           created_at: string
+          deletion_started_at: string
           failure_code: string
           height: number
           id: string
           ingest_status: string
           is_active: boolean
+          is_processing_stuck: boolean
           name: string
+          processing_started_at: string
           slug: string
           updated_at: string
           width: number
