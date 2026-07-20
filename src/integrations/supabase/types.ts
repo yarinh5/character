@@ -928,6 +928,97 @@ export type Database = {
         }
         Relationships: []
       }
+      gift_collections: {
+        Row: {
+          character_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gift_collections_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gifts: {
+        Row: {
+          collection_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          price_credits: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          collection_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          price_credits: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          collection_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          price_credits?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gifts_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "gift_collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_notes: {
         Row: {
           conversation_id: string
@@ -1133,6 +1224,93 @@ export type Database = {
             columns: ["reservation_id"]
             isOneToOne: true
             referencedRelation: "character_media_reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_gifts: {
+        Row: {
+          charged_transaction_id: string
+          collection_name_snapshot: string
+          compensated_at: string | null
+          compensation_reason: string | null
+          compensation_transaction_id: string | null
+          created_at: string
+          gift_id: string
+          gift_name_snapshot: string
+          id: string
+          message_id: string
+          price_credits_snapshot: number
+          refund_reason: string | null
+          refund_transaction_id: string | null
+          refunded_at: string | null
+        }
+        Insert: {
+          charged_transaction_id: string
+          collection_name_snapshot: string
+          compensated_at?: string | null
+          compensation_reason?: string | null
+          compensation_transaction_id?: string | null
+          created_at?: string
+          gift_id: string
+          gift_name_snapshot: string
+          id?: string
+          message_id: string
+          price_credits_snapshot: number
+          refund_reason?: string | null
+          refund_transaction_id?: string | null
+          refunded_at?: string | null
+        }
+        Update: {
+          charged_transaction_id?: string
+          collection_name_snapshot?: string
+          compensated_at?: string | null
+          compensation_reason?: string | null
+          compensation_transaction_id?: string | null
+          created_at?: string
+          gift_id?: string
+          gift_name_snapshot?: string
+          id?: string
+          message_id?: string
+          price_credits_snapshot?: number
+          refund_reason?: string | null
+          refund_transaction_id?: string | null
+          refunded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_gifts_charged_transaction_id_fkey"
+            columns: ["charged_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_gifts_compensation_transaction_id_fkey"
+            columns: ["compensation_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_gifts_gift_id_fkey"
+            columns: ["gift_id"]
+            isOneToOne: false
+            referencedRelation: "gifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_gifts_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: true
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_gifts_refund_transaction_id_fkey"
+            columns: ["refund_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -1967,6 +2145,18 @@ export type Database = {
           width: number
         }[]
       }
+      get_conversation_gifts: {
+        Args: { _conversation_id: string }
+        Returns: {
+          collection_id: string
+          collection_name: string
+          gift_id: string
+          name: string
+          price_credits: number
+          scope: string
+          sort_order: number
+        }[]
+      }
       get_conversation_read_summary: {
         Args: { _conversation_id: string }
         Returns: Json
@@ -2100,6 +2290,10 @@ export type Database = {
         Args: { _character_id: string }
         Returns: boolean
       }
+      refund_client_gift: {
+        Args: { _message_gift_id: string; _reason: string }
+        Returns: Json
+      }
       release_admin_character_media_reservation: {
         Args: { _reservation_id: string }
         Returns: Json
@@ -2165,6 +2359,14 @@ export type Database = {
           _conversation_id: string
           _idempotency_key: string
           _sticker_id: string
+        }
+        Returns: Json
+      }
+      send_client_gift: {
+        Args: {
+          _conversation_id: string
+          _gift_id: string
+          _idempotency_key: string
         }
         Returns: Json
       }
