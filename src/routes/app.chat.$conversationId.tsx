@@ -29,6 +29,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ArrowRight, Send, Flag, Trash2, Smile } from "lucide-react";
 import { toast } from "sonner";
 
@@ -511,18 +512,24 @@ function ChatPage() {
             placeholder="הקלד הודעה..."
             rows={1}
             maxLength={2000}
-            className="resize-none min-h-[40px] max-h-32"
+            className="min-w-0 flex-1 resize-none min-h-[40px] max-h-32"
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => setStickerPickerOpen(true)}
-            aria-label="Choose sticker"
-          >
-            <Smile className="h-4 w-4" />
-          </Button>
-          <Button onClick={send} disabled={sending || !input.trim()} size="icon">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => setStickerPickerOpen(true)}
+                aria-label="Choose sticker"
+              >
+                <Smile className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Choose sticker</TooltipContent>
+          </Tooltip>
+          <Button className="h-10 w-10 shrink-0" onClick={send} disabled={sending || !input.trim()} size="icon">
             <Send className="h-4 w-4" />
           </Button>
         </div>

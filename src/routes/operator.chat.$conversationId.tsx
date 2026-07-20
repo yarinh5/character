@@ -915,7 +915,7 @@ function OperatorChatPage() {
                     placeholder={sendBlockedByLock ? "השיחה נעולה כרגע לעובד אחר" : `כתוב כ${character?.name ?? "דמות"}...`}
                     rows={1}
                     maxLength={2000}
-                    className="resize-none min-h-[40px] max-h-32"
+                    className="min-w-0 flex-1 resize-none min-h-[40px] max-h-32"
                     disabled={sendBlockedByLock}
                   />
                   <Tooltip>
@@ -925,6 +925,7 @@ function OperatorChatPage() {
                           type="button"
                           variant="outline"
                           size="icon"
+                          className="h-10 w-10 shrink-0"
                           onClick={() => setMediaPickerOpen(true)}
                           disabled={sendBlockedByLock}
                           aria-label="בחירת מדיה לשליחה"
@@ -944,6 +945,7 @@ function OperatorChatPage() {
                           type="button"
                           variant="outline"
                           size="icon"
+                          className="h-10 w-10 shrink-0"
                           onClick={() => setStickerPickerOpen(true)}
                           disabled={sendBlockedByLock}
                           aria-label="Choose sticker"
@@ -956,7 +958,7 @@ function OperatorChatPage() {
                       {sendBlockedByLock ? "The conversation is locked by another operator." : "Choose sticker"}
                     </TooltipContent>
                   </Tooltip>
-                  <Button onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
+                  <Button className="h-10 w-10 shrink-0" onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
