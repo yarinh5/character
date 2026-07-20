@@ -38,6 +38,7 @@ import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
 import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
+import { Route as AdminGiftsRouteImport } from './routes/admin.gifts'
 import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
 import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
@@ -195,6 +196,11 @@ const AdminInvitesRoute = AdminInvitesRouteImport.update({
   path: '/invites',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminGiftsRoute = AdminGiftsRouteImport.update({
+  id: '/gifts',
+  path: '/gifts',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminCreditsRoute = AdminCreditsRouteImport.update({
   id: '/credits',
   path: '/credits',
@@ -272,6 +278,7 @@ export interface FileRoutesByFullPath {
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/gifts': typeof AdminGiftsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -310,6 +317,7 @@ export interface FileRoutesByTo {
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/gifts': typeof AdminGiftsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -353,6 +361,7 @@ export interface FileRoutesById {
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/gifts': typeof AdminGiftsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -397,6 +406,7 @@ export interface FileRouteTypes {
     | '/admin/clients'
     | '/admin/conversations'
     | '/admin/credits'
+    | '/admin/gifts'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -435,6 +445,7 @@ export interface FileRouteTypes {
     | '/admin/characters'
     | '/admin/clients'
     | '/admin/credits'
+    | '/admin/gifts'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -477,6 +488,7 @@ export interface FileRouteTypes {
     | '/admin/clients'
     | '/admin/conversations'
     | '/admin/credits'
+    | '/admin/gifts'
     | '/admin/invites'
     | '/admin/operators'
     | '/admin/reports'
@@ -721,6 +733,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminInvitesRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/gifts': {
+      id: '/admin/gifts'
+      path: '/gifts'
+      fullPath: '/admin/gifts'
+      preLoaderRoute: typeof AdminGiftsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/credits': {
       id: '/admin/credits'
       path: '/credits'
@@ -821,6 +840,7 @@ interface AdminRouteChildren {
   AdminClientsRoute: typeof AdminClientsRoute
   AdminConversationsRoute: typeof AdminConversationsRouteWithChildren
   AdminCreditsRoute: typeof AdminCreditsRoute
+  AdminGiftsRoute: typeof AdminGiftsRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
   AdminOperatorsRoute: typeof AdminOperatorsRoute
   AdminReportsRoute: typeof AdminReportsRoute
@@ -837,6 +857,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminClientsRoute: AdminClientsRoute,
   AdminConversationsRoute: AdminConversationsRouteWithChildren,
   AdminCreditsRoute: AdminCreditsRoute,
+  AdminGiftsRoute: AdminGiftsRoute,
   AdminInvitesRoute: AdminInvitesRoute,
   AdminOperatorsRoute: AdminOperatorsRoute,
   AdminReportsRoute: AdminReportsRoute,

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Coins,
   Flag,
+  Gift,
   LayoutDashboard,
   LogOut,
   MessageCircle,
@@ -32,7 +33,8 @@ type NavTo =
   | "/admin/reports"
   | "/admin/audit-logs"
   | "/admin/settings"
-  | "/admin/stickers";
+  | "/admin/stickers"
+  | "/admin/gifts";
 
 const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] = [
   { to: "/admin", label: "דשבורד", icon: LayoutDashboard, exact: true },
@@ -41,6 +43,7 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/operators", label: "עובדים", icon: UserCog },
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
   { to: "/admin/stickers", label: "Stickers", icon: Sticker },
+  { to: "/admin/gifts", label: "Gifts", icon: Gift },
   { to: "/admin/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },

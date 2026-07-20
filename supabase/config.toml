@@ -22,3 +22,18 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/process-character-media/deno.json"
 entrypoint = "./functions/process-character-media/index.ts"
+
+[functions.admin-gift-upload-intent]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/admin-gift-upload-intent/index.ts"
+
+[functions.finalize-gift-media]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/finalize-gift-media/index.ts"
+
+[functions.delete-gift-media]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/delete-gift-media/index.ts"
