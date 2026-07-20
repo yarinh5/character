@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-type MediaViewKind =
+export type MediaViewKind =
   | "message_attachment"
+  | "message_sticker"
+  | "conversation_sticker"
   | "reserved_preview"
   | "admin_asset_preview"
   | "admin_locked_teaser_preview"
@@ -18,7 +20,7 @@ type ViewUrlResponse = {
   expires_at?: unknown;
 };
 
-export function useMediaViewUrl(kind: MediaViewKind, targetId?: string) {
+export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversationId?: string) {
   const [state, setState] = useState<ViewState>(() =>
     targetId ? { status: "loading", url: null } : { status: "idle", url: null },
   );
@@ -34,14 +36,25 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string) {
     const requestVersion = ++requestVersionRef.current;
     setState({ status: "loading", url: null });
 
-    const { data, error } = await supabase.functions.invoke("media-view-url", {
-      body:
-        kind === "message_attachment"
-          ? { kind, attachment_id: targetId }
-          : kind === "reserved_preview"
-            ? { kind, reservation_id: targetId }
-            : { kind, asset_id: targetId },
-    });
+    const body =
+      kind === "message_attachment"
+        ? { kind, attachment_id: targetId }
+        : kind === "message_sticker"
+          ? { kind, message_sticker_id: targetId }
+          : kind === "conversation_sticker"
+            ? conversationId
+              ? { kind, conversation_id: conversationId, sticker_id: targetId }
+              : null
+            : kind === "reserved_preview"
+              ? { kind, reservation_id: targetId }
+              : { kind, asset_id: targetId };
+
+    if (!body) {
+      setState({ status: "idle", url: null });
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke("media-view-url", { body });
     if (requestVersion !== requestVersionRef.current) return;
 
     const response = (data ?? {}) as ViewUrlResponse;
@@ -51,7 +64,7 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string) {
     }
 
     setState({ status: "ready", url: response.url });
-  }, [kind, targetId]);
+  }, [conversationId, kind, targetId]);
 
   useEffect(() => {
     retriedRef.current = false;

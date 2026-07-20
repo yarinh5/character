@@ -15,6 +15,9 @@ import {
 } from "@/lib/messagePagination";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import { StickerPicker } from "@/components/chat/StickerPicker";
+import type { StickerSendResult } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,7 +29,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Send, Flag, Trash2 } from "lucide-react";
+import { ArrowRight, Send, Flag, Trash2, Smile } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/chat/$conversationId")({
@@ -42,9 +45,11 @@ type Msg = {
   created_at: string;
   is_read: boolean;
   message_attachments?: MessageAttachmentData[];
+  message_stickers?: MessageStickerData | null;
 };
 
 type MessageAttachmentData = ChatMessageAttachment;
+type MessageStickerData = ChatMessageSticker;
 
 type Conv = {
   id: string;
@@ -78,6 +83,7 @@ function ChatPage() {
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [clientAvatarUrl, setClientAvatarUrl] = useState<string | null>(null);
@@ -101,14 +107,24 @@ function ChatPage() {
     displayName: user?.email?.split("@")[0] ?? "לקוח",
   });
 
-  const hydrateMessageAttachments = async (message: Msg) => {
-    const { data } = await supabase
-      .from("message_attachments")
-      .select("id, message_id, kind, position, caption, metadata, created_at")
-      .eq("message_id", message.id)
-      .order("position", { ascending: true });
+  const hydrateMessageDecorations = async (message: Msg) => {
+    const [{ data: attachments }, { data: stickers }] = await Promise.all([
+      supabase
+        .from("message_attachments")
+        .select("id, message_id, kind, position, caption, metadata, created_at")
+        .eq("message_id", message.id)
+        .order("position", { ascending: true }),
+      supabase
+        .from("message_stickers")
+        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .eq("message_id", message.id),
+    ]);
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
+    return {
+      ...message,
+      message_attachments: (attachments ?? []) as MessageAttachmentData[],
+      message_stickers: (stickers?.[0] ?? null) as MessageStickerData | null,
+    };
   };
 
   const loadOlderMessages = async () => {
@@ -123,7 +139,7 @@ function ChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+      .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -163,7 +179,7 @@ function ChatPage() {
           .maybeSingle(),
         supabase
           .from("messages")
-          .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+          .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -220,7 +236,7 @@ function ChatPage() {
             return mergeMessagesById(prev, [newMsg]);
           });
           if (payload.eventType !== "UPDATE") {
-            void hydrateMessageAttachments(newMsg).then((hydrated) => {
+            void hydrateMessageDecorations(newMsg).then((hydrated) => {
               setMessages((prev) => mergeMessagesById(prev, [hydrated]));
             });
           }
@@ -293,6 +309,15 @@ function ChatPage() {
       setMessages((prev) => mergeMessagesById(prev, [result.message!]));
     }
     setInput("");
+  };
+
+  const handleStickerSent = (result: StickerSendResult) => {
+    if (!result.message) return;
+    const message: Msg = {
+      ...result.message,
+      message_stickers: result.message_sticker ?? null,
+    };
+    setMessages((prev) => mergeMessagesById(prev, [message]));
   };
 
   const deleteConversation = async () => {
@@ -407,7 +432,11 @@ function ChatPage() {
           const avatarUrl = mine ? clientAvatarUrl : character?.avatar_url;
           const avatarName = mine ? clientDisplayName : character?.name;
           const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
-          const showContent = m.content !== "[image]" || !hasAttachments;
+          const hasStickers = !!m.message_stickers;
+          const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+          const showContent =
+            (m.content !== "[image]" || !hasAttachments) &&
+            (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
           return (
             <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-start" : "justify-end"}`}>
               <ChatAvatar src={avatarUrl} name={avatarName} />
@@ -428,6 +457,8 @@ function ChatPage() {
                     refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
                   />
                 ))}
+                {stickerHydrationPending && <StickerHydrationPlaceholder />}
+                {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
                 <p className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                   {new Date(m.created_at).toLocaleTimeString("he-IL", {
                     hour: "2-digit",
@@ -482,6 +513,15 @@ function ChatPage() {
             maxLength={2000}
             className="resize-none min-h-[40px] max-h-32"
           />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => setStickerPickerOpen(true)}
+            aria-label="Choose sticker"
+          >
+            <Smile className="h-4 w-4" />
+          </Button>
           <Button onClick={send} disabled={sending || !input.trim()} size="icon">
             <Send className="h-4 w-4" />
           </Button>
@@ -502,6 +542,13 @@ function ChatPage() {
         onOpenChange={setDeleteOpen}
         onConfirm={deleteConversation}
         deleting={deleting}
+      />
+      <StickerPicker
+        conversationId={conversationId}
+        open={stickerPickerOpen}
+        onOpenChange={setStickerPickerOpen}
+        role="client"
+        onSent={handleStickerSent}
       />
     </div>
   );

@@ -15,6 +15,9 @@ import { useOperator, ConversationStatusBadge } from "@/components/operator/Oper
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import { StickerPicker } from "@/components/chat/StickerPicker";
+import type { StickerSendResult } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,7 +30,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus } from "lucide-react";
+import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -45,9 +48,11 @@ type Msg = {
   is_read: boolean;
   operators?: { full_name: string; user_id?: string | null } | null;
   message_attachments?: MessageAttachmentData[];
+  message_stickers?: MessageStickerData | null;
 };
 
 type MessageAttachmentData = ChatMessageAttachment;
+type MessageStickerData = ChatMessageSticker;
 
 type Conv = {
   id: string;
@@ -121,6 +126,7 @@ function OperatorChatPage() {
   const [customerInfoInput, setCustomerInfoInput] = useState("");
   const [sending, setSending] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
@@ -150,14 +156,24 @@ function OperatorChatPage() {
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
   });
 
-  const hydrateMessageAttachments = async (message: Msg) => {
-    const { data } = await supabase
-      .from("message_attachments")
-      .select("id, message_id, kind, position, caption, metadata, created_at")
-      .eq("message_id", message.id)
-      .order("position", { ascending: true });
+  const hydrateMessageDecorations = async (message: Msg) => {
+    const [{ data: attachments }, { data: stickers }] = await Promise.all([
+      supabase
+        .from("message_attachments")
+        .select("id, message_id, kind, position, caption, metadata, created_at")
+        .eq("message_id", message.id)
+        .order("position", { ascending: true }),
+      supabase
+        .from("message_stickers")
+        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .eq("message_id", message.id),
+    ]);
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
+    return {
+      ...message,
+      message_attachments: (attachments ?? []) as MessageAttachmentData[],
+      message_stickers: (stickers?.[0] ?? null) as MessageStickerData | null,
+    };
   };
 
   const loadOlderMessages = async () => {
@@ -172,7 +188,7 @@ function OperatorChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+      .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -249,7 +265,7 @@ function OperatorChatPage() {
       ] = await Promise.all([
         supabase
           .from("messages")
-          .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+          .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -369,13 +385,13 @@ function OperatorChatPage() {
                 }
                 const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name, user_id: data.user_id } : null };
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
-                void hydrateMessageAttachments(hydrated).then((attachmentHydrated) => {
+                void hydrateMessageDecorations(hydrated).then((attachmentHydrated) => {
                   setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
                 });
               });
           } else {
             setMessages((prev) => mergeMessagesById(prev, [newMsg]));
-            void hydrateMessageAttachments(newMsg).then((hydrated) => {
+            void hydrateMessageDecorations(newMsg).then((hydrated) => {
               setMessages((prev) => mergeMessagesById(prev, [hydrated]));
             });
           }
@@ -573,6 +589,18 @@ function OperatorChatPage() {
       setMessages((prev) => mergeMessagesById(prev, [message]));
     }
     setInput("");
+  };
+
+  const handleStickerSent = (result: StickerSendResult) => {
+    if (!result.message) return;
+    shouldStickToBottomRef.current = true;
+    const message: Msg = {
+      ...result.message,
+      operator_id: operator?.id ?? null,
+      operators: operator ? { full_name: operator.full_name, user_id: user?.id ?? null } : null,
+      message_stickers: result.message_sticker ?? null,
+    };
+    setMessages((prev) => mergeMessagesById(prev, [message]));
   };
 
   const saveNote = async () => {
@@ -783,7 +811,11 @@ function OperatorChatPage() {
               const avatarUrl = isOps ? conv?.characters?.avatar_url : client?.avatar_url;
               const avatarName = isOps ? conv?.characters?.name : client?.display_name ?? client?.email;
               const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
-              const showContent = m.content !== "[image]" || !hasAttachments;
+              const hasStickers = !!m.message_stickers;
+              const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+              const showContent =
+                (m.content !== "[image]" || !hasAttachments) &&
+                (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
               return (
                 <div key={m.id} className={`flex items-end gap-2 ${isOps ? "justify-start" : "justify-end"}`}>
                   <ChatAvatar src={avatarUrl} name={avatarName} />
@@ -813,6 +845,8 @@ function OperatorChatPage() {
                         refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
                       />
                     ))}
+                    {stickerHydrationPending && <StickerHydrationPlaceholder />}
+                    {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
                     <p className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                       {new Date(m.created_at).toLocaleTimeString("he-IL", {
                         hour: "2-digit",
@@ -903,6 +937,25 @@ function OperatorChatPage() {
                       {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "בחירת מדיה"}
                     </TooltipContent>
                   </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setStickerPickerOpen(true)}
+                          disabled={sendBlockedByLock}
+                          aria-label="Choose sticker"
+                        >
+                          <Smile className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {sendBlockedByLock ? "The conversation is locked by another operator." : "Choose sticker"}
+                    </TooltipContent>
+                  </Tooltip>
                   <Button onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
                     <Send className="h-4 w-4" />
                   </Button>
@@ -941,6 +994,13 @@ function OperatorChatPage() {
         conversationId={conversationId}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+      />
+      <StickerPicker
+        conversationId={conversationId}
+        open={stickerPickerOpen}
+        onOpenChange={setStickerPickerOpen}
+        role="operator"
+        onSent={handleStickerSent}
       />
     </div>
   );

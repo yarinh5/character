@@ -2001,6 +2001,14 @@ export type Database = {
         }
         Returns: string
       }
+      resolve_conversation_sticker_object_path_for_server: {
+        Args: {
+          _actor_user_id: string
+          _conversation_id: string
+          _sticker_id: string
+        }
+        Returns: string
+      }
       resolve_sticker_object_path_for_server: {
         Args: { _actor_user_id: string; _message_sticker_id: string }
         Returns: string

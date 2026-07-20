@@ -1,12 +1,27 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-type Target =
+type CharacterMediaTarget =
   | { targetKind: "message_attachment"; targetId: string; ttlSeconds: 60 }
   | { targetKind: "reserved_preview"; targetId: string; ttlSeconds: 30 }
   | { targetKind: "admin_asset_preview"; targetId: string; ttlSeconds: 60 }
   | { targetKind: "admin_locked_teaser_preview"; targetId: string; ttlSeconds: 60 }
   | { targetKind: "admin_locked_delivery_preview"; targetId: string; ttlSeconds: 60 };
+
+type StickerMessageTarget = {
+  targetKind: "message_sticker";
+  messageStickerId: string;
+  ttlSeconds: 60;
+};
+
+type StickerConversationTarget = {
+  targetKind: "conversation_sticker";
+  conversationId: string;
+  stickerId: string;
+  ttlSeconds: 60;
+};
+
+type Target = CharacterMediaTarget | StickerMessageTarget | StickerConversationTarget;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -39,6 +54,29 @@ function parseTarget(body: unknown): Target | null {
     UUID_PATTERN.test(value.attachment_id)
   ) {
     return { targetKind: "message_attachment", targetId: value.attachment_id, ttlSeconds: 60 };
+  }
+
+  if (
+    value.kind === "message_sticker" &&
+    typeof value.message_sticker_id === "string" &&
+    UUID_PATTERN.test(value.message_sticker_id)
+  ) {
+    return { targetKind: "message_sticker", messageStickerId: value.message_sticker_id, ttlSeconds: 60 };
+  }
+
+  if (
+    value.kind === "conversation_sticker" &&
+    typeof value.conversation_id === "string" &&
+    typeof value.sticker_id === "string" &&
+    UUID_PATTERN.test(value.conversation_id) &&
+    UUID_PATTERN.test(value.sticker_id)
+  ) {
+    return {
+      targetKind: "conversation_sticker",
+      conversationId: value.conversation_id,
+      stickerId: value.sticker_id,
+      ttlSeconds: 60,
+    };
   }
 
   if (
@@ -125,21 +163,34 @@ Deno.serve(async (request) => {
   const trusted = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data: previewPath, error: resolveError } = await trusted.rpc(
-    "resolve_character_media_preview_path_for_server",
-    {
-      _actor_user_id: userData.user.id,
-      _target_kind: target.targetKind,
-      _target_id: target.targetId,
-    },
-  );
+  const { data: previewPath, error: resolveError } =
+    target.targetKind === "message_sticker"
+      ? await trusted.rpc("resolve_sticker_object_path_for_server", {
+          _actor_user_id: userData.user.id,
+          _message_sticker_id: target.messageStickerId,
+        })
+      : target.targetKind === "conversation_sticker"
+        ? await trusted.rpc("resolve_conversation_sticker_object_path_for_server", {
+            _actor_user_id: userData.user.id,
+            _conversation_id: target.conversationId,
+            _sticker_id: target.stickerId,
+          })
+        : await trusted.rpc("resolve_character_media_preview_path_for_server", {
+            _actor_user_id: userData.user.id,
+            _target_kind: target.targetKind,
+            _target_id: target.targetId,
+          });
 
   if (resolveError || typeof previewPath !== "string" || !previewPath) {
     return errorResponse(404, "media_not_available", origin);
   }
 
+  const bucket =
+    target.targetKind === "message_sticker" || target.targetKind === "conversation_sticker"
+      ? "sticker-media"
+      : "character-media";
   const { data: signedUrl, error: signError } = await trusted.storage
-    .from("character-media")
+    .from(bucket)
     .createSignedUrl(previewPath, target.ttlSeconds);
   if (signError || !signedUrl?.signedUrl) {
     console.error("media_view_url_sign_failed");

@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
 import {
   getOldestMessageCursor,
@@ -47,9 +48,11 @@ type AdminMessage = {
   is_read: boolean;
   operators?: { full_name: string | null; user_id?: string | null } | null;
   message_attachments?: MessageAttachmentData[];
+  message_stickers?: MessageStickerData | null;
 };
 
 type MessageAttachmentData = ChatMessageAttachment;
+type MessageStickerData = ChatMessageSticker;
 
 function ConvView() {
   const { conversationId } = Route.useParams();
@@ -79,20 +82,30 @@ function ConvView() {
   const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
   useActiveConversation(conversationId, "admin");
 
-  const hydrateMessageAttachments = async (message: AdminMessage) => {
-    const { data } = await supabase
-      .from("message_attachments")
-      .select("id, message_id, kind, position, caption, metadata, created_at")
-      .eq("message_id", message.id)
-      .order("position", { ascending: true });
+  const hydrateMessageDecorations = async (message: AdminMessage) => {
+    const [{ data: attachments }, { data: stickers }] = await Promise.all([
+      supabase
+        .from("message_attachments")
+        .select("id, message_id, kind, position, caption, metadata, created_at")
+        .eq("message_id", message.id)
+        .order("position", { ascending: true }),
+      supabase
+        .from("message_stickers")
+        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .eq("message_id", message.id),
+    ]);
 
-    return { ...message, message_attachments: (data ?? []) as MessageAttachmentData[] };
+    return {
+      ...message,
+      message_attachments: (attachments ?? []) as MessageAttachmentData[],
+      message_stickers: (stickers?.[0] ?? null) as MessageStickerData | null,
+    };
   };
 
   const loadLatestMessages = async (requestVersion: number) => {
     const { data: msgs, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -126,7 +139,7 @@ function ConvView() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at)")
+      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
       .eq("conversation_id", conversationId)
       .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
       .order("created_at", { ascending: false })
@@ -318,7 +331,7 @@ function ConvView() {
                 };
                 if (requestVersion !== messageRequestVersionRef.current) return;
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
-                void hydrateMessageAttachments(hydrated).then((attachmentHydrated) => {
+                void hydrateMessageDecorations(hydrated).then((attachmentHydrated) => {
                   if (requestVersion !== messageRequestVersionRef.current) return;
                   setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
                 });
@@ -326,7 +339,7 @@ function ConvView() {
           } else {
             if (requestVersion !== messageRequestVersionRef.current) return;
             setMessages((prev) => mergeMessagesById(prev, [nextMessage]));
-            void hydrateMessageAttachments(nextMessage).then((hydrated) => {
+            void hydrateMessageDecorations(nextMessage).then((hydrated) => {
               if (requestVersion !== messageRequestVersionRef.current) return;
               setMessages((prev) => mergeMessagesById(prev, [hydrated]));
             });
@@ -586,7 +599,11 @@ function ConvView() {
               {messages.map((m: any) => {
                 const isClientMessage = m.sender_type === "client";
                 const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
-                const showContent = m.content !== "[image]" || !hasAttachments;
+                const hasStickers = !!m.message_stickers;
+                const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+                const showContent =
+                  (m.content !== "[image]" || !hasAttachments) &&
+                  (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
                 return (
                 <div
                   key={m.id}
@@ -622,6 +639,8 @@ function ConvView() {
                         refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
                       />
                     ))}
+                    {stickerHydrationPending && <StickerHydrationPlaceholder />}
+                    {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
                     <div className="text-[10px] opacity-60 mt-1">
                       {new Date(m.created_at).toLocaleTimeString("he-IL")}
                       {m.sender_type !== "client" && (
