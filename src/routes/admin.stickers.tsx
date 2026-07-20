@@ -115,7 +115,7 @@ function AdminStickersPage() {
       !collectionName.trim() ||
       !stickerName.trim()
     ) {
-      toast.error("Choose WebP, PNG, or JPEG up to 5 MB and enter names.");
+      toast.error("Choose WebP, PNG, or JPEG up to 10 MB and enter names.");
       return;
     }
 
@@ -233,7 +233,7 @@ function AdminStickersPage() {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground md:col-span-4">
-            WebP, PNG, or JPEG up to 5 MB.
+            WebP, PNG, or JPEG up to 10 MB.
           </p>
         </CardContent>
       </Card>

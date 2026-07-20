@@ -3,8 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { ImageMagick, initializeImageMagick, MagickFormat } from "npm:@imagemagick/magick-wasm@0.0.30";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MAX_SOURCE_SIDE = 8192;
-const MAX_SOURCE_PIXELS = 24000000;
+const MAX_SOURCE_PIXELS = 100000000;
+const MAX_SOURCE_BYTES = 10485760;
 const MAX_RENDER_SIDE = 768;
 const MAX_RENDER_BYTES = 524288;
 let ready: Promise<void> | null = null;
@@ -48,7 +48,7 @@ Deno.serve(async (request) => {
     if (!sourcePath || !objectPath) throw new Error("storage_temporary_failure");
     const { data: blob, error: downloadError } = await trusted.storage.from("sticker-media").download(sourcePath);
     if (downloadError || !blob) throw new Error("storage_temporary_failure");
-    if (blob.size < 1 || blob.size > 5242880) throw new Error("source_too_large");
+    if (blob.size < 1 || blob.size > MAX_SOURCE_BYTES) throw new Error("source_too_large");
     const bytes = new Uint8Array(await blob.arrayBuffer());
     const sourceContentType = detectSourceContentType(bytes);
     if (!sourceContentType || sourceContentType !== expectedSourceContentType(sourcePath)) throw new Error("source_mime_invalid");
@@ -59,8 +59,6 @@ Deno.serve(async (request) => {
         if (
           image.width < 1 ||
           image.height < 1 ||
-          image.width > MAX_SOURCE_SIDE ||
-          image.height > MAX_SOURCE_SIDE ||
           image.width * image.height > MAX_SOURCE_PIXELS
         ) {
           throw new Error("source_dimensions_unsafe");
