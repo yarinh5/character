@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   BarChart3,
+  Coins,
   Copy,
   Edit,
   Link as LinkIcon,
@@ -99,6 +100,7 @@ function OperatorsPage() {
   const [editing, setEditing] = useState<Operator | null>(null);
   const [assignOp, setAssignOp] = useState<Operator | null>(null);
   const [performanceOp, setPerformanceOp] = useState<Operator | null>(null);
+  const [creditsOp, setCreditsOp] = useState<Operator | null>(null);
   const [resetOp, setResetOp] = useState<Operator | null>(null);
   const [archiveOp, setArchiveOp] = useState<Operator | null>(null);
   const [restoreOp, setRestoreOp] = useState<Operator | null>(null);
@@ -119,6 +121,7 @@ function OperatorsPage() {
   const refreshCreditData = () => {
     refresh();
     qc.invalidateQueries({ queryKey: ["admin-operator-performance"] });
+    qc.invalidateQueries({ queryKey: ["admin-operator-credits"] });
   };
 
   useEffect(() => {
@@ -223,6 +226,9 @@ function OperatorsPage() {
                     <Button size="sm" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
                       <BarChart3 className="h-4 w-4" />
                     </Button>
+                    <Button size="sm" variant="outline" onClick={() => setCreditsOp(operator)}>
+                      <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
                       <LinkIcon className="h-4 w-4" />
                     </Button>
@@ -319,6 +325,13 @@ function OperatorsPage() {
         />
       )}
       {performanceOp && <OperatorPerformanceDialog operator={performanceOp} onClose={() => setPerformanceOp(null)} />}
+      {creditsOp && (
+        <OperatorCreditsDialog
+          operator={creditsOp}
+          onClose={() => setCreditsOp(null)}
+          onChanged={refreshCreditData}
+        />
+      )}
       {resetOp && <ResetPasswordDialog operator={resetOp} onClose={() => setResetOp(null)} />}
       {archiveOp && (
         <ArchiveOperatorConfirm
@@ -352,6 +365,197 @@ function OperatorsPage() {
       )}
     </div>
   );
+}
+
+type OperatorCreditTransaction = {
+  id: string;
+  amount: number;
+  balance_after: number;
+  type: string;
+  reason: string | null;
+  created_at: string;
+  message_id: string | null;
+  metadata: unknown | null;
+};
+
+function OperatorCreditsDialog({
+  operator,
+  onClose,
+  onChanged,
+}: {
+  operator: Operator;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const qc = useQueryClient();
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["admin-operator-credits", operator.id],
+    queryFn: async () => {
+      const [walletResult, transactionsResult] = await Promise.all([
+        supabase
+          .from("credit_wallets")
+          .select("balance, lifetime_earned, lifetime_spent")
+          .eq("user_id", operator.user_id)
+          .maybeSingle(),
+        supabase
+          .from("credit_transactions")
+          .select("id, amount, balance_after, type, reason, created_at, message_id, metadata")
+          .eq("user_id", operator.user_id)
+          .in("type", ["operator_message_payout", "message_payout", "sticker_payout", "admin_adjustment"])
+          .order("created_at", { ascending: false })
+          .limit(30),
+      ]);
+
+      if (walletResult.error) throw walletResult.error;
+      if (transactionsResult.error) throw transactionsResult.error;
+
+      return {
+        wallet: walletResult.data ?? { balance: 0, lifetime_earned: 0, lifetime_spent: 0 },
+        transactions: (transactionsResult.data ?? []) as OperatorCreditTransaction[],
+      };
+    },
+  });
+
+  const adjust = async () => {
+    const parsedAmount = Number(amount);
+    if (!Number.isInteger(parsedAmount) || parsedAmount === 0) {
+      toast.error("יש להזין כמות שלמה ושונה מאפס");
+      return;
+    }
+    if (reason.trim().length < 3) {
+      toast.error("חובה להזין סיבה לפעולה");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("adjust_operator_credits", {
+        _operator_id: operator.id,
+        _amount: parsedAmount,
+        _reason: reason.trim(),
+      });
+      if (error) {
+        if (error.message.includes("insufficient_credits_for_adjustment")) {
+          toast.error("לא ניתן להפחית קרדיטים מתחת לאפס");
+        } else {
+          toast.error("עדכון קרדיטי העובד נכשל: " + error.message);
+        }
+        return;
+      }
+
+      toast.success(parsedAmount > 0 ? "קרדיטים נוספו לעובד" : "קרדיטים הופחתו מהעובד");
+      setAmount("");
+      setReason("");
+      onChanged();
+      qc.invalidateQueries({ queryKey: ["admin-operator-credits", operator.id] });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto" dir="rtl">
+        <DialogHeader>
+          <DialogTitle>ניהול קרדיטים - {operator.full_name}</DialogTitle>
+          <DialogDescription>
+            התאמות נרשמות בארנק העובד, ב־ledger וביומן הביקורת.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading && <Skeleton className="h-72" />}
+        {!isLoading && error && (
+          <p className="text-sm text-destructive text-center py-8">טעינת קרדיטי העובד נכשלה.</p>
+        )}
+        {!isLoading && data && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <CreditStat label="קרדיטים זמינים" value={data.wallet.balance} />
+              <CreditStat label="סך הכל נצברו" value={data.wallet.lifetime_earned} />
+              <CreditStat label="סך הכל הופחתו" value={data.wallet.lifetime_spent} />
+            </div>
+
+            <div className="grid gap-3 rounded-md border p-4">
+              <div>
+                <Label htmlFor="operator-credit-amount">כמות לשינוי</Label>
+                <Input
+                  id="operator-credit-amount"
+                  type="number"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="לדוגמה 10 או -5"
+                  dir="ltr"
+                />
+              </div>
+              <div>
+                <Label htmlFor="operator-credit-reason">סיבה לפעולה</Label>
+                <Input
+                  id="operator-credit-reason"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="חובה לתיעוד ביומן הביקורת"
+                />
+              </div>
+              <Button onClick={adjust} disabled={busy}>
+                <Coins className="h-4 w-4 ml-1" />
+                {busy ? "מעדכן..." : "עדכן קרדיטים"}
+              </Button>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-medium mb-2">פעולות קרדיטים אחרונות</h3>
+              {data.transactions.length === 0 && (
+                <p className="text-sm text-muted-foreground py-4">אין פעולות קרדיטים להצגה.</p>
+              )}
+              {data.transactions.length > 0 && (
+                <div className="space-y-2">
+                  {data.transactions.map((transaction) => (
+                    <div key={transaction.id} className="rounded-md border p-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={transaction.amount >= 0 ? "font-semibold text-success" : "font-semibold text-destructive"}>
+                          {transaction.amount > 0 ? "+" : ""}{transaction.amount}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(transaction.created_at).toLocaleString("he-IL")}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {transaction.type} · יתרה אחרי: {transaction.balance_after}
+                        {transaction.message_id && <> · הודעה: {transaction.message_id.slice(0, 8)}</>}
+                      </div>
+                      {transaction.reason && <p className="mt-1">{transaction.reason}</p>}
+                      {getTransactionSource(transaction.metadata) && (
+                        <p className="mt-1 text-xs text-muted-foreground">מקור: {getTransactionSource(transaction.metadata)}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreditStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-xl font-semibold">{value.toLocaleString("he-IL")}</div>
+    </div>
+  );
+}
+
+function getTransactionSource(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const source = (metadata as { source?: unknown }).source;
+  return typeof source === "string" ? source : null;
 }
 
 function OperatorPerformanceDialog({ operator, onClose }: { operator: Operator; onClose: () => void }) {

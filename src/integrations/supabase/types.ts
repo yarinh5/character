@@ -1789,6 +1789,10 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      adjust_operator_credits: {
+        Args: { _amount: number; _operator_id: string; _reason: string }
+        Returns: Json
+      }
       admin_adjust_client_credits: {
         Args: { _amount: number; _reason: string; _user_id: string }
         Returns: Json
