@@ -10,11 +10,9 @@ type CharacterAssignment = {
   } | null;
 };
 
-type ScoreRow = {
-  operator_id: string;
-  period_month: string;
-  points: number;
-  message_count: number;
+type PointTransaction = {
+  amount: number | null;
+  created_at: string;
 };
 
 type PerformanceMessage = {
@@ -58,19 +56,14 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
   const currentMonthKey = toMonthKey(currentMonth);
   const previousMonthKey = toMonthKey(previousMonth);
   const currentMonthIso = currentMonth.toISOString();
+  const historyStartIso = addMonths(currentMonth, -11).toISOString();
 
-  const [operatorResult, scoresResult, assignmentsResult] = await Promise.all([
+  const [operatorResult, assignmentsResult] = await Promise.all([
     supabase
       .from("operators")
-      .select("id, full_name, availability_status, is_active")
+      .select("id, user_id, full_name, availability_status, is_active")
       .eq("id", operatorId)
       .maybeSingle(),
-    (supabase
-      .from("operator_monthly_scores" as any)
-      .select("operator_id, period_month, points, message_count")
-      .eq("operator_id", operatorId)
-      .order("period_month", { ascending: false })
-      .limit(12) as any),
     supabase
       .from("character_operator_assignments")
       .select("character_id, characters(id, name, avatar_url, availability_status)")
@@ -78,24 +71,37 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
   ]);
 
   if (operatorResult.error) throw operatorResult.error;
-  if (scoresResult.error) throw scoresResult.error;
   if (assignmentsResult.error) throw assignmentsResult.error;
 
-  const scoreRows = ((scoresResult.data ?? []) as ScoreRow[]).map((row) => ({
-    ...row,
-    points: Number(row.points ?? 0),
-    message_count: Number(row.message_count ?? 0),
-  }));
+  const transactionsResult = operatorResult.data
+    ? await supabase
+        .from("credit_transactions")
+        .select("amount, created_at")
+        .eq("user_id", operatorResult.data.user_id)
+        .in("type", ["message_payout", "sticker_payout"])
+        .gte("created_at", historyStartIso)
+        .order("created_at", { ascending: false })
+    : { data: [] as PointTransaction[], error: null };
+  if (transactionsResult.error) throw transactionsResult.error;
+
+  const monthlyPoints = new Map<string, { points: number; count: number }>();
+  ((transactionsResult.data ?? []) as PointTransaction[]).forEach((row) => {
+    const month = toMonthKey(getMonthStart(new Date(row.created_at)));
+    const current = monthlyPoints.get(month) ?? { points: 0, count: 0 };
+    current.points += Math.max(Number(row.amount ?? 0), 0);
+    current.count += 1;
+    monthlyPoints.set(month, current);
+  });
   const assignedCharacters = (assignmentsResult.data ?? []) as CharacterAssignment[];
 
-  const currentScore = scoreRows.find((row) => normalizeMonthKey(row.period_month) === currentMonthKey);
-  const previousScore = scoreRows.find((row) => normalizeMonthKey(row.period_month) === previousMonthKey);
-  const chartRows = [...scoreRows]
-    .sort((a, b) => normalizeMonthKey(a.period_month).localeCompare(normalizeMonthKey(b.period_month)))
+  const currentScore = monthlyPoints.get(currentMonthKey);
+  const previousScore = monthlyPoints.get(previousMonthKey);
+  const chartRows = [...monthlyPoints.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
     .map((row) => ({
-      month: formatMonthLabel(row.period_month),
-      points: row.points,
-      scoredMessages: row.message_count,
+      month: formatMonthLabel(row[0]),
+      points: row[1].points,
+      scoredMessages: row[1].count,
     }));
 
   return {
@@ -109,18 +115,20 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
       : null,
     currentMonthKey,
     currentPoints: currentScore?.points ?? 0,
-    currentScoredMessages: currentScore?.message_count ?? 0,
+    currentScoredMessages: currentScore?.count ?? 0,
     previousMonthPoints: previousScore?.points ?? 0,
     monthlyPointChange: (currentScore?.points ?? 0) - (previousScore?.points ?? 0),
-    monthlyMessageChange: (currentScore?.message_count ?? 0) - (previousScore?.message_count ?? 0),
+    monthlyMessageChange: (currentScore?.count ?? 0) - (previousScore?.count ?? 0),
     avgResponseSec: await fetchAverageResponseSeconds(operatorId, assignedCharacters, currentMonthIso),
     assignedCharacters,
-    monthlyHistory: scoreRows.map((row) => ({
-      month: normalizeMonthKey(row.period_month),
-      monthLabel: formatMonthLabel(row.period_month),
-      points: row.points,
-      scoredMessages: row.message_count,
-    })),
+    monthlyHistory: [...monthlyPoints.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([month, row]) => ({
+        month,
+        monthLabel: formatMonthLabel(month),
+        points: row.points,
+        scoredMessages: row.count,
+      })),
     chartData: chartRows,
   };
 }

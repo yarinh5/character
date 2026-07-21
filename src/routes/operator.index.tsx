@@ -29,7 +29,7 @@ type DashboardMessage = {
 };
 
 function OperatorDashboard() {
-  const { operator, isAdmin, refresh } = useOperator();
+  const { operator, isAdmin, walletBalance, refresh } = useOperator();
   const qc = useQueryClient();
 
   const { data: stats, isLoading, error } = useQuery({
@@ -41,10 +41,9 @@ function OperatorDashboard() {
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
       const monthStartIso = monthStart.toISOString();
-      const monthKey = toMonthKey(monthStart);
       const previousMonthStart = new Date(monthStart);
       previousMonthStart.setMonth(previousMonthStart.getMonth() - 1);
-      const previousMonthKey = toMonthKey(previousMonthStart);
+      const previousMonthStartIso = previousMonthStart.toISOString();
 
       let characterIds: string[] | null = null;
       if (operator && !isAdmin) {
@@ -71,7 +70,7 @@ function OperatorDashboard() {
             : convQuery.in("character_id", characterIds);
       }
 
-      const [{ data: convs, error }, { data: assigned }, monthlyScoreResult, previousScoreResult, sentMessagesResult] =
+      const [{ data: convs, error }, { data: assigned }, monthlyPointTransactions, previousPointTransactions, sentMessagesResult] =
         await Promise.all([
           convQuery,
           operator
@@ -82,20 +81,21 @@ function OperatorDashboard() {
             : Promise.resolve({ data: [] as unknown[] }),
           operator
             ? (supabase
-                .from("operator_monthly_scores" as any)
-                .select("points, message_count")
-                .eq("operator_id", operator.id)
-                .eq("period_month", monthKey)
-                .maybeSingle() as any)
-            : Promise.resolve({ data: null }),
+                .from("credit_transactions")
+                .select("amount")
+                .eq("user_id", operator.user_id)
+                .in("type", ["message_payout", "sticker_payout"])
+                .gte("created_at", monthStartIso) as any)
+            : Promise.resolve({ data: [] }),
           operator
             ? (supabase
-                .from("operator_monthly_scores" as any)
-                .select("points, message_count")
-                .eq("operator_id", operator.id)
-                .eq("period_month", previousMonthKey)
-                .maybeSingle() as any)
-            : Promise.resolve({ data: null }),
+                .from("credit_transactions")
+                .select("amount")
+                .eq("user_id", operator.user_id)
+                .in("type", ["message_payout", "sticker_payout"])
+                .gte("created_at", previousMonthStartIso)
+                .lt("created_at", monthStartIso) as any)
+            : Promise.resolve({ data: [] }),
           operator
             ? supabase
                 .from("messages")
@@ -109,11 +109,11 @@ function OperatorDashboard() {
         logSupabaseError("operator.dashboard conversations", error);
         throw error;
       }
-      if ((monthlyScoreResult as { error?: unknown }).error) {
-        logSupabaseError("operator.dashboard monthly score", (monthlyScoreResult as { error: unknown }).error);
+      if ((monthlyPointTransactions as { error?: unknown }).error) {
+        logSupabaseError("operator.dashboard monthly points", (monthlyPointTransactions as { error: unknown }).error);
       }
-      if ((previousScoreResult as { error?: unknown }).error) {
-        logSupabaseError("operator.dashboard previous score", (previousScoreResult as { error: unknown }).error);
+      if ((previousPointTransactions as { error?: unknown }).error) {
+        logSupabaseError("operator.dashboard previous points", (previousPointTransactions as { error: unknown }).error);
       }
       if ((sentMessagesResult as { error?: unknown }).error) {
         logSupabaseError("operator.dashboard sent messages", (sentMessagesResult as { error: unknown }).error);
@@ -146,17 +146,18 @@ function OperatorDashboard() {
       const closedToday = list.filter(
         (c) => c.status === "closed" && c.updated_at && new Date(c.updated_at) >= today,
       ).length;
-      const monthlyScore = monthlyScoreResult.data as { points: number; message_count: number } | null;
-      const previousScore = previousScoreResult.data as { points: number; message_count: number } | null;
+      const monthlyPoints = sumPointTransactions(monthlyPointTransactions.data);
+      const previousPoints = sumPointTransactions(previousPointTransactions.data);
 
       return {
         active,
         waiting,
         unread,
         closedToday,
-        monthlyPoints: monthlyScore?.points ?? 0,
-        monthlyPointChange: (monthlyScore?.points ?? 0) - (previousScore?.points ?? 0),
-        scoredMessages: monthlyScore?.message_count ?? 0,
+        walletBalance: walletBalance ?? 0,
+        monthlyPoints,
+        monthlyPointChange: monthlyPoints - previousPoints,
+        scoredMessages: (monthlyPointTransactions.data ?? []).length,
         sentThisMonth: sentMessagesResult.count ?? 0,
         avgResponseSec: calculateAverageResponseSeconds((monthMessages ?? []) as DashboardMessage[], operator?.id),
         waitingConversations: waitingConversations.slice(0, 5),
@@ -190,7 +191,10 @@ function OperatorDashboard() {
         },
         () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "operator_monthly_scores" }, () =>
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
+        qc.invalidateQueries({ queryKey: ["operator-stats"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, () =>
         qc.invalidateQueries({ queryKey: ["operator-stats"] }),
       )
       .subscribe();
@@ -252,12 +256,12 @@ function OperatorDashboard() {
           <CardContent className="p-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <div className="text-sm font-medium">ביצועים החודש</div>
-                <p className="text-xs text-muted-foreground mt-1">מבט מהיר על נקודות והודעות שנשלחו.</p>
+                <div className="text-sm font-medium">נקודות עובד</div>
+                <p className="text-xs text-muted-foreground mt-1">יתרה נוכחית ומה שנכנס החודש בפועל.</p>
               </div>
               <div className="grid grid-cols-3 gap-3 md:min-w-[360px]">
-                <QuickStat label="נקודות" value={stats?.monthlyPoints} loading={isLoading} />
-                <QuickStat label="הודעות שנשלחו" value={stats?.scoredMessages} loading={isLoading} />
+                <QuickStat label="נקודות זמינות" value={stats?.walletBalance} loading={isLoading} />
+                <QuickStat label="נכנסו החודש" value={stats?.monthlyPoints} loading={isLoading} />
                 <QuickStat label="מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
               </div>
               <Button variant="outline" asChild>
@@ -272,12 +276,13 @@ function OperatorDashboard() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="נקודות החודש" value={stats?.monthlyPoints} icon={Award} loading={isLoading} />
+        <StatCard label="נקודות זמינות" value={stats?.walletBalance} icon={Award} loading={isLoading} />
+        <StatCard label="נכנסו החודש" value={stats?.monthlyPoints} icon={Sparkles} loading={isLoading} />
         <StatCard label="שיחות פעילות" value={stats?.active} icon={MessageCircle} loading={isLoading} />
         <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
         <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />
         <StatCard label="זמן תגובה ממוצע" value={stats?.avgResponseSec} suffix="ש׳" icon={Timer} loading={isLoading} />
-        <StatCard label="הודעות שנשלחו" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
+        <StatCard label="פעולות מזכות" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>
@@ -503,6 +508,10 @@ function QuickStat({
   );
 }
 
+function sumPointTransactions(rows: unknown) {
+  return ((rows ?? []) as Array<{ amount: number | null }>).reduce((sum, row) => sum + Math.max(Number(row.amount ?? 0), 0), 0);
+}
+
 function calculateAverageResponseSeconds(messages: DashboardMessage[], operatorId?: string) {
   if (!operatorId) return 0;
   const byConversation = new Map<string, DashboardMessage[]>();
@@ -541,10 +550,4 @@ function formatShortDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function toMonthKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}-01`;
 }

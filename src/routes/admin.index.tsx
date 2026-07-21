@@ -108,7 +108,7 @@ function AdminDashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
         qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "operator_monthly_scores" }, () =>
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, () =>
         qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
       )
       .subscribe();
@@ -244,7 +244,7 @@ function AdminDashboard() {
                     </div>
                     <div className="text-left">
                       <div className="text-xl font-bold">{op.points}</div>
-                      <div className="text-[11px] text-muted-foreground">{op.messages} הודעות</div>
+                      <div className="text-[11px] text-muted-foreground">{op.messages} פעולות מזכות</div>
                     </div>
                   </div>
                 ))}

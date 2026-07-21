@@ -25,7 +25,7 @@ export const adminAnalytics = createServerFn({ method: "GET" })
     const currentMonth = new Date();
     currentMonth.setDate(1);
     currentMonth.setHours(0, 0, 0, 0);
-    const currentMonthKey = currentMonth.toISOString().slice(0, 10);
+    const currentMonthIso = currentMonth.toISOString();
 
     const [
       convs,
@@ -34,7 +34,7 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       opMsgs,
       charMsgs,
       creditTransactions,
-      monthlyScores,
+      operatorPointTransactions,
       operators,
       wallets,
       profiles,
@@ -63,15 +63,15 @@ export const adminAnalytics = createServerFn({ method: "GET" })
         .select("character_id, characters(name)"),
       supabaseAdmin
         .from("credit_transactions")
-        .select("amount, type"),
+        .select("user_id, amount, type"),
       supabaseAdmin
-        .from("operator_monthly_scores")
-        .select("operator_id, points, message_count, period_month")
-        .eq("period_month", currentMonthKey)
-        .order("points", { ascending: false }),
+        .from("credit_transactions")
+        .select("user_id, amount, type")
+        .in("type", ["message_payout", "sticker_payout"])
+        .gte("created_at", currentMonthIso),
       supabaseAdmin
         .from("operators")
-        .select("id, full_name, availability_status, is_active"),
+        .select("id, user_id, full_name, availability_status, is_active"),
       supabaseAdmin
         .from("credit_wallets")
         .select("user_id, balance")
@@ -177,24 +177,29 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       .filter((tx) => tx.type === "admin_adjustment" && tx.amount > 0)
       .reduce((sum, tx) => sum + tx.amount, 0);
 
-    const operatorById = new Map((operators.data ?? []).map((op) => [op.id, op]));
-    const topMonthlyOperators = ((monthlyScores.data ?? []) as Array<{
-      operator_id: string;
-      points: number;
-      message_count: number;
-      period_month: string;
-    }>)
-      .map((score) => {
-        const op = operatorById.get(score.operator_id);
+    const operatorByUserId = new Map((operators.data ?? []).map((op) => [op.user_id, op]));
+    const monthlyOperatorPoints = new Map<string, { points: number; messages: number }>();
+    ((operatorPointTransactions.data ?? []) as Array<{ user_id: string; amount: number | null; type: string }>).forEach((tx) => {
+      const current = monthlyOperatorPoints.get(tx.user_id) ?? { points: 0, messages: 0 };
+      current.points += Math.max(Number(tx.amount ?? 0), 0);
+      current.messages += 1;
+      monthlyOperatorPoints.set(tx.user_id, current);
+    });
+    const topMonthlyOperators = Array.from(monthlyOperatorPoints.entries())
+      .map(([userId, score]) => {
+        const op = operatorByUserId.get(userId);
+        if (!op) return null;
         return {
-          id: score.operator_id,
+          id: op.id,
           name: op?.full_name ?? "—",
           points: score.points,
-          messages: score.message_count,
+          messages: score.messages,
           status: op?.availability_status ?? "offline",
           isActive: op?.is_active ?? false,
         };
       })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .sort((a, b) => b.points - a.points)
       .slice(0, 8);
 
     const profileByUser = new Map((profiles.data ?? []).map((profile) => [profile.user_id, profile]));
@@ -325,7 +330,6 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       messages,
       events,
       creditTransactions,
-      scoreEvents,
       characters,
       operators,
     ] = await Promise.all([
@@ -355,18 +359,12 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
         .limit(10000),
       supabaseAdmin
         .from("credit_transactions")
-        .select("amount, type, created_at")
-        .gte("created_at", range.startIso)
-        .lte("created_at", range.endIso)
-        .limit(10000),
-      supabaseAdmin
-        .from("operator_score_events")
-        .select("operator_id, points, created_at")
+        .select("user_id, amount, type, created_at")
         .gte("created_at", range.startIso)
         .lte("created_at", range.endIso)
         .limit(10000),
       supabaseAdmin.from("characters").select("id, name").limit(10000),
-      supabaseAdmin.from("operators").select("id, full_name, is_active, availability_status").limit(10000),
+      supabaseAdmin.from("operators").select("id, user_id, full_name, is_active, availability_status").limit(10000),
     ]);
 
     const errors = [
@@ -375,7 +373,6 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       messages.error,
       events.error,
       creditTransactions.error,
-      scoreEvents.error,
       characters.error,
       operators.error,
     ].filter(Boolean);
@@ -394,7 +391,6 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       created_at: string;
     }>;
     const creditRows = creditTransactions.data ?? [];
-    const scoreRows = (scoreEvents.data ?? []) as Array<{ operator_id: string | null; points: number; created_at: string }>;
 
     const days = buildDays(range.safeStart, range.end);
     profileRows.forEach((row) => incrementDay(days, row.created_at, "signups"));
@@ -444,6 +440,7 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       .slice(0, 8);
 
     const operatorById = new Map((operators.data ?? []).map((operator) => [operator.id, operator]));
+    const operatorByUserId = new Map((operators.data ?? []).map((operator) => [operator.user_id, operator]));
     const operatorCounts = new Map<string, { id: string; name: string; messages: number; points: number; status: string }>();
     for (const message of messageRows) {
       if (message.sender_type !== "operator" || !message.operator_id) continue;
@@ -458,18 +455,19 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       current.messages += 1;
       operatorCounts.set(message.operator_id, current);
     }
-    for (const score of scoreRows) {
-      if (!score.operator_id) continue;
-      const operator = operatorById.get(score.operator_id);
-      const current = operatorCounts.get(score.operator_id) ?? {
-        id: score.operator_id,
+    for (const tx of creditRows as Array<{ user_id: string | null; amount: number | null; type: string }>) {
+      if (!tx.user_id || !["message_payout", "sticker_payout"].includes(tx.type)) continue;
+      const operator = operatorByUserId.get(tx.user_id);
+      if (!operator) continue;
+      const current = operatorCounts.get(operator.id) ?? {
+        id: operator.id,
         name: operator?.full_name ?? "ללא שם",
         messages: 0,
         points: 0,
         status: operator?.availability_status ?? "offline",
       };
-      current.points += score.points ?? 0;
-      operatorCounts.set(score.operator_id, current);
+      current.points += Math.max(Number(tx.amount ?? 0), 0);
+      operatorCounts.set(operator.id, current);
     }
     const topOperators = Array.from(operatorCounts.values())
       .sort((a, b) => b.points + b.messages - (a.points + a.messages))

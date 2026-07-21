@@ -103,7 +103,7 @@ export const adminListOperators = createServerFn({ method: "GET" })
     const ids = opsList.map((operator) => operator.id);
     const userIds = opsList.map((operator) => operator.user_id);
 
-    const [{ data: roles }, { data: assigns }, { data: convs }, { data: profs }] = await Promise.all([
+    const [{ data: roles }, { data: assigns }, { data: convs }, { data: profs }, { data: wallets }] = await Promise.all([
       userIds.length
         ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
         : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[] }),
@@ -116,6 +116,9 @@ export const adminListOperators = createServerFn({ method: "GET" })
       userIds.length
         ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
         : Promise.resolve({ data: [] as { user_id: string; email: string | null }[] }),
+      userIds.length
+        ? supabaseAdmin.from("credit_wallets").select("user_id, balance").in("user_id", userIds)
+        : Promise.resolve({ data: [] as { user_id: string; balance: number }[] }),
     ]);
 
     const rolesByUser = new Map<string, Set<AppRole>>();
@@ -137,6 +140,8 @@ export const adminListOperators = createServerFn({ method: "GET" })
 
     const emailMap = new Map<string, string | null>();
     (profs ?? []).forEach((row) => emailMap.set(row.user_id, row.email));
+    const walletMap = new Map<string, number>();
+    (wallets ?? []).forEach((row) => walletMap.set(row.user_id, row.balance));
 
     return opsList
       .filter((operator) => {
@@ -149,6 +154,7 @@ export const adminListOperators = createServerFn({ method: "GET" })
         role: rolesByUser.get(operator.user_id)?.has("admin") ? "admin" : "operator",
         chars: charsCount.get(operator.id) ?? 0,
         active: activeCount.get(operator.id) ?? 0,
+        credit_balance: walletMap.get(operator.user_id) ?? 0,
       }));
   });
 

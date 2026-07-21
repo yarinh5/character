@@ -9,7 +9,7 @@ import { useOperator, ConversationStatusBadge } from "@/components/operator/Oper
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, MessageCircle } from "lucide-react";
+import { Coins, Search, MessageCircle } from "lucide-react";
 
 export const Route = createFileRoute("/operator/conversations")({
   component: OperatorConversationsPage,
@@ -47,7 +47,7 @@ function formatTime(iso: string | null) {
 }
 
 function OperatorConversationsPage() {
-  const { operator, isAdmin } = useOperator();
+  const { operator, isAdmin, walletBalance } = useOperator();
   const { user } = useAuth();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
@@ -161,8 +161,14 @@ function OperatorConversationsPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <header className="mb-6">
+      <header className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-2xl md:text-3xl font-bold">שיחות</h1>
+        {operator && (
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm font-medium shadow-sm">
+            <Coins className="h-4 w-4 text-primary" />
+            <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
+          </div>
+        )}
       </header>
 
       <div className="space-y-3 mb-4">

@@ -1,6 +1,6 @@
 ﻿import { ReactNode, useEffect, useState, createContext, useContext } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { BarChart3, LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
+import { BarChart3, Coins, LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,7 @@ export type OperatorRecord = {
   availability_status: "available" | "busy" | "offline";
 };
 
-type Ctx = { operator: OperatorRecord | null; isAdmin: boolean; refresh: () => Promise<void> };
+type Ctx = { operator: OperatorRecord | null; isAdmin: boolean; walletBalance: number | null; refresh: () => Promise<void> };
 const OperatorCtx = createContext<Ctx | null>(null);
 export const useOperator = () => {
   const ctx = useContext(OperatorCtx);
@@ -62,18 +62,23 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   const { loading, session, role, signOut } = useAuth();
   const navigate = useNavigate();
   const [operator, setOperator] = useState<OperatorRecord | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [opLoading, setOpLoading] = useState(true);
 
   const isAdmin = role === "admin";
 
   const refresh = async () => {
     if (!session?.user) return;
-    const { data } = await supabase
-      .from("operators")
-      .select("id, user_id, full_name, is_active, availability_status")
-      .eq("user_id", session.user.id)
-      .maybeSingle();
-    setOperator((data as OperatorRecord | null) ?? null);
+    const [{ data: operatorData }, { data: walletData }] = await Promise.all([
+      supabase
+        .from("operators")
+        .select("id, user_id, full_name, is_active, availability_status")
+        .eq("user_id", session.user.id)
+        .maybeSingle(),
+      supabase.from("credit_wallets").select("balance").eq("user_id", session.user.id).maybeSingle(),
+    ]);
+    setOperator((operatorData as OperatorRecord | null) ?? null);
+    setWalletBalance(walletData?.balance ?? 0);
   };
 
   useEffect(() => {
@@ -93,6 +98,25 @@ export function RequireOperator({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, session, role]);
 
+  useEffect(() => {
+    if (!session?.user || role === "client") return;
+    const channel = supabase
+      .channel(`operator-wallet-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_wallets", filter: `user_id=eq.${session.user.id}` },
+        () => {
+          void refresh();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id, role]);
+
   if (loading || opLoading) return <Spinner />;
   if (!session) return null;
   if (role !== "operator" && role !== "admin") {
@@ -111,7 +135,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   }
 
   return (
-    <OperatorCtx.Provider value={{ operator, isAdmin, refresh }}>
+    <OperatorCtx.Provider value={{ operator, isAdmin, walletBalance, refresh }}>
       <OperatorShell signOut={signOut}>{children}</OperatorShell>
     </OperatorCtx.Provider>
   );
@@ -120,7 +144,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
 function OperatorShell({ children, signOut }: { children: ReactNode; signOut: () => Promise<void> }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const { operator, isAdmin } = useOperator();
+  const { operator, isAdmin, walletBalance } = useOperator();
 
   const isActive = (to: string, exact?: boolean) => (exact ? pathname === to : pathname.startsWith(to));
 
@@ -151,15 +175,21 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
             {operator?.full_name ?? (isAdmin ? "מנהל מערכת" : "-")}
           </div>
           {operator && (
-            <div className="flex items-center gap-2 mt-1">
-              <span className={cn("h-2 w-2 rounded-full", statusColor)} />
-              <span className="text-xs text-muted-foreground">
-                {operator.availability_status === "available"
-                  ? "זמין"
-                  : operator.availability_status === "busy"
-                  ? "עסוק"
-                  : "לא מחובר"}
-              </span>
+            <div className="mt-1 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className={cn("h-2 w-2 rounded-full", statusColor)} />
+                <span className="text-xs text-muted-foreground">
+                  {operator.availability_status === "available"
+                    ? "זמין"
+                    : operator.availability_status === "busy"
+                    ? "עסוק"
+                    : "לא מחובר"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Coins className="h-3.5 w-3.5" />
+                <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
+              </div>
             </div>
           )}
         </div>
@@ -194,6 +224,12 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
             <LogOut className="h-4 w-4" />
             יציאה
           </Button>
+          {operator && (
+            <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground">
+              <Coins className="h-3.5 w-3.5" />
+              <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נק׳</span>
+            </div>
+          )}
           <NotificationBell />
         </header>
         <div className="flex-1 min-h-0">{children}</div>

@@ -80,6 +80,7 @@ type Operator = {
   deleted_at?: string | null;
   chars: number;
   active: number;
+  credit_balance: number;
 };
 
 type CharacterRow = {
@@ -198,6 +199,7 @@ function OperatorsPage() {
                   <div className="inline-flex items-center gap-4 whitespace-nowrap text-xs text-muted-foreground max-xl:col-start-2 max-xl:row-start-3 max-md:col-span-2 max-md:col-start-1">
                     <span className="whitespace-nowrap">{operator.chars} דמויות</span>
                     <span className="whitespace-nowrap">{operator.active} שיחות פעילות</span>
+                    <span className="whitespace-nowrap">{operator.credit_balance.toLocaleString("he-IL")} נקודות</span>
                   </div>
 
                   <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap max-xl:row-span-3 max-md:col-span-2 max-md:justify-start">
