@@ -67,17 +67,14 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       supabaseAdmin
         .from("credit_transactions")
         .select("user_id, amount, type")
-        .in("type", ["message_payout", "sticker_payout"])
+        .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
         .gte("created_at", currentMonthIso),
       supabaseAdmin
         .from("operators")
         .select("id, user_id, full_name, availability_status, is_active"),
       supabaseAdmin
         .from("credit_wallets")
-        .select("user_id, balance")
-        .lte("balance", 2)
-        .order("balance", { ascending: true })
-        .limit(12),
+        .select("user_id, balance"),
       supabaseAdmin
         .from("profiles")
         .select("user_id, display_name, email"),
@@ -177,7 +174,6 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       .filter((tx) => tx.type === "admin_adjustment" && tx.amount > 0)
       .reduce((sum, tx) => sum + tx.amount, 0);
 
-    const operatorByUserId = new Map((operators.data ?? []).map((op) => [op.user_id, op]));
     const monthlyOperatorPoints = new Map<string, { points: number; messages: number }>();
     ((operatorPointTransactions.data ?? []) as Array<{ user_id: string; amount: number | null; type: string }>).forEach((tx) => {
       const current = monthlyOperatorPoints.get(tx.user_id) ?? { points: 0, messages: 0 };
@@ -185,25 +181,29 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       current.messages += 1;
       monthlyOperatorPoints.set(tx.user_id, current);
     });
-    const topMonthlyOperators = Array.from(monthlyOperatorPoints.entries())
-      .map(([userId, score]) => {
-        const op = operatorByUserId.get(userId);
-        if (!op) return null;
+    const walletRows = (wallets.data ?? []) as Array<{ user_id: string; balance: number }>;
+    const walletByUserId = new Map(walletRows.map((wallet) => [wallet.user_id, wallet.balance]));
+    const topOperatorsByAvailablePoints = (operators.data ?? [])
+      .map((op) => {
+        const monthlyPayouts = monthlyOperatorPoints.get(op.user_id) ?? { points: 0, messages: 0 };
         return {
           id: op.id,
-          name: op?.full_name ?? "—",
-          points: score.points,
-          messages: score.messages,
-          status: op?.availability_status ?? "offline",
-          isActive: op?.is_active ?? false,
+          name: op.full_name ?? "—",
+          availablePoints: walletByUserId.get(op.user_id) ?? 0,
+          monthlyPayouts: monthlyPayouts.points,
+          messages: monthlyPayouts.messages,
+          status: op.availability_status ?? "offline",
+          isActive: op.is_active ?? false,
         };
       })
-      .filter((row): row is NonNullable<typeof row> => Boolean(row))
-      .sort((a, b) => b.points - a.points)
+      .sort((a, b) => b.availablePoints - a.availablePoints || b.monthlyPayouts - a.monthlyPayouts)
       .slice(0, 8);
 
     const profileByUser = new Map((profiles.data ?? []).map((profile) => [profile.user_id, profile]));
-    const lowBalanceUsers = ((wallets.data ?? []) as Array<{ user_id: string; balance: number }>)
+    const lowBalanceUsers = walletRows
+      .filter((wallet) => wallet.balance <= 2)
+      .sort((a, b) => a.balance - b.balance)
+      .slice(0, 12)
       .map((wallet) => {
         const profile = profileByUser.get(wallet.user_id);
         return {
@@ -223,7 +223,7 @@ export const adminAnalytics = createServerFn({ method: "GET" })
       manualCreditsAdded,
       clientMessages: clientMessagesTotal.count ?? 0,
       operatorMessages: operatorMessagesTotal.count ?? 0,
-      topMonthlyOperators,
+      topOperatorsByAvailablePoints,
       lowBalanceUsers,
     };
   });
@@ -456,7 +456,7 @@ export const adminAdvancedAnalytics = createServerFn({ method: "POST" })
       operatorCounts.set(message.operator_id, current);
     }
     for (const tx of creditRows as Array<{ user_id: string | null; amount: number | null; type: string }>) {
-      if (!tx.user_id || !["message_payout", "sticker_payout"].includes(tx.type)) continue;
+      if (!tx.user_id || !["message_payout", "sticker_payout", "operator_message_payout"].includes(tx.type)) continue;
       const operator = operatorByUserId.get(tx.user_id);
       if (!operator) continue;
       const current = operatorCounts.get(operator.id) ?? {

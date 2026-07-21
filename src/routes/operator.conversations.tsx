@@ -166,7 +166,7 @@ function OperatorConversationsPage() {
         {operator && (
           <div className="inline-flex shrink-0 items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm font-medium shadow-sm">
             <Coins className="h-4 w-4 text-primary" />
-            <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
+            <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
           </div>
         )}
       </header>

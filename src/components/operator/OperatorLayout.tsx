@@ -109,6 +109,13 @@ export function RequireOperator({ children }: { children: ReactNode }) {
           void refresh();
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_transactions", filter: `user_id=eq.${session.user.id}` },
+        () => {
+          void refresh();
+        },
+      )
       .subscribe();
 
     return () => {
@@ -188,7 +195,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Coins className="h-3.5 w-3.5" />
-                <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
+                <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
               </div>
             </div>
           )}
@@ -227,7 +234,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
           {operator && (
             <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground">
               <Coins className="h-3.5 w-3.5" />
-              <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נק׳</span>
+              <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
             </div>
           )}
           <NotificationBell />

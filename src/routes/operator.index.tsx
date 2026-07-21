@@ -33,7 +33,7 @@ function OperatorDashboard() {
   const qc = useQueryClient();
 
   const { data: stats, isLoading, error } = useQuery({
-    queryKey: ["operator-stats", operator?.id ?? "admin", isAdmin],
+    queryKey: ["operator-stats", operator?.id ?? "admin", isAdmin, walletBalance ?? 0],
     queryFn: async () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -84,7 +84,7 @@ function OperatorDashboard() {
                 .from("credit_transactions")
                 .select("amount")
                 .eq("user_id", operator.user_id)
-                .in("type", ["message_payout", "sticker_payout"])
+                .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
                 .gte("created_at", monthStartIso) as any)
             : Promise.resolve({ data: [] }),
           operator
@@ -92,7 +92,7 @@ function OperatorDashboard() {
                 .from("credit_transactions")
                 .select("amount")
                 .eq("user_id", operator.user_id)
-                .in("type", ["message_payout", "sticker_payout"])
+                .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
                 .gte("created_at", previousMonthStartIso)
                 .lt("created_at", monthStartIso) as any)
             : Promise.resolve({ data: [] }),
@@ -155,7 +155,6 @@ function OperatorDashboard() {
         unread,
         closedToday,
         walletBalance: walletBalance ?? 0,
-        monthlyPoints,
         monthlyPointChange: monthlyPoints - previousPoints,
         scoredMessages: (monthlyPointTransactions.data ?? []).length,
         sentThisMonth: sentMessagesResult.count ?? 0,
@@ -256,13 +255,12 @@ function OperatorDashboard() {
           <CardContent className="p-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <div className="text-sm font-medium">נקודות עובד</div>
-                <p className="text-xs text-muted-foreground mt-1">יתרה נוכחית ומה שנכנס החודש בפועל.</p>
+                <div className="text-sm font-medium">קרדיטים עובד</div>
+                <p className="text-xs text-muted-foreground mt-1">יתרה זמינה והשוואת תשלומי קרדיטים חודשיים בפועל.</p>
               </div>
-              <div className="grid grid-cols-3 gap-3 md:min-w-[360px]">
-                <QuickStat label="נקודות זמינות" value={stats?.walletBalance} loading={isLoading} />
-                <QuickStat label="נכנסו החודש" value={stats?.monthlyPoints} loading={isLoading} />
-                <QuickStat label="מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
+              <div className="grid grid-cols-2 gap-3 md:min-w-[250px]">
+                <QuickStat label="קרדיטים זמינים" value={stats?.walletBalance} loading={isLoading} />
+                <QuickStat label="קרדיטים מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
               </div>
               <Button variant="outline" asChild>
                 <Link to="/operator/analytics">
@@ -276,8 +274,7 @@ function OperatorDashboard() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="נקודות זמינות" value={stats?.walletBalance} icon={Award} loading={isLoading} />
-        <StatCard label="נכנסו החודש" value={stats?.monthlyPoints} icon={Sparkles} loading={isLoading} />
+        <StatCard label="קרדיטים זמינים" value={stats?.walletBalance} icon={Award} loading={isLoading} />
         <StatCard label="שיחות פעילות" value={stats?.active} icon={MessageCircle} loading={isLoading} />
         <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
         <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />

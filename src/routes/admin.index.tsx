@@ -222,16 +222,16 @@ function AdminDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">דירוג עובדים חודשי</CardTitle>
+            <CardTitle className="text-base">קרדיטים זמינים לעובדים</CardTitle>
           </CardHeader>
           <CardContent>
             {analyticsLoading && <Skeleton className="h-32" />}
-            {!analyticsLoading && analytics && analytics.topMonthlyOperators.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">אין עדיין ניקוד לחודש הנוכחי</p>
+            {!analyticsLoading && analytics && analytics.topOperatorsByAvailablePoints.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-6">אין עדיין עובדים להצגה</p>
             )}
-            {!analyticsLoading && analytics && analytics.topMonthlyOperators.length > 0 && (
+            {!analyticsLoading && analytics && analytics.topOperatorsByAvailablePoints.length > 0 && (
               <div className="space-y-2">
-                {analytics.topMonthlyOperators.map((op, index) => (
+                {analytics.topOperatorsByAvailablePoints.map((op, index) => (
                   <div key={op.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
                     <div className="min-w-0">
                       <div className="font-medium truncate">
@@ -243,8 +243,10 @@ function AdminDashboard() {
                       </div>
                     </div>
                     <div className="text-left">
-                      <div className="text-xl font-bold">{op.points}</div>
-                      <div className="text-[11px] text-muted-foreground">{op.messages} פעולות מזכות</div>
+                      <div className="text-xl font-bold">{op.availablePoints}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        קרדיטים החודש: {op.monthlyPayouts} · {op.messages} פעולות מזכות
+                      </div>
                     </div>
                   </div>
                 ))}

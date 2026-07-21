@@ -227,7 +227,7 @@ function AdminAnalyticsPage() {
                     </div>
                     <div className="text-left">
                       <div className="text-lg font-bold">{operator.points}</div>
-                      <div className="text-[11px] text-muted-foreground">נקודות</div>
+                      <div className="text-[11px] text-muted-foreground">קרדיטים בתקופה</div>
                     </div>
                   </div>
                 ))}

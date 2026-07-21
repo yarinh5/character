@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   Copy,
@@ -116,6 +116,23 @@ function OperatorsPage() {
     qc.invalidateQueries({ queryKey: ["admin-users"] });
   };
 
+  const refreshCreditData = () => {
+    refresh();
+    qc.invalidateQueries({ queryKey: ["admin-operator-performance"] });
+  };
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-operators-wallets")
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, refreshCreditData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, refreshCreditData)
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [qc]);
+
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8" dir="rtl">
       <PageHeader
@@ -199,7 +216,7 @@ function OperatorsPage() {
                   <div className="inline-flex items-center gap-4 whitespace-nowrap text-xs text-muted-foreground max-xl:col-start-2 max-xl:row-start-3 max-md:col-span-2 max-md:col-start-1">
                     <span className="whitespace-nowrap">{operator.chars} דמויות</span>
                     <span className="whitespace-nowrap">{operator.active} שיחות פעילות</span>
-                    <span className="whitespace-nowrap">{operator.credit_balance.toLocaleString("he-IL")} נקודות</span>
+                    <span className="whitespace-nowrap">{operator.credit_balance.toLocaleString("he-IL")} קרדיטים</span>
                   </div>
 
                   <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap max-xl:row-span-3 max-md:col-span-2 max-md:justify-start">

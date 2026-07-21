@@ -30,6 +30,7 @@ export type OperatorPerformanceSummary = {
     is_active: boolean;
   } | null;
   currentMonthKey: string;
+  availablePoints: number;
   currentPoints: number;
   currentScoredMessages: number;
   previousMonthPoints: number;
@@ -78,11 +79,20 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
         .from("credit_transactions")
         .select("amount, created_at")
         .eq("user_id", operatorResult.data.user_id)
-        .in("type", ["message_payout", "sticker_payout"])
+        .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
         .gte("created_at", historyStartIso)
         .order("created_at", { ascending: false })
     : { data: [] as PointTransaction[], error: null };
   if (transactionsResult.error) throw transactionsResult.error;
+
+  const walletResult = operatorResult.data
+    ? await supabase
+        .from("credit_wallets")
+        .select("balance")
+        .eq("user_id", operatorResult.data.user_id)
+        .maybeSingle()
+    : { data: null, error: null };
+  if (walletResult.error) throw walletResult.error;
 
   const monthlyPoints = new Map<string, { points: number; count: number }>();
   ((transactionsResult.data ?? []) as PointTransaction[]).forEach((row) => {
@@ -114,6 +124,7 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
         }
       : null,
     currentMonthKey,
+    availablePoints: walletResult.data?.balance ?? 0,
     currentPoints: currentScore?.points ?? 0,
     currentScoredMessages: currentScore?.count ?? 0,
     previousMonthPoints: previousScore?.points ?? 0,

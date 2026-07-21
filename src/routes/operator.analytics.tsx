@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Award, BarChart3, Clock, Sparkles, Users } from "lucide-react";
 import { useOperator } from "@/components/operator/OperatorLayout";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +22,7 @@ export const Route = createFileRoute("/operator/analytics")({
 
 function OperatorAnalyticsPage() {
   const { operator } = useOperator();
+  const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ["operator-performance", operator?.id],
@@ -27,11 +30,32 @@ function OperatorAnalyticsPage() {
     queryFn: () => fetchOperatorPerformance(operator!.id),
   });
 
+  useEffect(() => {
+    if (!operator) return;
+    const channel = supabase
+      .channel(`operator-performance-${operator.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_wallets", filter: `user_id=eq.${operator.user_id}` },
+        () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_transactions", filter: `user_id=eq.${operator.user_id}` },
+        () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [operator?.id, operator?.user_id, qc]);
+
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
       <header>
         <h1 className="text-2xl md:text-3xl font-bold">ביצועים</h1>
-        <p className="text-sm text-muted-foreground mt-1">סיכום פעילות ונקודות עובד על בסיס החודש והיסטוריה חודשית.</p>
+        <p className="text-sm text-muted-foreground mt-1">סיכום פעילות וקרדיטים על בסיס החודש והיסטוריה חודשית.</p>
       </header>
 
       {isLoading && <AnalyticsSkeleton />}
@@ -53,7 +77,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricCard label="נקודות החודש" value={data.currentPoints} icon={Award} />
+        <MetricCard label="קרדיטים זמינים" value={data.availablePoints} icon={Award} />
         <MetricCard label="פעולות מזכות" value={data.currentScoredMessages} icon={Sparkles} />
         <MetricCard label="דמויות משויכות" value={data.assignedCharacters.length} icon={Users} />
         <MetricCard label="זמן תגובה ממוצע" value={formatResponseTime(data.avgResponseSec)} icon={Clock} />
@@ -66,7 +90,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
         <CardContent>
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">נקודות</div>
+              <div className="text-xs text-muted-foreground">קרדיטים מול חודש קודם</div>
               <div className="mt-1 text-2xl font-bold">{formatChange(data.monthlyPointChange)}</div>
             </div>
             <div className="rounded-lg border border-border p-4">
@@ -79,14 +103,14 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">נקודות לפי חודשים</CardTitle>
+          <CardTitle className="text-base">קרדיטים לפי חודשים</CardTitle>
         </CardHeader>
         <CardContent>
           {!hasHistory && <EmptyPerformanceState />}
           {hasHistory && (
             <ChartContainer
               config={{
-                points: { label: "נקודות", color: "var(--primary)" },
+                points: { label: "קרדיטים", color: "var(--primary)" },
               }}
               className="h-64 w-full"
             >
@@ -115,7 +139,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
                   <TableHeader>
                     <TableRow>
                       <TableHead className="text-right">חודש</TableHead>
-                      <TableHead className="text-right">סה״כ נקודות</TableHead>
+                      <TableHead className="text-right">סה״כ קרדיטים</TableHead>
                       <TableHead className="text-right">פעולות מזכות</TableHead>
                     </TableRow>
                   </TableHeader>
