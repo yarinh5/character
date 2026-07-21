@@ -313,6 +313,7 @@ function ChatPage() {
   };
 
   const handleStickerSent = (result: StickerSendResult) => {
+    if (typeof result.balance === "number") setCreditBalance(result.balance);
     if (!result.message) return;
     const message: Msg = {
       ...result.message,
@@ -556,6 +557,7 @@ function ChatPage() {
         onOpenChange={setStickerPickerOpen}
         role="client"
         onSent={handleStickerSent}
+        creditBalance={creditBalance}
       />
     </div>
   );

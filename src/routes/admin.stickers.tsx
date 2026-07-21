@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -130,6 +131,7 @@ function AdminStickersPage() {
   const [collectionName, setCollectionName] = useState("");
   const [stickerName, setStickerName] = useState("");
   const [characterId, setCharacterId] = useState("global");
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
 
   const catalog = useQuery({
     queryKey: ["admin-stickers"],
@@ -220,6 +222,31 @@ function AdminStickersPage() {
     toast.success("Sticker state updated.");
   };
 
+  const savePrice = async (row: StickerRow) => {
+    const rawValue = priceDrafts[row.id] ?? String(row.price_credits);
+    const price = Number(rawValue);
+    if (!Number.isInteger(price) || price < 0) {
+      toast.error("Enter a whole number of credits, or 0 for Free.");
+      return;
+    }
+
+    setBusy(true);
+    const { error } = await supabase.rpc("set_sticker_price", {
+      _sticker_id: row.id,
+      _price_credits: price,
+    });
+    setBusy(false);
+
+    if (error) {
+      toast.error("Sticker price could not be updated.");
+      return;
+    }
+
+    setPriceDrafts((current) => ({ ...current, [row.id]: String(price) }));
+    await refresh();
+    toast.success("Sticker price updated.");
+  };
+
   const retry = async (row: StickerRow) => {
     setBusy(true);
     try {
@@ -270,7 +297,7 @@ function AdminStickersPage() {
     <div className="max-w-7xl mx-auto p-4 md:p-8" dir="rtl">
       <PageHeader
         title="Sticker catalog"
-        description="Admin-only QA ingest. Conversation stickers remain disabled."
+        description="Admin-only sticker ingest, activation, and pricing."
       />
       <Card className="mb-6">
         <CardContent className="grid gap-3 p-4 md:grid-cols-4">
@@ -334,6 +361,43 @@ function AdminStickersPage() {
               <div className="text-xs">
                 {row.ingest_status}
                 {row.is_active ? " - active" : " - inactive"}
+              </div>
+              <div className="space-y-2 border-t pt-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <Label htmlFor={`sticker-paid-${row.id}`}>Paid</Label>
+                  <Switch
+                    id={`sticker-paid-${row.id}`}
+                    checked={Number(priceDrafts[row.id] ?? row.price_credits) > 0}
+                    disabled={busy}
+                    onCheckedChange={(paid) =>
+                      setPriceDrafts((current) => ({
+                        ...current,
+                        [row.id]: paid ? String(Math.max(1, row.price_credits)) : "0",
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label={`Price for ${row.name}`}
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={priceDrafts[row.id] ?? String(row.price_credits)}
+                    disabled={busy || Number(priceDrafts[row.id] ?? row.price_credits) === 0}
+                    onChange={(event) =>
+                      setPriceDrafts((current) => ({ ...current, [row.id]: event.target.value }))
+                    }
+                  />
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void savePrice(row)}>
+                    Save
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {Number(priceDrafts[row.id] ?? row.price_credits) > 0
+                    ? `${priceDrafts[row.id] ?? row.price_credits} credits per client send`
+                    : "Free for clients"}
+                </p>
               </div>
               {row.is_processing_stuck && <div className="text-xs text-destructive">Processing stuck</div>}
               {row.deletion_started_at && <div className="text-xs text-destructive">Delete cleanup pending</div>}

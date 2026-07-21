@@ -23,6 +23,7 @@ export type StickerMessageHydration = {
 export type StickerSendResult = {
   message?: StickerMessage;
   message_sticker?: StickerMessageHydration;
+  balance?: number | null;
   already_sent?: boolean;
 };
 
@@ -31,6 +32,14 @@ const SERVER_COOLDOWN_MS = 2000;
 
 function createIdempotencyKey() {
   return crypto.randomUUID();
+}
+
+function rpcErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return "sticker_send_failed";
+  const candidate = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+  return [candidate.message, candidate.details, candidate.hint, candidate.code]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ") || "sticker_send_failed";
 }
 
 export function useStickerSend(conversationId: string, role: StickerSendRole) {
@@ -74,7 +83,7 @@ export function useStickerSend(conversationId: string, role: StickerSendRole) {
             : await supabase.rpc("send_operator_sticker_message", args);
 
         if (error) {
-          const errorCode = error.message || "sticker_send_failed";
+          const errorCode = rpcErrorCode(error);
           if (errorCode.includes("sticker_rate_limited")) {
             setCooldownUntil(Date.now() + SERVER_COOLDOWN_MS);
           }

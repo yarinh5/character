@@ -1347,35 +1347,71 @@ export type Database = {
       }
       message_stickers: {
         Row: {
+          charged_transaction_id: string | null
           collection_name_snapshot: string
           created_at: string
           id: string
           message_id: string
+          payer_client_id: string | null
+          payout_operator_id: string | null
+          payout_transaction_id: string | null
+          price_credits_snapshot: number
           sticker_id: string
           sticker_name_snapshot: string
         }
         Insert: {
+          charged_transaction_id?: string | null
           collection_name_snapshot: string
           created_at?: string
           id?: string
           message_id: string
+          payer_client_id?: string | null
+          payout_operator_id?: string | null
+          payout_transaction_id?: string | null
+          price_credits_snapshot?: number
           sticker_id: string
           sticker_name_snapshot: string
         }
         Update: {
+          charged_transaction_id?: string | null
           collection_name_snapshot?: string
           created_at?: string
           id?: string
           message_id?: string
+          payer_client_id?: string | null
+          payout_operator_id?: string | null
+          payout_transaction_id?: string | null
+          price_credits_snapshot?: number
           sticker_id?: string
           sticker_name_snapshot?: string
         }
         Relationships: [
           {
+            foreignKeyName: "message_stickers_charged_transaction_id_fkey"
+            columns: ["charged_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "message_stickers_message_id_fkey"
             columns: ["message_id"]
             isOneToOne: true
             referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_stickers_payout_operator_id_fkey"
+            columns: ["payout_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_stickers_payout_transaction_id_fkey"
+            columns: ["payout_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "credit_transactions"
             referencedColumns: ["id"]
           },
           {
@@ -1801,6 +1837,7 @@ export type Database = {
           metadata: Json
           name: string
           object_path: string
+          price_credits: number
           processed_at: string | null
           processing_started_at: string | null
           slug: string
@@ -1828,6 +1865,7 @@ export type Database = {
           metadata?: Json
           name: string
           object_path: string
+          price_credits?: number
           processed_at?: string | null
           processing_started_at?: string | null
           slug: string
@@ -1855,6 +1893,7 @@ export type Database = {
           metadata?: Json
           name?: string
           object_path?: string
+          price_credits?: number
           processed_at?: string | null
           processing_started_at?: string | null
           slug?: string
@@ -2268,6 +2307,7 @@ export type Database = {
           is_active: boolean
           is_processing_stuck: boolean
           name: string
+          price_credits: number
           processing_started_at: string
           slug: string
           updated_at: string
@@ -2296,6 +2336,7 @@ export type Database = {
           collection_id: string
           collection_name: string
           name: string
+          price_credits: number
           scope: string
           sort_order: number
           sticker_id: string
@@ -2554,6 +2595,10 @@ export type Database = {
       }
       set_sticker_active: {
         Args: { _is_active: boolean; _sticker_id: string }
+        Returns: undefined
+      }
+      set_sticker_price: {
+        Args: { _price_credits: number; _sticker_id: string }
         Returns: undefined
       }
       start_or_get_conversation: {
