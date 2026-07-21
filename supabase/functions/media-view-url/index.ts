@@ -22,9 +22,8 @@ type StickerConversationTarget = {
 };
 
 type AdminStickerTarget = { targetKind: "admin_sticker_preview"; stickerId: string; ttlSeconds: 60 };
-type AdminGiftTarget = { targetKind: "admin_gift_preview"; giftId: string; ttlSeconds: 60 };
 
-type Target = CharacterMediaTarget | StickerMessageTarget | StickerConversationTarget | AdminStickerTarget | AdminGiftTarget;
+type Target = CharacterMediaTarget | StickerMessageTarget | StickerConversationTarget | AdminStickerTarget;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -84,10 +83,6 @@ function parseTarget(body: unknown): Target | null {
 
   if (value.kind === "admin_sticker_preview" && typeof value.sticker_id === "string" && UUID_PATTERN.test(value.sticker_id)) {
     return { targetKind: "admin_sticker_preview", stickerId: value.sticker_id, ttlSeconds: 60 };
-  }
-
-  if (value.kind === "admin_gift_preview" && typeof value.gift_id === "string" && UUID_PATTERN.test(value.gift_id)) {
-    return { targetKind: "admin_gift_preview", giftId: value.gift_id, ttlSeconds: 60 };
   }
 
   if (
@@ -191,12 +186,7 @@ Deno.serve(async (request) => {
               _actor_user_id: userData.user.id,
               _sticker_id: target.stickerId,
             })
-          : target.targetKind === "admin_gift_preview"
-            ? await trusted.rpc("resolve_admin_gift_object_path_for_server", {
-                _actor_user_id: userData.user.id,
-                _gift_id: target.giftId,
-              })
-        : await trusted.rpc("resolve_character_media_preview_path_for_server", {
+          : await trusted.rpc("resolve_character_media_preview_path_for_server", {
             _actor_user_id: userData.user.id,
             _target_kind: target.targetKind,
             _target_id: target.targetId,
@@ -209,8 +199,6 @@ Deno.serve(async (request) => {
   const bucket =
     target.targetKind === "message_sticker" || target.targetKind === "conversation_sticker" || target.targetKind === "admin_sticker_preview"
       ? "sticker-media"
-      : target.targetKind === "admin_gift_preview"
-        ? "gift-media"
       : "character-media";
   const { data: signedUrl, error: signError } = await trusted.storage
     .from(bucket)

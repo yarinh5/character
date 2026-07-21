@@ -928,127 +928,6 @@ export type Database = {
         }
         Relationships: []
       }
-      gift_collections: {
-        Row: {
-          character_id: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          is_active: boolean
-          metadata: Json
-          name: string
-          sort_order: number
-          updated_at: string
-        }
-        Insert: {
-          character_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_active?: boolean
-          metadata?: Json
-          name: string
-          sort_order?: number
-          updated_at?: string
-        }
-        Update: {
-          character_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_active?: boolean
-          metadata?: Json
-          name?: string
-          sort_order?: number
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "gift_collections_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "characters"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      gifts: {
-        Row: {
-          byte_size: number | null
-          collection_id: string
-          created_at: string
-          created_by: string | null
-          deletion_started_at: string | null
-          failed_at: string | null
-          failure_code: string | null
-          height: number | null
-          id: string
-          ingest_status: string
-          is_active: boolean
-          metadata: Json
-          name: string
-          object_path: string | null
-          price_credits: number
-          processed_at: string | null
-          processing_started_at: string | null
-          sort_order: number
-          updated_at: string
-          width: number | null
-        }
-        Insert: {
-          byte_size?: number | null
-          collection_id: string
-          created_at?: string
-          created_by?: string | null
-          deletion_started_at?: string | null
-          failed_at?: string | null
-          failure_code?: string | null
-          height?: number | null
-          id?: string
-          ingest_status?: string
-          is_active?: boolean
-          metadata?: Json
-          name: string
-          object_path?: string | null
-          price_credits: number
-          processed_at?: string | null
-          processing_started_at?: string | null
-          sort_order?: number
-          updated_at?: string
-          width?: number | null
-        }
-        Update: {
-          byte_size?: number | null
-          collection_id?: string
-          created_at?: string
-          created_by?: string | null
-          deletion_started_at?: string | null
-          failed_at?: string | null
-          failure_code?: string | null
-          height?: number | null
-          id?: string
-          ingest_status?: string
-          is_active?: boolean
-          metadata?: Json
-          name?: string
-          object_path?: string | null
-          price_credits?: number
-          processed_at?: string | null
-          processing_started_at?: string | null
-          sort_order?: number
-          updated_at?: string
-          width?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "gifts_collection_id_fkey"
-            columns: ["collection_id"]
-            isOneToOne: false
-            referencedRelation: "gift_collections"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       internal_notes: {
         Row: {
           conversation_id: string
@@ -1254,93 +1133,6 @@ export type Database = {
             columns: ["reservation_id"]
             isOneToOne: true
             referencedRelation: "character_media_reservations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      message_gifts: {
-        Row: {
-          charged_transaction_id: string
-          collection_name_snapshot: string
-          compensated_at: string | null
-          compensation_reason: string | null
-          compensation_transaction_id: string | null
-          created_at: string
-          gift_id: string
-          gift_name_snapshot: string
-          id: string
-          message_id: string
-          price_credits_snapshot: number
-          refund_reason: string | null
-          refund_transaction_id: string | null
-          refunded_at: string | null
-        }
-        Insert: {
-          charged_transaction_id: string
-          collection_name_snapshot: string
-          compensated_at?: string | null
-          compensation_reason?: string | null
-          compensation_transaction_id?: string | null
-          created_at?: string
-          gift_id: string
-          gift_name_snapshot: string
-          id?: string
-          message_id: string
-          price_credits_snapshot: number
-          refund_reason?: string | null
-          refund_transaction_id?: string | null
-          refunded_at?: string | null
-        }
-        Update: {
-          charged_transaction_id?: string
-          collection_name_snapshot?: string
-          compensated_at?: string | null
-          compensation_reason?: string | null
-          compensation_transaction_id?: string | null
-          created_at?: string
-          gift_id?: string
-          gift_name_snapshot?: string
-          id?: string
-          message_id?: string
-          price_credits_snapshot?: number
-          refund_reason?: string | null
-          refund_transaction_id?: string | null
-          refunded_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "message_gifts_charged_transaction_id_fkey"
-            columns: ["charged_transaction_id"]
-            isOneToOne: true
-            referencedRelation: "credit_transactions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_gifts_compensation_transaction_id_fkey"
-            columns: ["compensation_transaction_id"]
-            isOneToOne: true
-            referencedRelation: "credit_transactions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_gifts_gift_id_fkey"
-            columns: ["gift_id"]
-            isOneToOne: false
-            referencedRelation: "gifts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_gifts_message_id_fkey"
-            columns: ["message_id"]
-            isOneToOne: true
-            referencedRelation: "messages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_gifts_refund_transaction_id_fkey"
-            columns: ["refund_transaction_id"]
-            isOneToOne: true
-            referencedRelation: "credit_transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -2001,29 +1793,6 @@ export type Database = {
         Args: { _amount: number; _reason: string; _user_id: string }
         Returns: Json
       }
-      admin_create_gift_collection: {
-        Args: { _character_id?: string; _name: string; _sort_order?: number }
-        Returns: string
-      }
-      admin_update_gift: {
-        Args: {
-          _gift_id: string
-          _name: string
-          _price_credits: number
-          _sort_order: number
-        }
-        Returns: undefined
-      }
-      admin_update_gift_collection: {
-        Args: {
-          _character_id: string
-          _collection_id: string
-          _is_active: boolean
-          _name: string
-          _sort_order: number
-        }
-        Returns: undefined
-      }
       begin_character_media_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string }
         Returns: {
@@ -2032,21 +1801,6 @@ export type Database = {
           content_type: string
           preview_path: string
           source_path: string
-        }[]
-      }
-      begin_gift_hard_delete_for_server: {
-        Args: { _actor_user_id: string; _gift_id: string }
-        Returns: {
-          gift_id: string
-          object_path: string
-        }[]
-      }
-      begin_gift_processing_for_server: {
-        Args: { _actor_user_id: string; _gift_id: string }
-        Returns: {
-          already_ready: boolean
-          gift_id: string
-          object_path: string
         }[]
       }
       begin_locked_media_derivative_processing_for_server: {
@@ -2077,24 +1831,6 @@ export type Database = {
         }[]
       }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
-      complete_gift_hard_delete_for_server: {
-        Args: { _actor_user_id: string; _gift_id: string }
-        Returns: undefined
-      }
-      complete_gift_processing_for_server: {
-        Args: {
-          _actor_user_id: string
-          _byte_size: number
-          _gift_id: string
-          _height: number
-          _width: number
-        }
-        Returns: {
-          already_ready: boolean
-          gift_id: string
-          ingest_status: string
-        }[]
-      }
       complete_sticker_hard_delete_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: undefined
@@ -2128,19 +1864,6 @@ export type Database = {
           asset_id: string
           content_type: string
           source_path: string
-        }[]
-      }
-      create_gift_upload_intent_for_server: {
-        Args: {
-          _actor_user_id: string
-          _collection_id: string
-          _gift_name: string
-          _price_credits: number
-          _sort_order?: number
-        }
-        Returns: {
-          gift_id: string
-          object_path: string
         }[]
       }
       create_notification: {
@@ -2178,14 +1901,6 @@ export type Database = {
       fail_character_media_ingest_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
         Returns: Json
-      }
-      fail_gift_processing_for_server: {
-        Args: {
-          _actor_user_id: string
-          _failure_code: string
-          _gift_id: string
-        }
-        Returns: undefined
       }
       fail_locked_media_derivative_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
@@ -2245,28 +1960,6 @@ export type Database = {
           width: number
         }[]
       }
-      get_admin_gift_catalog: {
-        Args: never
-        Returns: {
-          byte_size: number
-          character_id: string
-          collection_id: string
-          collection_is_active: boolean
-          collection_name: string
-          created_at: string
-          deletion_started_at: string
-          failure_code: string
-          height: number
-          id: string
-          ingest_status: string
-          is_active: boolean
-          name: string
-          price_credits: number
-          sort_order: number
-          updated_at: string
-          width: number
-        }[]
-      }
       get_admin_media_catalog: {
         Args: { _conversation_id: string }
         Returns: {
@@ -2312,18 +2005,6 @@ export type Database = {
           slug: string
           updated_at: string
           width: number
-        }[]
-      }
-      get_conversation_gifts: {
-        Args: { _conversation_id: string }
-        Returns: {
-          collection_id: string
-          collection_name: string
-          gift_id: string
-          name: string
-          price_credits: number
-          scope: string
-          sort_order: number
         }[]
       }
       get_conversation_read_summary: {
@@ -2460,10 +2141,6 @@ export type Database = {
         Args: { _character_id: string }
         Returns: boolean
       }
-      refund_client_gift: {
-        Args: { _message_gift_id: string; _reason: string }
-        Returns: Json
-      }
       release_admin_character_media_reservation: {
         Args: { _reservation_id: string }
         Returns: Json
@@ -2491,10 +2168,6 @@ export type Database = {
           _intended_access_mode: string
         }
         Returns: Json
-      }
-      resolve_admin_gift_object_path_for_server: {
-        Args: { _actor_user_id: string; _gift_id: string }
-        Returns: string
       }
       resolve_admin_sticker_object_path_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
@@ -2536,14 +2209,6 @@ export type Database = {
         }
         Returns: Json
       }
-      send_client_gift: {
-        Args: {
-          _conversation_id: string
-          _gift_id: string
-          _idempotency_key: string
-        }
-        Returns: Json
-      }
       send_client_message: {
         Args: { _content: string; _conversation_id: string }
         Returns: Json
@@ -2575,10 +2240,6 @@ export type Database = {
           _sticker_id: string
         }
         Returns: Json
-      }
-      set_admin_gift_active: {
-        Args: { _gift_id: string; _is_active: boolean }
-        Returns: undefined
       }
       set_character_favorite: {
         Args: { _character_id: string; _is_favorite: boolean }

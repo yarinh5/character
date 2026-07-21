@@ -6,7 +6,6 @@ export type MediaViewKind =
   | "message_sticker"
   | "conversation_sticker"
   | "admin_sticker_preview"
-  | "admin_gift_preview"
   | "reserved_preview"
   | "admin_asset_preview"
   | "admin_locked_teaser_preview"
@@ -49,11 +48,9 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversa
               : null
             : kind === "admin_sticker_preview"
               ? { kind, sticker_id: targetId }
-              : kind === "admin_gift_preview"
-                ? { kind, gift_id: targetId }
               : kind === "reserved_preview"
-              ? { kind, reservation_id: targetId }
-              : { kind, asset_id: targetId };
+                ? { kind, reservation_id: targetId }
+                : { kind, asset_id: targetId };
 
     if (!body) {
       setState({ status: "idle", url: null });
