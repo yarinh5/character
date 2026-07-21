@@ -188,7 +188,7 @@ function OperatorsPage() {
               {data.map((operator) => (
                 <div
                   key={operator.id}
-                  className="grid grid-cols-[40px_92px_210px_120px_170px_170px_210px] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
+                  className="grid grid-cols-[40px_minmax(100px,0.75fr)_minmax(160px,1fr)_minmax(120px,auto)_minmax(420px,auto)] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
                 >
                   <div className="h-10 w-10 rounded-full bg-muted overflow-hidden justify-self-start">
                     <div className="h-full w-full flex items-center justify-center text-sm font-medium">
@@ -212,56 +212,53 @@ function OperatorsPage() {
                     )}
                   </div>
 
-                  <div className="inline-flex items-center gap-2 whitespace-nowrap max-xl:col-start-2 max-xl:row-start-2 max-md:col-span-2 max-md:col-start-1">
-                    {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
-                  </div>
-
-                  <div className="inline-flex items-center gap-4 whitespace-nowrap text-xs text-muted-foreground max-xl:col-start-2 max-xl:row-start-3 max-md:col-span-2 max-md:col-start-1">
-                    <span className="whitespace-nowrap">{operator.chars} דמויות</span>
-                    <span className="whitespace-nowrap">{operator.active} שיחות פעילות</span>
-                    <span className="whitespace-nowrap">{operator.credit_balance.toLocaleString("he-IL")} קרדיטים</span>
-                  </div>
-
-                  <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap max-xl:row-span-3 max-md:col-span-2 max-md:justify-start">
-                    <Button size="sm" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד">
-                      <BarChart3 className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setCreditsOp(operator)}>
-                      <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות">
-                      <LinkIcon className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד">
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה">
-                      <RotateCcw className="h-4 w-4" />
-                    </Button>
-                    {operator.deleted_at && (
-                      <Button size="sm" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד">
-                        <Undo2 className="h-4 w-4" />
+                  <div className="flex flex-wrap items-center justify-end gap-3 min-w-0 max-xl:col-span-2 max-xl:col-start-2 max-xl:row-start-2 max-xl:justify-start max-md:col-span-2 max-md:col-start-1">
+                    <div className="shrink-0">
+                      {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 whitespace-nowrap">
+                      <Button size="icon" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד" aria-label="ביצועי עובד">
+                        <BarChart3 className="h-4 w-4" />
                       </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setArchiveOp(operator)}
-                      disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
-                      title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
-                    >
-                      <UserX className="h-4 w-4" />
-                    </Button>
-                    {operator.role !== "admin" && !operator.deleted_at && (
+                      <Button size="sm" variant="outline" className="shrink-0 whitespace-nowrap" onClick={() => setCreditsOp(operator)}>
+                        <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות" aria-label="שיוך דמויות">
+                        <LinkIcon className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד" aria-label="עריכת עובד">
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה" aria-label="שליחת איפוס סיסמה">
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                      {operator.deleted_at && (
+                        <Button size="icon" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד" aria-label="שחזר עובד">
+                          <Undo2 className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
-                        size="sm"
+                        size="icon"
                         variant="ghost"
-                        onClick={() => setConvertOp(operator)}
-                        title="הפוך ללקוח"
+                        onClick={() => setArchiveOp(operator)}
+                        disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
+                        title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
+                        aria-label={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
                       >
-                        <UserPlus className="h-4 w-4" />
+                        <UserX className="h-4 w-4" />
                       </Button>
-                    )}
+                      {operator.role !== "admin" && !operator.deleted_at && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setConvertOp(operator)}
+                          title="הפוך ללקוח"
+                          aria-label="הפוך ללקוח"
+                        >
+                          <UserPlus className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
