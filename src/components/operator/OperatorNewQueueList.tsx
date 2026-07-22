@@ -128,7 +128,7 @@ export function OperatorNewQueueList({
               disabled={Boolean(claimingId)}
             >
               <MessageCircle className="h-4 w-4" />
-              {claimingId === item.work_item_id ? "לוקח..." : "קח"}
+              {claimingId === item.work_item_id ? "לוקח..." : "קח שיחה"}
             </Button>
           </div>
         </Card>
