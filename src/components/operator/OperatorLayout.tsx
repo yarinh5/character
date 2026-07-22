@@ -1,6 +1,6 @@
 ﻿import { ReactNode, useEffect, useState, createContext, useContext } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { BarChart3, Coins, LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
+import { BarChart3, Coins, Inbox, LayoutDashboard, MessageCircle, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -25,13 +25,14 @@ export const useOperator = () => {
 };
 
 type NavItem = {
-  to: "/operator" | "/operator/conversations" | "/operator/analytics" | "/operator/settings";
+  to: "/operator" | "/operator/new" | "/operator/conversations" | "/operator/analytics" | "/operator/settings";
   label: string;
   icon: typeof LayoutDashboard;
   exact?: boolean;
 };
 const NAV: NavItem[] = [
   { to: "/operator", label: "דשבורד", icon: LayoutDashboard, exact: true },
+  { to: "/operator/new", label: "חדש", icon: Inbox },
   { to: "/operator/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/operator/analytics", label: "ביצועים", icon: BarChart3 },
   { to: "/operator/settings", label: "הגדרות", icon: Settings },
@@ -243,7 +244,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
       </main>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {NAV.map(({ to, label, icon: Icon, exact }) => (
             <Link
               key={to}

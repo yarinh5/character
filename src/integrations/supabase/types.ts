@@ -624,6 +624,77 @@ export type Database = {
           },
         ]
       }
+      conversation_work_items: {
+        Row: {
+          assigned_at: string | null
+          character_id: string
+          client_id: string
+          conversation_id: string
+          created_at: string
+          id: string
+          last_activity_at: string
+          last_client_message_id: string | null
+          responsible_operator_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_at?: string | null
+          character_id: string
+          client_id: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          last_activity_at?: string
+          last_client_message_id?: string | null
+          responsible_operator_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_at?: string | null
+          character_id?: string
+          client_id?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          last_activity_at?: string
+          last_client_message_id?: string | null
+          responsible_operator_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_work_items_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_work_items_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_work_items_last_client_message_id_fkey"
+            columns: ["last_client_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_work_items_responsible_operator_id_fkey"
+            columns: ["responsible_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversation_read_states: {
         Row: {
           conversation_id: string
@@ -1835,6 +1906,10 @@ export type Database = {
         }[]
       }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      claim_new_conversation: {
+        Args: { _work_item_id: string }
+        Returns: Json
+      }
       complete_sticker_hard_delete_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: undefined
@@ -2090,6 +2165,20 @@ export type Database = {
           my_reservation_id: string
           status: string
           width: number
+        }[]
+      }
+      get_operator_new_queue: {
+        Args: never
+        Returns: {
+          character_avatar_url: string
+          character_name: string
+          client_display_name: string
+          conversation_id: string
+          created_at: string
+          last_activity_at: string
+          last_client_preview: string
+          status: string
+          work_item_id: string
         }[]
       }
       get_sla_risk_conversations: {
