@@ -695,6 +695,61 @@ export type Database = {
           },
         ]
       }
+      conversation_handling_cycles: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          end_reason: string | null
+          ended_at: string | null
+          id: string
+          operator_id: string
+          started_at: string
+          work_item_id: string | null
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
+          id?: string
+          operator_id: string
+          started_at?: string
+          work_item_id?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
+          id?: string
+          operator_id?: string
+          started_at?: string
+          work_item_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_handling_cycles_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_handling_cycles_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_handling_cycles_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "conversation_work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversation_read_states: {
         Row: {
           conversation_id: string
@@ -1530,6 +1585,8 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          last_seen_at: string | null
+          presence_status: string
           updated_at: string
           user_id: string
         }
@@ -1540,6 +1597,8 @@ export type Database = {
           full_name: string
           id?: string
           is_active?: boolean
+          last_seen_at?: string | null
+          presence_status?: string
           updated_at?: string
           user_id: string
         }
@@ -1550,6 +1609,8 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          last_seen_at?: string | null
+          presence_status?: string
           updated_at?: string
           user_id?: string
         }
@@ -2234,6 +2295,7 @@ export type Database = {
         Args: { _character_id: string }
         Returns: boolean
       }
+      operator_heartbeat: { Args: never; Returns: Json }
       release_admin_character_media_reservation: {
         Args: { _reservation_id: string }
         Returns: Json
@@ -2246,6 +2308,11 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      release_operator_conversation: {
+        Args: { _conversation_id: string; _reason?: string }
+        Returns: Json
+      }
+      return_stale_work_items_to_new: { Args: never; Returns: number }
       reserve_admin_character_media_asset: {
         Args: { _asset_id: string; _conversation_id: string }
         Returns: Json

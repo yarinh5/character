@@ -30,7 +30,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile } from "lucide-react";
+import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -133,6 +133,7 @@ function OperatorChatPage() {
   const [lockTimeoutMinutes, setLockTimeoutMinutes] = useState(10);
   const [conversationLock, setConversationLock] = useState<ConversationLock | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
+  const [releasingConversation, setReleasingConversation] = useState(false);
   const [, setLockClock] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -527,6 +528,34 @@ function OperatorChatPage() {
     toast.success(payload?.released ? "השיחה שוחררה" : "אין נעילה פעילה");
   };
 
+  const releaseConversation = async () => {
+    if (releasingConversation) return;
+
+    setReleasingConversation(true);
+    try {
+      const { error } = await supabase.rpc("release_operator_conversation", {
+        _conversation_id: conversationId,
+        _reason: "released",
+      });
+
+      if (error) {
+        if (error.message.includes("conversation_not_responsible_operator")) {
+          toast.error("השיחה אינה באחריותך ולכן לא ניתן לשחרר אותה.");
+        } else if (error.message.includes("conversation_locked_by_other_operator")) {
+          toast.error("השיחה נעולה לעובד אחר.");
+        } else {
+          toast.error("שחרור השיחה נכשל.");
+        }
+        return;
+      }
+
+      toast.success("השיחה הוחזרה לפניות החדשות.");
+      navigate({ to: "/operator/new" });
+    } finally {
+      setReleasingConversation(false);
+    }
+  };
+
   const handleComposerActivity = () => {
     if (concurrencyMode !== "open") {
       void acquireLock();
@@ -709,6 +738,18 @@ function OperatorChatPage() {
           </p>
         </div>
         <div className="hidden md:flex gap-1">
+          {!closed && operator && !isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void releaseConversation()}
+              disabled={releasingConversation}
+              className="shrink-0"
+            >
+              <RotateCcw className="h-4 w-4" />
+              {releasingConversation ? "משחרר..." : "שחרר שיחה"}
+            </Button>
+          )}
           {closed ? (
             <Button variant="outline" size="sm" onClick={() => updateStatus("open")}>
               <Unlock className="h-4 w-4" />
@@ -751,6 +792,17 @@ function OperatorChatPage() {
                   canEdit={!!operator}
                 />
                 <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
+                {!closed && operator && !isAdmin && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => void releaseConversation()}
+                    disabled={releasingConversation}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {releasingConversation ? "משחרר..." : "שחרר שיחה לפניות החדשות"}
+                  </Button>
+                )}
               </div>
             </SheetContent>
           </Sheet>

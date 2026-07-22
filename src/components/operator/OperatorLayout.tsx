@@ -125,6 +125,18 @@ export function RequireOperator({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, role]);
 
+  useEffect(() => {
+    if (role !== "operator" || !operator?.id) return;
+
+    const heartbeat = () => {
+      void supabase.rpc("operator_heartbeat");
+    };
+
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 45_000);
+    return () => window.clearInterval(interval);
+  }, [operator?.id, role]);
+
   if (loading || opLoading) return <Spinner />;
   if (!session) return null;
   if (role !== "operator" && role !== "admin") {
