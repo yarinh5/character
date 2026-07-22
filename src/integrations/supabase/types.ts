@@ -2232,12 +2232,14 @@ export type Database = {
         Args: never
         Returns: {
           character_avatar_url: string
+          character_id: string
           character_name: string
           client_display_name: string
           conversation_id: string
           created_at: string
           last_activity_at: string
           last_client_preview: string
+          queue_state: string
           status: string
           work_item_id: string
         }[]
