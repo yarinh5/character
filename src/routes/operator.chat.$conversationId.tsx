@@ -13,12 +13,14 @@ import {
 } from "@/lib/messagePagination";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
+import { OperatorNewQueuePanel } from "@/components/operator/OperatorNewQueueList";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
 import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
 import { StickerPicker } from "@/components/chat/StickerPicker";
 import type { StickerSendResult } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
+import { operatorNewQueueClaimError, useOperatorNewQueue, type OperatorNewQueueItem } from "@/hooks/useOperatorNewQueue";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -30,7 +32,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile, RotateCcw } from "lucide-react";
+import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile, RotateCcw, Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -127,6 +129,7 @@ function OperatorChatPage() {
   const [sending, setSending] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
+  const [newQueueSheetOpen, setNewQueueSheetOpen] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
@@ -139,6 +142,7 @@ function OperatorChatPage() {
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  const newQueue = useOperatorNewQueue(operator?.id);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialScrollDoneRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
@@ -681,6 +685,20 @@ function OperatorChatPage() {
     toast.success("הסטטוס עודכן");
   };
 
+  const claimNewQueueConversation = async (item: OperatorNewQueueItem) => {
+    const result = await newQueue.claimConversation(item.work_item_id);
+    if (!result.ok) {
+      toast.error(operatorNewQueueClaimError(result.errorMessage));
+      return;
+    }
+
+    setNewQueueSheetOpen(false);
+    navigate({
+      to: "/operator/chat/$conversationId",
+      params: { conversationId: result.conversationId },
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -761,6 +779,29 @@ function OperatorChatPage() {
               סגור
             </Button>
           )}
+        </div>
+        <div className="xl:hidden">
+          <Sheet open={newQueueSheetOpen} onOpenChange={setNewQueueSheetOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="פניות NEW">
+                <Inbox className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-full p-0 sm:max-w-sm" dir="rtl">
+              <SheetHeader className="sr-only">
+                <SheetTitle>פניות NEW</SheetTitle>
+              </SheetHeader>
+              <OperatorNewQueuePanel
+                items={newQueue.items}
+                claimingId={newQueue.claimingId}
+                onClaim={claimNewQueueConversation}
+                isLoading={newQueue.isLoading}
+                error={newQueue.error}
+                onRetry={() => void newQueue.refetch()}
+                emptyDescription="פניות שממתינות לטיפול יופיעו כאן."
+              />
+            </SheetContent>
+          </Sheet>
         </div>
         <div className="md:hidden flex gap-1">
           <Sheet>
@@ -1019,6 +1060,18 @@ function OperatorChatPage() {
             )}
           </div>
         </div>
+
+        <aside className="hidden xl:flex w-72 shrink-0 border-r border-border">
+          <OperatorNewQueuePanel
+            items={newQueue.items}
+            claimingId={newQueue.claimingId}
+            onClaim={claimNewQueueConversation}
+            isLoading={newQueue.isLoading}
+            error={newQueue.error}
+            onRetry={() => void newQueue.refetch()}
+            emptyDescription="פניות שממתינות לטיפול יופיעו כאן."
+          />
+        </aside>
 
         {/* Side panel desktop */}
         <aside className="hidden md:flex w-80 shrink-0 flex-col border-r border-border bg-card overflow-y-auto">
