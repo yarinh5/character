@@ -2033,6 +2033,7 @@ export type Database = {
       }
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
+      complete_client_onboarding: { Args: { _payload: Json }; Returns: Json }
       complete_sticker_hard_delete_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: undefined
@@ -2451,6 +2452,7 @@ export type Database = {
         Returns: Json
       }
       return_stale_work_items_to_new: { Args: never; Returns: number }
+      save_client_onboarding_step: { Args: { _payload: Json }; Returns: Json }
       send_admin_media_message: {
         Args: { _caption?: string; _reservation_id: string }
         Returns: Json

@@ -95,8 +95,11 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 export function RequireClient({ children }: { children: ReactNode }) {
   const { loading, session, role, signOut } = useAuth();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [statusLoading, setStatusLoading] = useState(true);
   const [clientStatus, setClientStatus] = useState<string | null>(null);
+  const [onboardingGate, setOnboardingGate] = useState<"loading" | "allowed" | "redirecting">("loading");
+  const [onboardingRefresh, setOnboardingRefresh] = useState(0);
 
   useEffect(() => {
     if (loading) return;
@@ -139,7 +142,61 @@ export function RequireClient({ children }: { children: ReactNode }) {
     };
   }, [loading, navigate, role, session?.user, signOut]);
 
-  if (loading || statusLoading) {
+  useEffect(() => {
+    const refresh = () => setOnboardingRefresh((version) => version + 1);
+    window.addEventListener("client-profile-updated", refresh);
+    return () => window.removeEventListener("client-profile-updated", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!session?.user || role !== "client") {
+      setOnboardingGate("allowed");
+      return;
+    }
+
+    let alive = true;
+    setOnboardingGate("loading");
+
+    Promise.all([
+      supabase
+        .from("system_settings")
+        .select("value")
+        .eq("key", "mandatory_onboarding_enabled")
+        .maybeSingle(),
+      supabase
+        .from("client_profiles")
+        .select("onboarding_completed_at")
+        .eq("user_id", session.user.id)
+        .maybeSingle(),
+    ]).then(([{ data: setting }, { data: profile }]) => {
+      if (!alive) return;
+
+      const mandatory = setting?.value === true;
+      const completed = !!profile?.onboarding_completed_at;
+      const isOnboardingRoute = pathname.startsWith("/app/onboarding");
+
+      if (mandatory && !completed && !isOnboardingRoute) {
+        setOnboardingGate("redirecting");
+        navigate({ to: "/app/onboarding", replace: true });
+        return;
+      }
+
+      if (pathname === "/app" || pathname === "/app/") {
+        setOnboardingGate("redirecting");
+        navigate({ to: "/app/characters", replace: true });
+        return;
+      }
+
+      setOnboardingGate("allowed");
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [loading, navigate, onboardingRefresh, pathname, role, session?.user]);
+
+  if (loading || statusLoading || onboardingGate === "loading" || onboardingGate === "redirecting") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />

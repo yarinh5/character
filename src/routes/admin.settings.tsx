@@ -23,6 +23,7 @@ export const Route = createFileRoute("/admin/settings")({
 const KEYS = [
   { key: "minimum_age", label: "גיל מינימום", type: "number", default: 18 },
   { key: "require_age_confirmation", label: "דרוש אישור גיל בהרשמה", type: "bool", default: true },
+  { key: "mandatory_onboarding_enabled", label: "Onboarding mandatory", type: "bool", default: false },
   { key: "allow_new_registrations", label: "אפשר הרשמות חדשות", type: "bool", default: true },
   { key: "default_conversation_status", label: "סטטוס שיחה ברירת מחדל", type: "text", default: "open" },
   {
