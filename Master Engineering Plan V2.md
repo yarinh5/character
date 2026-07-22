@@ -13,7 +13,7 @@
 6. Onboarding חובה: שם, תאריך לידה, גיל מחושב, עיר, תמונת פרופיל, bio קצר, interests והעדפות בסיסיות. שדות כמו עישון וסטטוס אישי נשמרים כחלק מהמודל, ורמת החובה שלהם תיקבע בולידציה.
 7. ONLINE יתחיל עם מגבלת spam שמרנית: פנייה יזומה אחת לכל operator-client-character ב-24 שעות, ולא אם קיימת שיחה שממתינה ב-NEW.
 8. חסימת לקוח ברמת עובד מונעת הקצאה ויזימה לאותו עובד ומסתירה ממנו NEW, אבל אינה חוסמת עובדים אחרים או אדמין.
-9. Stickers נשארים לפי המודל הקיים, כולל חינם/בתשלום, חיוב, payout וניקוד. אין פיצ'ר Gifts נפרד ב-V2.
+9. Stickers הם המודל היחיד לפריטים ויזואליים חינמיים/בתשלום בצ'אט: מחיר, חיוב, payout וקרדיטי עובד נשארים לפי המימוש שאושר.
 10. לפני V2 חייבים להכריע את ה-worktree והמיגרציות הלא סגורות, כולל שינויי operator credits קיימים.
 
 ## עקרונות ביצוע
@@ -35,7 +35,8 @@
 - Open/Warning/Lock קיימים באמצעות `conversation_locks`.
 - Discovery/favorites/cycles קיימים חלקית.
 - Media inventory/reservations/locked images קיימים חלקית.
-- Stickers קיימים וכוללים paid flow.
+- Stickers קיימים וכוללים paid flow מאושר: לקוח משלם בכל שליחת מדבקה בתשלום, אותו סכום נכנס לעובד המטפל, ועובד/אדמין שולחים ללא חיוב או payout.
+- קרדיטי עובד קיימים ומאושרים: הודעת לקוח מזכה את העובד המטפל ב-1 קרדיט, והודעות עובד מזכות עד 3 קרדיטים בכל מחזור מאז הודעת הלקוח האחרונה. אין לפתוח מחדש את המודל הזה במסגרת V2 אלא רק לחבר אותו לאחריות NEW.
 - Notifications/SLA/Analytics קיימים חלקית.
 
 ---
@@ -95,7 +96,7 @@ worktree נקי או מתועד; build ו-TypeScript עוברים; ידוע אי
 `tsc --noEmit` עובר. `build` לא נבדק במסגרת audit כי הוא עלול לכתוב artifacts. `.env` מוחרג ב-gitignore. Pagination בצ'אט קיים דרך `src/lib/messagePagination.ts`.
 
 ### השינוי המבוקש
-להריץ build אחרי freeze, לתקן שגיאות blocking בלבד, ולוודא שאין regression בצ'אט, קרדיטים, ניקוד והרשאות.
+להריץ build אחרי freeze, לתקן שגיאות blocking בלבד, ולוודא שאין regression בצ'אט, קרדיטים, קרדיטי עובד והרשאות.
 
 ### טבלאות ומבנה נתונים
 אין שינוי.
@@ -458,10 +459,10 @@ NEW, ONLINE, media V2.
 לחבר את מודל הצ'אט הקיים לאחריות NEW בלי לשבור הודעות קיימות.
 
 ### מצב קיים
-`send_client_message` מחייב קרדיט ויכול לבצע payout לפי assigned/lock/latest. `send_operator_message` מנקד עובד. אין handling cycle רשמי.
+`send_client_message` מחייב קרדיט ומזכה את העובד המטפל. `send_operator_message` יכול לזכות את העובד השולח לפי מגבלת הרצף. אין handling cycle רשמי.
 
 ### השינוי המבוקש
-כאשר לקוח שולח הודעה: לפתוח/לעדכן work item. כאשר עובד עונה: לסגור cycle ולשייך ניקוד/מדבקות לעובד האחראי.
+כאשר לקוח שולח הודעה: לפתוח/לעדכן work item ולשמר את זיכוי העובד המטפל. כאשר עובד עונה: לסגור cycle ולשייך קרדיטי עובד/מדבקות לעובד האחראי.
 
 ### טבלאות ומבנה נתונים
 `conversation_work_items`, `conversation_handling_cycles`, קשר ל-`messages`, optional `responsible_operator_id` snapshot.
@@ -470,7 +471,7 @@ NEW, ONLINE, media V2.
 לעדכן:
 - `send_client_message`
 - `send_operator_message`
-- private scoring/payout helpers
+- private credit/payout helpers
 
 ### RLS והרשאות
 Operator send עדיין רק assigned character. ב-Lock רק holder. ב-Open/Warning שולחים מורשים, אבל responsible נשאר מי שנקבע ב-NEW.
@@ -491,7 +492,7 @@ Backfill work item לשיחות waiting בלבד.
 הצ'אט הישן עדיין עובד; NEW state עקבי.
 
 ### סיכונים
-גבוה: כפילות חיוב/ניקוד או סגירת cycle לא נכונה.
+גבוה: כפילות חיוב/קרדיטי עובד או סגירת cycle לא נכונה.
 
 ### Rollback
 Feature flag ל-disable responsibility; חזרה לפתרון assigned/lock/latest.
@@ -917,10 +918,10 @@ Invalidate messages, operator performance, credits wallet.
 אין תיקון היסטורי אוטומטי אלא אם הוחלט אחרת.
 
 ### בדיקות
-Paid sticker מחייב לקוח, מוסיף payout לעובד responsible, לא מכפיל ניקוד.
+Paid sticker מחייב לקוח, מוסיף payout לעובד responsible, ולא מכפיל קרדיטי עובד.
 
 ### תנאי קבלה
-מודל Stickers הקיים עובד; אין Gifts.
+מודל Stickers הקיים עובד כמודל היחיד לפריטים ויזואליים חינמיים/בתשלום בצ'אט.
 
 ### סיכונים
 שינוי payout היסטורי בטעות.
@@ -929,7 +930,7 @@ Paid sticker מחייב לקוח, מוסיף payout לעובד responsible, לא
 Fallback resolver ל-legacy.
 
 ### מחוץ ל-Scope
-קטלוג Gifts או פיצ'ר מתנות.
+שינוי קטלוג Stickers מעבר לאחריות payout.
 
 ---
 
@@ -1189,7 +1190,7 @@ Feature flags לפי תחום: NEW, ONLINE, media V2, paid sessions, mandatory o
 4. Backfill ללא מחיקה: profile fields, media default tags, NEW pending items.
 5. תאימות לצ'אט קיים: `conversations`, `messages`, `assigned_operator_id`, `conversation_status` נשמרים.
 6. Paid image legacy unlocks נשמרים ולא מחויבים מחדש.
-7. Stickers existing model נשמר; רק payout responsibility מתעדכן אחרי NEW.
+7. Stickers וקרדיטי עובד נשמרים כפי שאושרו; אחרי NEW מעדכנים רק את בחירת העובד האחראי ל-payout, ללא redesign של המחיר, החיוב או ה-UI הקיים.
 8. Admin direct writes עוברים ל-RPC בהדרגה, עם תקופת תאימות קצרה.
 9. Realtime מתווסף בשלבים: קודם DB/RPC, אחר כך UI.
 10. Rollout מדורג: internal/admin, operators נבחרים, ואז כלל המשתמשים.
@@ -1210,5 +1211,4 @@ Feature flags לפי תחום: NEW, ONLINE, media V2, paid sessions, mandatory o
 - תרגום מלא/i18n.
 - מערכת רמות.
 - וידאו.
-- Gifts כמוצר נפרד.
 - Rewrite של האפליקציה.
