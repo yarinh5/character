@@ -2122,6 +2122,28 @@ export type Database = {
           width: number
         }[]
       }
+      get_admin_new_queue_overview: {
+        Args: never
+        Returns: {
+          character_id: string
+          character_name: string
+          new_queue_count: number
+          returned_to_queue_count: number
+          waiting_long_count: number
+        }[]
+      }
+      get_admin_operator_presence_overview: {
+        Args: never
+        Returns: {
+          active_work_item_count: number
+          eligible_new_queue_count: number
+          held_conversations: Json
+          last_seen_at: string
+          operator_id: string
+          presence_status: string
+          stale_returned_count: number
+        }[]
+      }
       get_admin_sticker_catalog: {
         Args: never
         Returns: {

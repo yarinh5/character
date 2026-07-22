@@ -3,7 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
+  Activity,
   BarChart3,
+  Clock3,
   Coins,
   Copy,
   Edit,
@@ -91,6 +93,54 @@ type CharacterRow = {
   is_active?: boolean | null;
 };
 
+type HeldConversation = {
+  conversation_id: string;
+  character_name: string | null;
+  client_display_name: string | null;
+  status: string;
+  last_activity_at: string;
+};
+
+type OperatorPresenceOverview = {
+  operator_id: string;
+  presence_status: "online" | "idle" | "offline";
+  last_seen_at: string | null;
+  active_work_item_count: number;
+  eligible_new_queue_count: number;
+  stale_returned_count: number;
+  held_conversations: HeldConversation[];
+};
+
+type NewQueueOverview = {
+  character_id: string;
+  character_name: string;
+  new_queue_count: number;
+  waiting_long_count: number;
+  returned_to_queue_count: number;
+};
+
+function formatLastSeen(value: string | null) {
+  if (!value) return "לא נצפה";
+
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 1) return "נראה כעת";
+  if (minutes < 60) return `לפני ${minutes} דק׳`;
+
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `לפני ${hours} שע׳` : new Date(value).toLocaleDateString("he-IL");
+}
+
+function PresenceBadge({ status }: { status: OperatorPresenceOverview["presence_status"] }) {
+  const labels = { online: "מחובר", idle: "לא פעיל", offline: "מנותק" } as const;
+  const classes = {
+    online: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    idle: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    offline: "bg-muted text-muted-foreground",
+  } as const;
+
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${classes[status]}`}>{labels[status]}</span>;
+}
+
 function OperatorsPage() {
   const qc = useQueryClient();
   const listOperators = useServerFn(adminListOperators);
@@ -100,6 +150,7 @@ function OperatorsPage() {
   const [editing, setEditing] = useState<Operator | null>(null);
   const [assignOp, setAssignOp] = useState<Operator | null>(null);
   const [performanceOp, setPerformanceOp] = useState<Operator | null>(null);
+  const [monitoringOp, setMonitoringOp] = useState<Operator | null>(null);
   const [creditsOp, setCreditsOp] = useState<Operator | null>(null);
   const [resetOp, setResetOp] = useState<Operator | null>(null);
   const [archiveOp, setArchiveOp] = useState<Operator | null>(null);
@@ -113,6 +164,26 @@ function OperatorsPage() {
     queryFn: async () => (await listOperators({ data: { show_archived_only: showArchived } })) as Operator[],
   });
 
+  const { data: presenceData } = useQuery({
+    queryKey: ["admin-operator-presence-overview"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_admin_operator_presence_overview");
+      if (error) throw error;
+      return (data ?? []) as OperatorPresenceOverview[];
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { data: newQueueData } = useQuery({
+    queryKey: ["admin-new-queue-overview"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_admin_new_queue_overview");
+      if (error) throw error;
+      return (data ?? []) as NewQueueOverview[];
+    },
+    refetchInterval: 30_000,
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["admin-operators"] });
     qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -124,17 +195,37 @@ function OperatorsPage() {
     qc.invalidateQueries({ queryKey: ["admin-operator-credits"] });
   };
 
+  const refreshMonitoring = () => {
+    refresh();
+    qc.invalidateQueries({ queryKey: ["admin-operator-presence-overview"] });
+    qc.invalidateQueries({ queryKey: ["admin-new-queue-overview"] });
+  };
+
   useEffect(() => {
     const channel = supabase
       .channel("admin-operators-wallets")
       .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, refreshCreditData)
       .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, refreshCreditData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "operators" }, refreshMonitoring)
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_work_items" }, refreshMonitoring)
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_handling_cycles" }, refreshMonitoring)
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
   }, [qc]);
+
+  const presenceByOperator = new Map((presenceData ?? []).map((item) => [item.operator_id, item]));
+  const newQueueTotals = (newQueueData ?? []).reduce(
+    (totals, item) => ({
+      total: totals.total + item.new_queue_count,
+      waiting: totals.waiting + item.waiting_long_count,
+      returned: totals.returned + item.returned_to_queue_count,
+    }),
+    { total: 0, waiting: 0, returned: 0 },
+  );
+  const onlineOperators = (presenceData ?? []).filter((item) => item.presence_status === "online").length;
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8" dir="rtl">
@@ -155,6 +246,13 @@ function OperatorsPage() {
           </div>
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 mb-6 md:grid-cols-4">
+        <MonitoringStat label="עובדים מחוברים" value={onlineOperators} />
+        <MonitoringStat label="פניות NEW" value={newQueueTotals.total} />
+        <MonitoringStat label="ממתינות זמן רב" value={newQueueTotals.waiting} />
+        <MonitoringStat label="חזרו לתור" value={newQueueTotals.returned} />
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -185,7 +283,9 @@ function OperatorsPage() {
           )}
           {!isLoading && !error && data && data.length > 0 && (
             <div className="divide-y">
-              {data.map((operator) => (
+              {data.map((operator) => {
+                const monitoring = presenceByOperator.get(operator.id);
+                return (
                 <div
                   key={operator.id}
                   className="grid grid-cols-[40px_minmax(100px,0.75fr)_minmax(160px,1fr)_minmax(120px,auto)_minmax(420px,auto)] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
@@ -198,6 +298,11 @@ function OperatorsPage() {
 
                   <div className="min-w-0 justify-self-stretch">
                     <div className="font-medium truncate">{operator.full_name}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                      <PresenceBadge status={monitoring?.presence_status ?? "offline"} />
+                      <span>{formatLastSeen(monitoring?.last_seen_at ?? null)}</span>
+                      <span>{monitoring?.active_work_item_count ?? 0} בטיפול</span>
+                    </div>
                   </div>
 
                   <div className="min-w-0 justify-self-stretch truncate text-left text-xs text-muted-foreground" dir="ltr">
@@ -217,6 +322,9 @@ function OperatorsPage() {
                       {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 whitespace-nowrap">
+                      <Button size="icon" variant="ghost" onClick={() => setMonitoringOp(operator)} title="ניטור עובד" aria-label="ניטור עובד">
+                        <Activity className="h-4 w-4" />
+                      </Button>
                       <Button size="icon" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד" aria-label="ביצועי עובד">
                         <BarChart3 className="h-4 w-4" />
                       </Button>
@@ -261,7 +369,8 @@ function OperatorsPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -322,6 +431,13 @@ function OperatorsPage() {
         />
       )}
       {performanceOp && <OperatorPerformanceDialog operator={performanceOp} onClose={() => setPerformanceOp(null)} />}
+      {monitoringOp && (
+        <OperatorMonitoringDialog
+          operator={monitoringOp}
+          overview={presenceByOperator.get(monitoringOp.id)}
+          onClose={() => setMonitoringOp(null)}
+        />
+      )}
       {creditsOp && (
         <OperatorCreditsDialog
           operator={creditsOp}
@@ -374,6 +490,83 @@ type OperatorCreditTransaction = {
   message_id: string | null;
   metadata: unknown | null;
 };
+
+function MonitoringStat({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-2xl font-semibold tabular-nums">{value}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{label}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OperatorMonitoringDialog({
+  operator,
+  overview,
+  onClose,
+}: {
+  operator: Operator;
+  overview: OperatorPresenceOverview | undefined;
+  onClose: () => void;
+}) {
+  const heldConversations = overview?.held_conversations ?? [];
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl" dir="rtl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" /> ניטור עובד: {operator.full_name}
+          </DialogTitle>
+          <DialogDescription>תצוגת מעקב בלבד. אין פעולות הקצאה או שינוי שיחה במסך זה.</DialogDescription>
+        </DialogHeader>
+
+        {!overview ? (
+          <Skeleton className="h-44" />
+        ) : (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <PresenceBadge status={overview.presence_status} />
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Clock3 className="h-4 w-4" /> {formatLastSeen(overview.last_seen_at)}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <MonitoringStat label="שיחות בטיפול" value={overview.active_work_item_count} />
+              <MonitoringStat label="פניות NEW מתאימות" value={overview.eligible_new_queue_count} />
+              <MonitoringStat label="timeout שחזרו (24ש)" value={overview.stale_returned_count} />
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium">שיחות שהעובד מחזיק כעת</div>
+              {heldConversations.length === 0 ? (
+                <p className="text-sm text-muted-foreground">אין שיחות פעילות בטיפול העובד.</p>
+              ) : (
+                <div className="divide-y rounded-md border">
+                  {heldConversations.map((conversation) => (
+                    <div key={conversation.conversation_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+                      <div>
+                        <div className="font-medium">{conversation.character_name ?? "דמות"}</div>
+                        <div className="text-xs text-muted-foreground">{conversation.client_display_name ?? "לקוח"}</div>
+                      </div>
+                      <div className="text-left text-xs text-muted-foreground">
+                        <div>{conversation.status}</div>
+                        <div>{formatLastSeen(conversation.last_activity_at)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function OperatorCreditsDialog({
   operator,
