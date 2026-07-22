@@ -32,7 +32,7 @@ type NavItem = {
 };
 const NAV: NavItem[] = [
   { to: "/operator", label: "דשבורד", icon: LayoutDashboard, exact: true },
-  { to: "/operator/new", label: "חדש", icon: Inbox },
+  { to: "/operator/new", label: "NEW", icon: Inbox },
   { to: "/operator/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/operator/analytics", label: "ביצועים", icon: BarChart3 },
   { to: "/operator/settings", label: "הגדרות", icon: Settings },
