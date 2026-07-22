@@ -291,9 +291,7 @@ function OperatorChatPage() {
           .eq("user_id", c.client_id)
           .maybeSingle(),
         supabase
-          .from("client_profiles")
-          .select("age, interests, conversation_preferences")
-          .eq("user_id", c.client_id)
+          .rpc("get_operator_conversation_client_profile", { _conversation_id: c.id })
           .maybeSingle(),
         supabase
           .from("conversations")

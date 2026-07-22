@@ -540,35 +540,149 @@ export type Database = {
       client_profiles: {
         Row: {
           age: number | null
+          bio: string | null
+          character_preferences: Json
+          city_id: string | null
+          computed_age: number | null
+          content_preferences: Json
           conversation_preferences: string | null
           created_at: string
+          date_of_birth: string | null
+          first_name: string | null
           gender: string | null
           id: string
           interests: string[] | null
+          last_name: string | null
+          onboarding_completed_at: string | null
+          onboarding_step: number
+          preferred_distance_km: number | null
+          preferred_max_age: number | null
+          preferred_min_age: number | null
+          profile_image_url: string | null
+          profile_image_urls: string[]
+          relationship_status: string | null
+          smoking_status: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           age?: number | null
+          bio?: string | null
+          character_preferences?: Json
+          city_id?: string | null
+          computed_age?: number | null
+          content_preferences?: Json
           conversation_preferences?: string | null
           created_at?: string
+          date_of_birth?: string | null
+          first_name?: string | null
           gender?: string | null
           id?: string
           interests?: string[] | null
+          last_name?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_step?: number
+          preferred_distance_km?: number | null
+          preferred_max_age?: number | null
+          preferred_min_age?: number | null
+          profile_image_url?: string | null
+          profile_image_urls?: string[]
+          relationship_status?: string | null
+          smoking_status?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           age?: number | null
+          bio?: string | null
+          character_preferences?: Json
+          city_id?: string | null
+          computed_age?: number | null
+          content_preferences?: Json
           conversation_preferences?: string | null
           created_at?: string
+          date_of_birth?: string | null
+          first_name?: string | null
           gender?: string | null
           id?: string
           interests?: string[] | null
+          last_name?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_step?: number
+          preferred_distance_km?: number | null
+          preferred_max_age?: number | null
+          preferred_min_age?: number | null
+          profile_image_url?: string | null
+          profile_image_urls?: string[]
+          relationship_status?: string | null
+          smoking_status?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "client_profiles_city_id_fkey"
+            columns: ["city_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_cities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_handling_cycles: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          end_reason: string | null
+          ended_at: string | null
+          id: string
+          operator_id: string
+          started_at: string
+          work_item_id: string | null
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
+          id?: string
+          operator_id: string
+          started_at?: string
+          work_item_id?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
+          id?: string
+          operator_id?: string
+          started_at?: string
+          work_item_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_handling_cycles_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_handling_cycles_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_handling_cycles_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "conversation_work_items"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       conversation_locks: {
         Row: {
@@ -620,6 +734,42 @@ export type Database = {
             columns: ["locked_by_operator_id"]
             isOneToOne: false
             referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_read_states: {
+        Row: {
+          conversation_id: string
+          last_read_at: string
+          last_read_message_id: string | null
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          last_read_at?: string
+          last_read_message_id?: string | null
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          last_read_at?: string
+          last_read_message_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_read_states_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_read_states_last_read_message_id_fkey"
+            columns: ["last_read_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
@@ -691,97 +841,6 @@ export type Database = {
             columns: ["responsible_operator_id"]
             isOneToOne: false
             referencedRelation: "operators"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      conversation_handling_cycles: {
-        Row: {
-          conversation_id: string
-          created_at: string
-          end_reason: string | null
-          ended_at: string | null
-          id: string
-          operator_id: string
-          started_at: string
-          work_item_id: string | null
-        }
-        Insert: {
-          conversation_id: string
-          created_at?: string
-          end_reason?: string | null
-          ended_at?: string | null
-          id?: string
-          operator_id: string
-          started_at?: string
-          work_item_id?: string | null
-        }
-        Update: {
-          conversation_id?: string
-          created_at?: string
-          end_reason?: string | null
-          ended_at?: string | null
-          id?: string
-          operator_id?: string
-          started_at?: string
-          work_item_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conversation_handling_cycles_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conversation_handling_cycles_operator_id_fkey"
-            columns: ["operator_id"]
-            isOneToOne: false
-            referencedRelation: "operators"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conversation_handling_cycles_work_item_id_fkey"
-            columns: ["work_item_id"]
-            isOneToOne: false
-            referencedRelation: "conversation_work_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      conversation_read_states: {
-        Row: {
-          conversation_id: string
-          last_read_at: string
-          last_read_message_id: string | null
-          user_id: string
-        }
-        Insert: {
-          conversation_id: string
-          last_read_at?: string
-          last_read_message_id?: string | null
-          user_id: string
-        }
-        Update: {
-          conversation_id?: string
-          last_read_at?: string
-          last_read_message_id?: string | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conversation_read_states_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conversation_read_states_last_read_message_id_fkey"
-            columns: ["last_read_message_id"]
-            isOneToOne: false
-            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
@@ -1036,6 +1095,8 @@ export type Database = {
           display_name_he: string
           id: string
           is_active: boolean
+          latitude: number | null
+          longitude: number | null
           slug: string
         }
         Insert: {
@@ -1043,6 +1104,8 @@ export type Database = {
           display_name_he: string
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           slug: string
         }
         Update: {
@@ -1050,6 +1113,8 @@ export type Database = {
           display_name_he?: string
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           slug?: string
         }
         Relationships: []
@@ -1966,11 +2031,8 @@ export type Database = {
           sticker_id: string
         }[]
       }
+      claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
-      claim_new_conversation: {
-        Args: { _work_item_id: string }
-        Returns: Json
-      }
       complete_sticker_hard_delete_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: undefined
@@ -2228,6 +2290,14 @@ export type Database = {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
       }
+      get_operator_conversation_client_profile: {
+        Args: { _conversation_id: string }
+        Returns: {
+          age: number
+          conversation_preferences: string
+          interests: string[]
+        }[]
+      }
       get_operator_media_catalog: {
         Args: { _conversation_id: string }
         Returns: {
@@ -2336,7 +2406,6 @@ export type Database = {
         Args: { _conversation_id: string; _reason?: string }
         Returns: Json
       }
-      return_stale_work_items_to_new: { Args: never; Returns: number }
       reserve_admin_character_media_asset: {
         Args: { _asset_id: string; _conversation_id: string }
         Returns: Json
@@ -2381,6 +2450,7 @@ export type Database = {
         Args: { _asset_id: string }
         Returns: Json
       }
+      return_stale_work_items_to_new: { Args: never; Returns: number }
       send_admin_media_message: {
         Args: { _caption?: string; _reservation_id: string }
         Returns: Json
