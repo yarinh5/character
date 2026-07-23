@@ -8,6 +8,9 @@ export type DiscoveryFilters = {
   min_age: number | null;
   max_age: number | null;
   city_id: string | null;
+  favorites_only: boolean;
+  recycled_only: boolean;
+  interest: string | null;
 };
 export type DiscoveryCharacterWithFilters = DiscoveryCharacter & {
   filtersSnapshot: DiscoveryFilters;
@@ -21,6 +24,9 @@ export const EMPTY_DISCOVERY_FILTERS: DiscoveryFilters = {
   min_age: null,
   max_age: null,
   city_id: null,
+  favorites_only: false,
+  recycled_only: false,
+  interest: null,
 };
 
 function isBusinessError(error: unknown, code: string) {
@@ -32,6 +38,9 @@ function snapshotFilters(filters: DiscoveryFilters): DiscoveryFilters {
     min_age: filters.min_age,
     max_age: filters.max_age,
     city_id: filters.city_id,
+    favorites_only: filters.favorites_only,
+    recycled_only: filters.recycled_only,
+    interest: filters.interest,
   };
 }
 
@@ -50,7 +59,10 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   const queryClient = useQueryClient();
   const [dismissedCard, setDismissedCard] = useState<DismissedCard | null>(null);
   const [favoriteOverride, setFavoriteOverride] = useState<boolean | undefined>();
-  const filtersSnapshot = useMemo(() => snapshotFilters(filters), [filters.city_id, filters.max_age, filters.min_age]);
+  const filtersSnapshot = useMemo(
+    () => snapshotFilters(filters),
+    [filters.city_id, filters.favorites_only, filters.interest, filters.max_age, filters.min_age, filters.recycled_only],
+  );
   const filtersKey = JSON.stringify(filtersSnapshot);
   const queryKey = ["discovery-card", userId, filtersKey] as const;
 

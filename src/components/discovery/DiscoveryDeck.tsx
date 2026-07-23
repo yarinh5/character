@@ -15,6 +15,7 @@ type DiscoveryDeckProps = {
   onLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
+  onViewProfile: () => void;
 };
 
 export function DiscoveryDeck({ character, ...props }: DiscoveryDeckProps) {

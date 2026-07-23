@@ -49,6 +49,7 @@ import { Route as AcceptInviteTokenRouteImport } from './routes/accept-invite.$t
 import { Route as AdminConversationsIndexRouteImport } from './routes/admin.conversations.index'
 import { Route as OperatorChatConversationIdRouteImport } from './routes/operator.chat.$conversationId'
 import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$conversationId'
+import { Route as AppCharactersCharacterIdRouteImport } from './routes/app.characters.$characterId'
 import { Route as AdminConversationsConversationIdRouteImport } from './routes/admin.conversations.$conversationId'
 
 const TermsRoute = TermsRouteImport.update({
@@ -252,6 +253,12 @@ const AppChatConversationIdRoute = AppChatConversationIdRouteImport.update({
   path: '/chat/$conversationId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCharactersCharacterIdRoute =
+  AppCharactersCharacterIdRouteImport.update({
+    id: '/$characterId',
+    path: '/$characterId',
+    getParentRoute: () => AppCharactersRoute,
+  } as any)
 const AdminConversationsConversationIdRoute =
   AdminConversationsConversationIdRouteImport.update({
     id: '/$conversationId',
@@ -284,7 +291,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
-  '/app/characters': typeof AppCharactersRoute
+  '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
   '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
@@ -298,6 +305,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/operator/': typeof OperatorIndexRoute
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
+  '/app/characters/$characterId': typeof AppCharactersCharacterIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
   '/admin/conversations/': typeof AdminConversationsIndexRoute
@@ -323,7 +331,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
-  '/app/characters': typeof AppCharactersRoute
+  '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
   '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
@@ -337,6 +345,7 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/operator': typeof OperatorIndexRoute
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
+  '/app/characters/$characterId': typeof AppCharactersCharacterIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
   '/admin/conversations': typeof AdminConversationsIndexRoute
@@ -367,7 +376,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
   '/admin/users': typeof AdminUsersRoute
-  '/app/characters': typeof AppCharactersRoute
+  '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
   '/app/favorites': typeof AppFavoritesRoute
   '/app/onboarding': typeof AppOnboardingRoute
@@ -381,6 +390,7 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/operator/': typeof OperatorIndexRoute
   '/admin/conversations/$conversationId': typeof AdminConversationsConversationIdRoute
+  '/app/characters/$characterId': typeof AppCharactersCharacterIdRoute
   '/app/chat/$conversationId': typeof AppChatConversationIdRoute
   '/operator/chat/$conversationId': typeof OperatorChatConversationIdRoute
   '/admin/conversations/': typeof AdminConversationsIndexRoute
@@ -426,6 +436,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/operator/'
     | '/admin/conversations/$conversationId'
+    | '/app/characters/$characterId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
     | '/admin/conversations/'
@@ -465,6 +476,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/operator'
     | '/admin/conversations/$conversationId'
+    | '/app/characters/$characterId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
     | '/admin/conversations'
@@ -508,6 +520,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/operator/'
     | '/admin/conversations/$conversationId'
+    | '/app/characters/$characterId'
     | '/app/chat/$conversationId'
     | '/operator/chat/$conversationId'
     | '/admin/conversations/'
@@ -810,6 +823,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppChatConversationIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/characters/$characterId': {
+      id: '/app/characters/$characterId'
+      path: '/$characterId'
+      fullPath: '/app/characters/$characterId'
+      preLoaderRoute: typeof AppCharactersCharacterIdRouteImport
+      parentRoute: typeof AppCharactersRoute
+    }
     '/admin/conversations/$conversationId': {
       id: '/admin/conversations/$conversationId'
       path: '/$conversationId'
@@ -867,8 +887,20 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface AppCharactersRouteChildren {
+  AppCharactersCharacterIdRoute: typeof AppCharactersCharacterIdRoute
+}
+
+const AppCharactersRouteChildren: AppCharactersRouteChildren = {
+  AppCharactersCharacterIdRoute: AppCharactersCharacterIdRoute,
+}
+
+const AppCharactersRouteWithChildren = AppCharactersRoute._addFileChildren(
+  AppCharactersRouteChildren,
+)
+
 interface AppRouteChildren {
-  AppCharactersRoute: typeof AppCharactersRoute
+  AppCharactersRoute: typeof AppCharactersRouteWithChildren
   AppConversationsRoute: typeof AppConversationsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppOnboardingRoute: typeof AppOnboardingRoute
@@ -879,7 +911,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppCharactersRoute: AppCharactersRoute,
+  AppCharactersRoute: AppCharactersRouteWithChildren,
   AppConversationsRoute: AppConversationsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppOnboardingRoute: AppOnboardingRoute,

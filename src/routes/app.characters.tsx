@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Heart, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -13,11 +13,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const Route = createFileRoute("/app/characters")({
-  component: CharactersPage,
+  component: CharactersRoute,
 });
 
 function errorMessage(error: unknown, fallback: string) {
   return typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback;
+}
+
+function CharactersRoute() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  return pathname === "/app/characters" ? <CharactersPage /> : <Outlet />;
 }
 
 function CharactersPage() {
@@ -121,6 +126,9 @@ function CharactersPage() {
               onLike={() => void handleSwipe("like")}
               onFavorite={() => void handleFavorite()}
               onStartChat={() => void startChat()}
+              onViewProfile={() =>
+                void navigate({ to: "/app/characters/$characterId", params: { characterId: character.id } })
+              }
             />
           )}
         </div>

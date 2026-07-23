@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FilterX } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { DiscoveryFilters } from "@/hooks/useDiscovery";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
@@ -12,29 +14,44 @@ type DiscoveryCity = {
   display_name_he: string;
 };
 
+type DiscoveryFilterData = {
+  cities: DiscoveryCity[];
+  interests: string[];
+};
+
 type DiscoveryFiltersProps = {
   filters: DiscoveryFilters;
   onChange: (filters: DiscoveryFilters) => void;
 };
 
 async function fetchAvailableCities() {
-  const [{ data: cities, error: citiesError }, { count, error: charactersError }] = await Promise.all([
+  const [{ data: cities, error: citiesError }, { data: characters, error: charactersError }] = await Promise.all([
     supabase.from("discovery_cities").select("id, display_name_he").eq("is_active", true).order("display_name_he"),
     supabase
       .from("characters")
-      .select("id", { count: "exact", head: true })
+      .select("interests, discovery_city_id")
       .eq("is_active", true)
-      .eq("is_visible", true)
-      .not("discovery_city_id", "is", null),
+      .eq("is_visible", true),
   ]);
 
   if (citiesError) throw citiesError;
   if (charactersError) throw charactersError;
 
+  const assignedCityIds = new Set(
+    (characters ?? []).map((character) => character.discovery_city_id).filter((cityId): cityId is string => Boolean(cityId)),
+  );
+  const interests = Array.from(
+    new Set(
+      (characters ?? []).flatMap((character) =>
+        (character.interests ?? []).map((interest) => interest.trim()).filter(Boolean),
+      ),
+    ),
+  ).sort((a, b) => a.localeCompare(b, "he"));
+
   return {
-    cities: (cities ?? []) as DiscoveryCity[],
-    hasAssignedCharacters: (count ?? 0) > 0,
-  };
+    cities: ((cities ?? []) as DiscoveryCity[]).filter((city) => assignedCityIds.has(city.id)),
+    interests,
+  } satisfies DiscoveryFilterData;
 }
 
 export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
@@ -44,8 +61,28 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
   });
   const ageRange = [filters.min_age ?? 18, filters.max_age ?? 120];
   const hasAgeFilter = filters.min_age !== null || filters.max_age !== null;
-  const showCityFilter = Boolean(citiesQuery.data?.hasAssignedCharacters && citiesQuery.data.cities.length > 0);
-  const hasActiveFilters = hasAgeFilter || filters.city_id !== null;
+  const showCityFilter = Boolean(citiesQuery.data?.cities.length);
+  const showInterestFilter = Boolean(citiesQuery.data?.interests.length);
+  const hasActiveFilters =
+    hasAgeFilter ||
+    filters.city_id !== null ||
+    filters.favorites_only ||
+    filters.recycled_only ||
+    filters.interest !== null;
+
+  useEffect(() => {
+    if (!citiesQuery.data) return;
+
+    const cityIsAvailable = !filters.city_id || citiesQuery.data.cities.some((city) => city.id === filters.city_id);
+    const interestIsAvailable = !filters.interest || citiesQuery.data.interests.includes(filters.interest);
+    if (cityIsAvailable && interestIsAvailable) return;
+
+    onChange({
+      ...filters,
+      city_id: cityIsAvailable ? filters.city_id : null,
+      interest: interestIsAvailable ? filters.interest : null,
+    });
+  }, [citiesQuery.data, filters, onChange]);
 
   return (
     <section className="mb-6 border-y py-4" aria-label="סינון גילוי">
@@ -56,7 +93,16 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => onChange({ min_age: null, max_age: null, city_id: null })}
+            onClick={() =>
+              onChange({
+                min_age: null,
+                max_age: null,
+                city_id: null,
+                favorites_only: false,
+                recycled_only: false,
+                interest: null,
+              })
+            }
           >
             <FilterX className="h-4 w-4" />
             נקה
@@ -106,6 +152,54 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
           </Select>
         </div>
       )}
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {showInterestFilter && (
+          <div className="space-y-2">
+          <Label htmlFor="discovery-interest">תחום עניין</Label>
+          <Select
+            value={filters.interest ?? "all"}
+            onValueChange={(interest) => onChange({ ...filters, interest: interest === "all" ? null : interest })}
+          >
+            <SelectTrigger id="discovery-interest">
+              <SelectValue placeholder="כל תחומי העניין" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">כל תחומי העניין</SelectItem>
+              {citiesQuery.data?.interests.map((interest) => (
+                <SelectItem key={interest} value={interest}>
+                  {interest}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <Label htmlFor="discovery-recycled">הצגה</Label>
+          <Select
+            value={filters.recycled_only ? "recycled" : "all"}
+            onValueChange={(value) => onChange({ ...filters, recycled_only: value === "recycled" })}
+          >
+            <SelectTrigger id="discovery-recycled">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">כל הדמויות</SelectItem>
+              <SelectItem value="recycled">מדמויות שנצפו בעבר</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <label className="mt-4 flex w-fit cursor-pointer items-center gap-2 text-sm font-medium">
+        <Checkbox
+          checked={filters.favorites_only}
+          onCheckedChange={(checked) => onChange({ ...filters, favorites_only: checked === true })}
+        />
+        מועדפים בלבד
+      </label>
     </section>
   );
 }

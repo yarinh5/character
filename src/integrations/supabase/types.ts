@@ -2069,6 +2069,13 @@ export type Database = {
           source_path: string
         }[]
       }
+      create_discovery_city: {
+        Args: { _display_name_he: string }
+        Returns: {
+          display_name_he: string
+          id: string
+        }[]
+      }
       create_notification: {
         Args: {
           _body?: string
@@ -2232,6 +2239,25 @@ export type Database = {
           width: number
         }[]
       }
+      get_character_profile: {
+        Args: { _character_id: string }
+        Returns: {
+          availability_status: Database["public"]["Enums"]["availability_status"]
+          avatar_url: string
+          category: string
+          city_name: string
+          conversation_id: string
+          fictional_age: number
+          full_description: string
+          gallery_images: string[]
+          id: string
+          interests: string[]
+          is_favorite: boolean
+          name: string
+          personality: string
+          short_description: string
+        }[]
+      }
       get_conversation_read_summary: {
         Args: { _conversation_id: string }
         Returns: Json
@@ -2249,6 +2275,26 @@ export type Database = {
         }[]
       }
       get_discovery_characters: {
+        Args: { _filters?: Json }
+        Returns: {
+          availability_status: Database["public"]["Enums"]["availability_status"]
+          avatar_url: string
+          category: string
+          conversation_id: string
+          created_at: string
+          cycle_id: string
+          cycle_number: number
+          fictional_age: number
+          id: string
+          interests: string[]
+          is_favorite: boolean
+          is_liked: boolean
+          is_recycled: boolean
+          name: string
+          short_description: string
+        }[]
+      }
+      get_discovery_characters_base: {
         Args: { _filters?: Json }
         Returns: {
           availability_status: Database["public"]["Enums"]["availability_status"]

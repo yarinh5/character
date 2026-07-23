@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Check, Heart, MessageCirclePlus, Star, X } from "lucide-react";
+import { Check, Heart, MessageCirclePlus, Star, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -13,6 +13,7 @@ type DiscoveryActionBarProps = {
   onLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
+  onViewProfile: () => void;
 };
 
 function IconAction({
@@ -42,6 +43,7 @@ export function DiscoveryActionBar({
   onLike,
   onFavorite,
   onStartChat,
+  onViewProfile,
 }: DiscoveryActionBarProps) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-3" onPointerDown={(event) => event.stopPropagation()}>
@@ -71,6 +73,10 @@ export function DiscoveryActionBar({
       >
         {isLiked ? <Check className="h-5 w-5" /> : <Heart className="h-5 w-5 fill-current" />}
       </IconAction>
+      <Button variant="outline" disabled={disabled} onClick={onViewProfile} className="h-12 shrink-0 whitespace-nowrap px-4">
+        <UserRound className="h-4 w-4" />
+        לפרופיל
+      </Button>
       <Button variant="secondary" disabled={disabled || startingChat} onClick={onStartChat} className="h-12 px-4">
         <MessageCirclePlus className="h-4 w-4" />
         {startingChat ? "פותח שיחה..." : conversationId ? "המשך שיחה" : "התחל שיחה"}

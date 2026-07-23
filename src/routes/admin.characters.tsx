@@ -24,8 +24,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { Plus, Edit, Eye, EyeOff, Images } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Edit, Eye, EyeOff, Images } from "lucide-react";
 import { AvatarUpload } from "@/components/common/AvatarUpload";
 import { CharacterMediaDialog } from "@/components/admin/CharacterMediaDialog";
 
@@ -42,6 +61,7 @@ type CharRow = {
   full_description: string | null;
   personality: string | null;
   interests: string[] | null;
+  discovery_city_id: string | null;
   avatar_url: string | null;
   availability_status: "available" | "busy" | "offline";
   is_active: boolean;
@@ -56,6 +76,7 @@ const empty: Partial<CharRow> = {
   full_description: "",
   personality: "",
   interests: [],
+  discovery_city_id: null,
   avatar_url: "",
   availability_status: "available",
   is_active: true,
@@ -200,12 +221,56 @@ function CharacterDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const qc = useQueryClient();
   const [form, setForm] = useState(char);
   const [interestsText, setInterestsText] = useState((char.interests ?? []).join(", "));
   const [busy, setBusy] = useState(false);
+  const [cityOpen, setCityOpen] = useState(false);
+  const [cityQuery, setCityQuery] = useState("");
+  const [cityToCreate, setCityToCreate] = useState<string | null>(null);
+  const [creatingCity, setCreatingCity] = useState(false);
   const isNew = !char.id;
+  const citiesQuery = useQuery({
+    queryKey: ["admin-discovery-cities"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("discovery_cities")
+        .select("id, display_name_he")
+        .eq("is_active", true)
+        .order("display_name_he");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
-  const set = <K extends keyof CharRow>(k: K, v: any) => setForm((f) => ({ ...f, [k]: v }));
+  const set = <K extends keyof CharRow>(k: K, v: CharRow[K] | null) =>
+    setForm((f) => ({ ...f, [k]: v }));
+  const selectedCity = citiesQuery.data?.find((city) => city.id === form.discovery_city_id);
+  const normalizedCityQuery = cityQuery.trim().replace(/\s+/g, " ");
+  const cityAlreadyExists = citiesQuery.data?.some(
+    (city) => city.display_name_he.trim().toLocaleLowerCase("he") === normalizedCityQuery.toLocaleLowerCase("he"),
+  );
+
+  const createCity = async () => {
+    if (!cityToCreate) return;
+
+    setCreatingCity(true);
+    const { data, error } = await supabase.rpc("create_discovery_city", {
+      _display_name_he: cityToCreate,
+    });
+    setCreatingCity(false);
+
+    if (error || !data?.[0]) {
+      toast.error("יצירת העיר נכשלה");
+      return;
+    }
+
+    set("discovery_city_id", data[0].id);
+    setCityQuery("");
+    setCityToCreate(null);
+    await qc.invalidateQueries({ queryKey: ["admin-discovery-cities"] });
+    toast.success("העיר נוספה ונבחרה לדמות");
+  };
 
   const submit = async () => {
     if (!form.name?.trim()) {
@@ -224,6 +289,7 @@ function CharacterDialog({
       short_description: form.short_description?.trim() || null,
       full_description: form.full_description?.trim() || null,
       personality: form.personality?.trim() || null,
+      discovery_city_id: form.discovery_city_id ?? null,
       interests: interestsText
         .split(",")
         .map((s) => s.trim())
@@ -271,6 +337,74 @@ function CharacterDialog({
             <Input value={form.category ?? ""} onChange={(e) => set("category", e.target.value)} />
           </div>
           <div>
+            <Label>עיר גילוי</Label>
+            <Popover open={cityOpen} onOpenChange={setCityOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={cityOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {selectedCity?.display_name_he ?? "ללא עיר"}
+                  <ChevronsUpDown className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command shouldFilter>
+                  <CommandInput
+                    placeholder="חיפוש עיר..."
+                    value={cityQuery}
+                    onValueChange={setCityQuery}
+                  />
+                  <CommandList>
+                    <CommandEmpty>לא נמצאה עיר קיימת.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="no-city"
+                        onSelect={() => {
+                          set("discovery_city_id", null);
+                          setCityOpen(false);
+                          setCityQuery("");
+                        }}
+                      >
+                        ללא עיר
+                        {!form.discovery_city_id && <Check className="mr-auto h-4 w-4" />}
+                      </CommandItem>
+                      {(citiesQuery.data ?? []).map((city) => (
+                        <CommandItem
+                          key={city.id}
+                          value={city.display_name_he}
+                          onSelect={() => {
+                            set("discovery_city_id", city.id);
+                            setCityOpen(false);
+                            setCityQuery("");
+                          }}
+                        >
+                          {city.display_name_he}
+                          {form.discovery_city_id === city.id && <Check className="mr-auto h-4 w-4" />}
+                        </CommandItem>
+                      ))}
+                      {normalizedCityQuery && !cityAlreadyExists && (
+                        <CommandItem
+                          value={`create-${normalizedCityQuery}`}
+                          onSelect={() => {
+                            setCityOpen(false);
+                            setCityToCreate(normalizedCityQuery);
+                          }}
+                        >
+                          <Plus className="h-4 w-4" />
+                          {`הוסף "${normalizedCityQuery}"`}
+                        </CommandItem>
+                      )}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div>
             <Label>תיאור קצר</Label>
             <Input value={form.short_description ?? ""} onChange={(e) => set("short_description", e.target.value)} />
           </div>
@@ -303,7 +437,10 @@ function CharacterDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>סטטוס זמינות</Label>
-              <Select value={form.availability_status ?? "available"} onValueChange={(v) => set("availability_status", v)}>
+              <Select
+                value={form.availability_status ?? "available"}
+                onValueChange={(v) => set("availability_status", v as CharRow["availability_status"])}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="available">זמין</SelectItem>
@@ -327,6 +464,22 @@ function CharacterDialog({
           <Button variant="outline" onClick={onClose}>ביטול</Button>
         </DialogFooter>
       </DialogContent>
+      <AlertDialog open={cityToCreate !== null} onOpenChange={(open) => !open && setCityToCreate(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>להוסיף עיר חדשה?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cityToCreate ? `העיר "${cityToCreate}" תתווסף כעיר פעילה ותיבחר לדמות.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={creatingCity}>ביטול</AlertDialogCancel>
+            <AlertDialogAction disabled={creatingCity} onClick={createCity}>
+              {creatingCity ? "מוסיף..." : "הוסף עיר"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

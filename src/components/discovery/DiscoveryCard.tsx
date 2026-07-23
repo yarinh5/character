@@ -18,6 +18,7 @@ type DiscoveryCardProps = {
   onLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
+  onViewProfile: () => void;
 };
 
 export function DiscoveryCard({
@@ -32,6 +33,7 @@ export function DiscoveryCard({
   onLike,
   onFavorite,
   onStartChat,
+  onViewProfile,
 }: DiscoveryCardProps) {
   const { dragX, isDragging, handlers } = useSwipeGesture({
     disabled,
@@ -116,6 +118,7 @@ export function DiscoveryCard({
           onLike={onLike}
           onFavorite={onFavorite}
           onStartChat={onStartChat}
+          onViewProfile={onViewProfile}
         />
       </CardContent>
     </Card>
