@@ -1543,6 +1543,45 @@ export type Database = {
           },
         ]
       }
+      operator_client_blocks: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by_operator_id: string
+          operator_id: string
+          reason: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by_operator_id: string
+          operator_id: string
+          reason?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by_operator_id?: string
+          operator_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_client_blocks_created_by_operator_id_fkey"
+            columns: ["created_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_client_blocks_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       operator_monthly_scores: {
         Row: {
           message_count: number
@@ -1568,6 +1607,77 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "operator_monthly_scores_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operator_outreach_attempts: {
+        Row: {
+          character_id: string
+          client_id: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          idempotency_key: string
+          message_content: string
+          message_id: string | null
+          operator_id: string
+          result: Json
+          status: string
+        }
+        Insert: {
+          character_id: string
+          client_id: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          message_content: string
+          message_id?: string | null
+          operator_id: string
+          result?: Json
+          status?: string
+        }
+        Update: {
+          character_id?: string
+          client_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          message_content?: string
+          message_id?: string | null
+          operator_id?: string
+          result?: Json
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_outreach_attempts_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_outreach_attempts_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_outreach_attempts_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_outreach_attempts_operator_id_fkey"
             columns: ["operator_id"]
             isOneToOne: false
             referencedRelation: "operators"
@@ -2351,6 +2461,16 @@ export type Database = {
           state: string
         }[]
       }
+      get_operator_online_candidates: {
+        Args: { _filters?: Json }
+        Returns: {
+          avatar_url: string
+          character_options: Json
+          client_id: string
+          display_name: string
+          has_existing_conversation: boolean
+        }[]
+      }
       get_operator_media_catalog: {
         Args: { _conversation_id: string }
         Returns: {
@@ -2573,6 +2693,15 @@ export type Database = {
       start_or_get_conversation: {
         Args: { _character_id: string }
         Returns: string
+      }
+      start_operator_outreach: {
+        Args: {
+          _character_id: string
+          _client_id: string
+          _idempotency_key: string
+          _message: string
+        }
+        Returns: Json
       }
       touch_active_conversation: {
         Args: { _conversation_id: string; _role: string }
