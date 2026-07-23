@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
@@ -94,6 +94,7 @@ type CustomerInfoEntry = {
 };
 
 type ConcurrencyMode = "open" | "warning" | "lock";
+type ConversationResponsibility = "mine" | "available" | "other" | "closed";
 
 type ConversationLock = {
   conversation_id: string;
@@ -135,6 +136,7 @@ function OperatorChatPage() {
   const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
   const [lockTimeoutMinutes, setLockTimeoutMinutes] = useState(10);
   const [conversationLock, setConversationLock] = useState<ConversationLock | null>(null);
+  const [responsibility, setResponsibility] = useState<ConversationResponsibility | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
   const [releasingConversation, setReleasingConversation] = useState(false);
   const [, setLockClock] = useState(0);
@@ -160,6 +162,21 @@ function OperatorChatPage() {
     role: isAdmin ? "admin" : "operator",
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
   });
+
+  const refreshResponsibility = useCallback(async () => {
+    if (isAdmin || !operator?.id) {
+      setResponsibility(null);
+      return;
+    }
+
+    const { data, error } = await supabase.rpc("get_operator_conversation_responsibility", {
+      _conversation_id: conversationId,
+    });
+    const state = data?.[0]?.state;
+    if (!error && (state === "mine" || state === "available" || state === "other" || state === "closed")) {
+      setResponsibility(state);
+    }
+  }, [conversationId, isAdmin, operator?.id]);
 
   const hydrateMessageDecorations = async (message: Msg) => {
     const [{ data: attachments }, { data: stickers }] = await Promise.all([
@@ -255,6 +272,7 @@ function OperatorChatPage() {
         }
       }
       setConv(c as unknown as Conv);
+      await refreshResponsibility();
 
       await (supabase as any).rpc("cleanup_expired_conversation_locks");
 
@@ -347,7 +365,7 @@ function OperatorChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, operator, isAdmin]);
+  }, [conversationId, operator, isAdmin, refreshResponsibility]);
 
   // Realtime
   useEffect(() => {
@@ -458,11 +476,23 @@ function OperatorChatPage() {
           setConversationLock((data ?? null) as unknown as ConversationLock | null);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_handling_cycles",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          void refreshResponsibility();
+        },
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [conversationId, conv?.client_id]);
+  }, [conversationId, conv?.client_id, refreshResponsibility]);
 
   useEffect(() => {
     if (!scrollRef.current || loadingOlderRef.current) return;
@@ -552,6 +582,8 @@ function OperatorChatPage() {
       }
 
       toast.success("השיחה הוחזרה לפניות החדשות.");
+      setResponsibility("available");
+      await newQueue.refetch();
       navigate({ to: "/operator/new" });
     } finally {
       setReleasingConversation(false);
@@ -619,6 +651,7 @@ function OperatorChatPage() {
       shouldStickToBottomRef.current = true;
       setMessages((prev) => mergeMessagesById(prev, [message]));
     }
+    void refreshResponsibility();
     setInput("");
   };
 
@@ -680,6 +713,7 @@ function OperatorChatPage() {
       return;
     }
     setConv({ ...conv, status });
+    void refreshResponsibility();
     toast.success("הסטטוס עודכן");
   };
 
@@ -723,6 +757,7 @@ function OperatorChatPage() {
   const lockHeldByMe = !!activeLock && !!operator && activeLock.locked_by_operator_id === operator.id;
   const lockHeldByOther = !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
   const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
+  const canReleaseConversation = responsibility === "mine";
   const clientTyping = typingUsers.some((presence) => presence.role === "client");
   const coworkerTyping = typingUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
   const otherActiveOperators = activeUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
@@ -754,7 +789,7 @@ function OperatorChatPage() {
           </p>
         </div>
         <div className="hidden md:flex gap-1">
-          {!closed && operator && !isAdmin && (
+          {!closed && operator && !isAdmin && canReleaseConversation && (
             <Button
               variant="outline"
               size="sm"
@@ -831,7 +866,7 @@ function OperatorChatPage() {
                   canEdit={!!operator}
                 />
                 <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
-                {!closed && operator && !isAdmin && (
+                {!closed && operator && !isAdmin && canReleaseConversation && (
                   <Button
                     variant="outline"
                     className="w-full"
@@ -858,6 +893,7 @@ function OperatorChatPage() {
         onAcquire={acquireLock}
         onRelease={releaseLock}
       />
+      <HandlingResponsibilityBanner responsibility={closed ? "closed" : responsibility} />
 
       <div className="flex-1 flex min-h-0">
         {/* Messages */}
@@ -1181,6 +1217,32 @@ function LockModeBanner({
             {isAdmin && !isMine ? "שחרור מנהל" : "שחרר שיחה"}
           </Button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function HandlingResponsibilityBanner({ responsibility }: { responsibility: ConversationResponsibility | null }) {
+  if (!responsibility) return null;
+
+  const copy = {
+    mine: "השיחה בטיפולך",
+    available: "השיחה פנויה",
+    other: "השיחה בטיפול עובד אחר",
+    closed: "השיחה סגורה",
+  } satisfies Record<ConversationResponsibility, string>;
+  const tone = {
+    mine: "border-success/30 bg-success/10 text-success",
+    available: "border-primary/30 bg-primary/10 text-primary",
+    other: "border-warning/30 bg-warning/10 text-warning",
+    closed: "border-muted bg-muted text-muted-foreground",
+  } satisfies Record<ConversationResponsibility, string>;
+
+  return (
+    <div className={`border-b px-4 py-2 text-sm ${tone[responsibility]}`} dir="rtl">
+      <div className="flex items-center gap-2">
+        <Info className="h-4 w-4 shrink-0" />
+        <span className="font-medium">{copy[responsibility]}</span>
       </div>
     </div>
   );

@@ -2345,6 +2345,12 @@ export type Database = {
           interests: string[]
         }[]
       }
+      get_operator_conversation_responsibility: {
+        Args: { _conversation_id: string }
+        Returns: {
+          state: string
+        }[]
+      }
       get_operator_media_catalog: {
         Args: { _conversation_id: string }
         Returns: {
