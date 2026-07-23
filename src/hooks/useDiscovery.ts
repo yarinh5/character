@@ -12,8 +12,17 @@ export type DiscoveryFilters = {
   recycled_only: boolean;
   interest: string | null;
 };
+
+type DiscoveryRpcFilters = {
+  min_age?: number;
+  max_age?: number;
+  city_id?: string;
+  favorites_only: boolean;
+  recycled_only: boolean;
+  interest?: string;
+};
 export type DiscoveryCharacterWithFilters = DiscoveryCharacter & {
-  filtersSnapshot: DiscoveryFilters;
+  filtersSnapshot: DiscoveryRpcFilters;
 };
 type Swipe = "like" | "pass";
 type DismissedCard = Pick<DiscoveryCharacterWithFilters, "id" | "cycle_id">;
@@ -33,19 +42,21 @@ function isBusinessError(error: unknown, code: string) {
   return typeof error === "object" && error !== null && "message" in error && String(error.message).includes(code);
 }
 
-function snapshotFilters(filters: DiscoveryFilters): DiscoveryFilters {
-  return {
-    min_age: filters.min_age,
-    max_age: filters.max_age,
-    city_id: filters.city_id,
+function serializeDiscoveryFilters(filters: DiscoveryFilters): DiscoveryRpcFilters {
+  const payload: DiscoveryRpcFilters = {
     favorites_only: filters.favorites_only,
     recycled_only: filters.recycled_only,
-    interest: filters.interest,
   };
+
+  if (filters.min_age !== null) payload.min_age = filters.min_age;
+  if (filters.max_age !== null) payload.max_age = filters.max_age;
+  if (filters.city_id !== null) payload.city_id = filters.city_id;
+  if (filters.interest !== null) payload.interest = filters.interest;
+
+  return payload;
 }
 
-async function fetchDiscoveryCharacter(filters: DiscoveryFilters): Promise<DiscoveryCharacterWithFilters | null> {
-  const filtersSnapshot = snapshotFilters(filters);
+async function fetchDiscoveryCharacter(filtersSnapshot: DiscoveryRpcFilters): Promise<DiscoveryCharacterWithFilters | null> {
   const { data, error } = await supabase.rpc("get_discovery_characters", {
     _filters: filtersSnapshot as Json,
   });
@@ -60,7 +71,7 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   const [dismissedCard, setDismissedCard] = useState<DismissedCard | null>(null);
   const [favoriteOverride, setFavoriteOverride] = useState<boolean | undefined>();
   const filtersSnapshot = useMemo(
-    () => snapshotFilters(filters),
+    () => serializeDiscoveryFilters(filters),
     [filters.city_id, filters.favorites_only, filters.interest, filters.max_age, filters.min_age, filters.recycled_only],
   );
   const filtersKey = JSON.stringify(filtersSnapshot);

@@ -24,6 +24,9 @@ type DiscoveryFiltersProps = {
   onChange: (filters: DiscoveryFilters) => void;
 };
 
+const AGE_MIN = 18;
+const AGE_MAX = 80;
+
 async function fetchAvailableCities() {
   const [{ data: cities, error: citiesError }, { data: characters, error: charactersError }] = await Promise.all([
     supabase.from("discovery_cities").select("id, display_name_he").eq("is_active", true).order("display_name_he"),
@@ -59,8 +62,14 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
     queryKey: ["discovery-filter-cities"],
     queryFn: fetchAvailableCities,
   });
-  const ageRange = [filters.min_age ?? 18, filters.max_age ?? 120];
+  const ageRange: [number, number] = [
+    Math.min(Math.max(filters.min_age ?? AGE_MIN, AGE_MIN), AGE_MAX),
+    Math.min(Math.max(filters.max_age ?? AGE_MAX, AGE_MIN), AGE_MAX),
+  ];
   const hasAgeFilter = filters.min_age !== null || filters.max_age !== null;
+  const ageRangeLabel = !hasAgeFilter
+    ? "כל הגילים"
+    : `גיל ${ageRange[0]}-${ageRange[1]}${ageRange[1] === AGE_MAX ? "+" : ""}`;
   const showCityFilter = Boolean(citiesQuery.data?.cities.length);
   const showInterestFilter = Boolean(citiesQuery.data?.interests.length);
   const hasActiveFilters =
@@ -87,7 +96,12 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
   return (
     <section className="mb-6 border-y py-4" aria-label="סינון גילוי">
       <div className="flex items-center justify-between gap-3">
-        <Label htmlFor="discovery-age-range">טווח גיל</Label>
+        <div className="flex items-baseline gap-2">
+          <Label htmlFor="discovery-age-range">טווח גיל</Label>
+          <span className={hasAgeFilter ? "text-sm font-medium text-foreground" : "text-sm text-muted-foreground"}>
+            {ageRangeLabel}
+          </span>
+        </div>
         {hasActiveFilters && (
           <Button
             type="button"
@@ -109,25 +123,29 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
           </Button>
         )}
       </div>
-      <div className="mt-4 space-y-2">
+      <div className="mt-3 rounded-md border bg-muted/30 px-4 py-3">
         <Slider
           id="discovery-age-range"
-          min={18}
-          max={120}
+          min={AGE_MIN}
+          max={AGE_MAX}
           step={1}
+          minStepsBetweenThumbs={1}
+          dir="ltr"
           value={ageRange}
-          onValueChange={([minAge, maxAge]) =>
+          onValueChange={([firstValue = AGE_MIN, secondValue = AGE_MAX]) => {
+            const minAge = Math.min(firstValue, secondValue);
+            const maxAge = Math.max(firstValue, secondValue);
             onChange({
               ...filters,
-              min_age: minAge,
-              max_age: maxAge,
-            })
-          }
+              min_age: minAge === AGE_MIN && maxAge === AGE_MAX ? null : minAge,
+              max_age: minAge === AGE_MIN && maxAge === AGE_MAX ? null : maxAge,
+            });
+          }}
           aria-label="טווח גיל"
         />
-        <div className="flex justify-between text-sm text-muted-foreground">
-          <span>{ageRange[0]}</span>
-          <span>{ageRange[1]}</span>
+        <div className="mt-2 flex justify-between text-sm text-muted-foreground" dir="ltr">
+          <span>{AGE_MIN}</span>
+          <span>{AGE_MAX}+</span>
         </div>
       </div>
 
