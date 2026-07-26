@@ -126,6 +126,7 @@ export type Database = {
           locked_derivatives_generated_at: string | null
           locked_price_credits: number | null
           locked_teaser_path: string | null
+          media_tag_id: string
           metadata: Json
           preview_generated_at: string | null
           preview_path: string | null
@@ -163,6 +164,7 @@ export type Database = {
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
           locked_teaser_path?: string | null
+          media_tag_id: string
           metadata?: Json
           preview_generated_at?: string | null
           preview_path?: string | null
@@ -200,6 +202,7 @@ export type Database = {
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
           locked_teaser_path?: string | null
+          media_tag_id?: string
           metadata?: Json
           preview_generated_at?: string | null
           preview_path?: string | null
@@ -220,6 +223,13 @@ export type Database = {
             columns: ["character_id"]
             isOneToOne: false
             referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_media_assets_media_tag_id_fkey"
+            columns: ["media_tag_id"]
+            isOneToOne: false
+            referencedRelation: "media_tags"
             referencedColumns: ["id"]
           },
         ]
@@ -1454,6 +1464,50 @@ export type Database = {
           },
         ]
       }
+      media_tags: {
+        Row: {
+          character_id: string | null
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_tags_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_settings: {
         Row: {
           assignment_enabled: boolean
@@ -2271,6 +2325,8 @@ export type Database = {
           locked_derivatives_generated_at: string
           locked_preview_available: boolean
           locked_price_credits: number
+          media_tag_id: string
+          media_tag_name: string
           preview_available: boolean
           processing_attempts: number
           processing_error_code: string
