@@ -2360,6 +2360,8 @@ export type Database = {
           locked_derivative_status: string
           locked_images_enabled: boolean
           locked_price_credits: number
+          media_tag_id: string
+          media_tag_name: string
           my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string

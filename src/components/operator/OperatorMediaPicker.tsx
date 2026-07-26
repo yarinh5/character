@@ -22,9 +22,9 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
-type CatalogAsset =
-  | Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number]
-  | Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
+type OperatorCatalogAsset = Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number];
+type AdminCatalogAsset = Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
+type CatalogAsset = OperatorCatalogAsset | AdminCatalogAsset;
 type DeliveryMode = "standard" | "locked";
 type MediaPickerActor = "operator" | "admin";
 
@@ -45,6 +45,17 @@ type ReservationResponse = {
 type SendResponse = {
   already_sent?: unknown;
 };
+
+type CatalogTag = {
+  id: string;
+  name: string;
+};
+
+function getCatalogTag(asset: CatalogAsset): CatalogTag | null {
+  if (!("media_tag_id" in asset) || !("media_tag_name" in asset)) return null;
+  if (typeof asset.media_tag_id !== "string" || typeof asset.media_tag_name !== "string") return null;
+  return { id: asset.media_tag_id, name: asset.media_tag_name };
+}
 
 function toDeliveryMode(value: unknown): DeliveryMode {
   return value === "locked" ? "locked" : "standard";
@@ -135,6 +146,7 @@ export function OperatorMediaPicker({
   const isMobile = useIsMobile();
   const [catalog, setCatalog] = useState<CatalogAsset[]>([]);
   const [catalogState, setCatalogState] = useState<"idle" | "loading" | "error" | "ready">("idle");
+  const [selectedTagId, setSelectedTagId] = useState("all");
   const [reservation, setReservation] = useState<SelectedReservation | null>(null);
   const [caption, setCaption] = useState("");
   const [reservingAssetId, setReservingAssetId] = useState<string | null>(null);
@@ -237,6 +249,30 @@ export function OperatorMediaPicker({
     () => (reservation ? new Date(reservation.expiresAt).getTime() - clock : 0),
     [clock, reservation],
   );
+
+  const availableTags = useMemo(() => {
+    if (actor !== "operator") return [];
+    const tags = new Map<string, CatalogTag>();
+    for (const asset of catalog) {
+      if (!asset.is_reservable && !asset.is_locked_reservable && !asset.is_reserved_by_me) continue;
+      const tag = getCatalogTag(asset);
+      if (tag) tags.set(tag.id, tag);
+    }
+    return [...tags.values()].sort((left, right) => left.name.localeCompare(right.name, "he"));
+  }, [actor, catalog]);
+
+  const visibleCatalog = useMemo(
+    () => selectedTagId === "all"
+      ? catalog
+      : catalog.filter((asset) => getCatalogTag(asset)?.id === selectedTagId),
+    [catalog, selectedTagId],
+  );
+
+  useEffect(() => {
+    if (selectedTagId !== "all" && !availableTags.some((tag) => tag.id === selectedTagId)) {
+      setSelectedTagId("all");
+    }
+  }, [availableTags, selectedTagId]);
 
   useEffect(() => {
     if (!reservation || remainingMilliseconds > 0) return;
@@ -474,8 +510,39 @@ export function OperatorMediaPicker({
             </div>
           )}
           {catalogState === "ready" && catalog.length > 0 && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {catalog.map((asset) => {
+            <div className="space-y-3">
+              {availableTags.length > 1 && (
+                <div className="flex gap-2 overflow-x-auto pb-1" aria-label="סינון מדיה לפי תגית">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={selectedTagId === "all" ? "default" : "outline"}
+                    className="shrink-0"
+                    onClick={() => setSelectedTagId("all")}
+                  >
+                    הכל
+                  </Button>
+                  {availableTags.map((tag) => (
+                    <Button
+                      key={tag.id}
+                      type="button"
+                      size="sm"
+                      variant={selectedTagId === tag.id ? "default" : "outline"}
+                      className="shrink-0"
+                      onClick={() => setSelectedTagId(tag.id)}
+                    >
+                      {tag.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {visibleCatalog.length === 0 ? (
+                <div className="flex h-32 items-center justify-center text-center text-sm text-muted-foreground">
+                  אין מדיה זמינה בתגית שנבחרה.
+                </div>
+              ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {visibleCatalog.map((asset) => {
                 const reserving = reservingAssetId === asset.id;
                 const accessMode: DeliveryMode =
                   actor === "admin" ? "standard" : asset.is_locked_reservable ? "locked" : "standard";
@@ -522,6 +589,8 @@ export function OperatorMediaPicker({
                   </button>
                 );
               })}
+              </div>
+              )}
             </div>
           )}
         </section>
