@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { ImagePlus, LoaderCircle, LockKeyhole, RefreshCw, RotateCcw, ShieldOff } from "lucide-react";
+import { Check, ImagePlus, LoaderCircle, LockKeyhole, Plus, RefreshCw, RotateCcw, ShieldOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -15,8 +15,20 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type MediaAsset = Database["public"]["Functions"]["get_admin_character_media_assets"]["Returns"][number];
+type MediaTag = Database["public"]["Functions"]["get_admin_media_tags"]["Returns"][number];
 
 type UploadIntentResponse = {
   asset_id?: unknown;
@@ -82,6 +94,8 @@ function AssetCard({
   onRetry,
   onPrepareLocked,
   onConfigureLocked,
+  tags,
+  onAssignTag,
 }: {
   asset: MediaAsset;
   busy: boolean;
@@ -90,6 +104,8 @@ function AssetCard({
   onRetry: () => void;
   onPrepareLocked: () => void;
   onConfigureLocked: (priceCredits: number | null) => void;
+  tags: MediaTag[];
+  onAssignTag: (tagId: string) => void;
 }) {
   const [price, setPrice] = useState(asset.locked_price_credits?.toString() ?? "");
   const details = [asset.content_type.replace("image/", ""), formatBytes(asset.byte_size), asset.width && asset.height ? `${asset.width} x ${asset.height}` : null]
@@ -114,6 +130,19 @@ function AssetCard({
             נעול: {asset.locked_derivative_status}
             {asset.locked_price_credits ? ` · ${asset.locked_price_credits} קרדיטים` : ""}
           </span>
+        </div>
+        <div className="space-y-1 border-t border-border pt-2">
+          <span className="text-xs text-muted-foreground">תגית מדיה</span>
+          <Select value={asset.media_tag_id} onValueChange={onAssignTag} disabled={busy || tags.length === 0}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {tags.map((tag) => (
+                <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {asset.processing_error_code && <div className="text-xs text-destructive">העיבוד נכשל</div>}
         {asset.locked_derivative_error_code && <div className="text-xs text-destructive">יצירת נגזרות נעולות נכשלה</div>}
@@ -192,7 +221,13 @@ export function CharacterMediaDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [busyAssetId, setBusyAssetId] = useState<string | null>(null);
+  const [busyTagId, setBusyTagId] = useState<string | null>(null);
+  const [newTagName, setNewTagName] = useState("");
+  const [tagDrafts, setTagDrafts] = useState<Record<string, { name: string; sortOrder: string }>>({});
+  const [selectedTagId, setSelectedTagId] = useState("all");
+  const [tagToDelete, setTagToDelete] = useState<MediaTag | null>(null);
   const queryKey = ["admin-character-media", character.id] as const;
+  const tagQueryKey = ["admin-character-media-tags", character.id] as const;
   const { data: assets = [], isLoading, isError } = useQuery({
     queryKey,
     queryFn: async () => {
@@ -201,9 +236,115 @@ export function CharacterMediaDialog({
       return data;
     },
   });
+  const { data: tags = [], isLoading: tagsLoading, isError: tagsError } = useQuery({
+    queryKey: tagQueryKey,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_admin_media_tags", { _character_id: character.id });
+      if (error) throw error;
+      return data;
+    },
+  });
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey }),
+      queryClient.invalidateQueries({ queryKey: tagQueryKey }),
+    ]);
+  };
+
+  const getTagErrorMessage = (error: unknown) => {
+    const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
+    if (message.includes("media_tag_in_use")) return "לא ניתן למחוק תגית עם נכסים. העבר את הנכסים תחילה.";
+    if (message.includes("default_media_tag_cannot_be_deleted")) return "לא ניתן למחוק תגית ברירת מחדל.";
+    if (message.includes("media_tag_name_conflict")) return "כבר קיימת תגית בשם זה לדמות.";
+    if (message.includes("media_tag_character_mismatch")) return "אפשר לשייך נכס רק לתגית של אותה דמות.";
+    return "לא ניתן לשמור את תגית המדיה כרגע.";
+  };
+
+  const createTag = async () => {
+    const name = newTagName.trim();
+    if (!name) return;
+    setBusyTagId("create");
+    try {
+      const { error } = await supabase.rpc("create_admin_media_tag", {
+        _character_id: character.id,
+        _name: name,
+      });
+      if (error) throw error;
+      setNewTagName("");
+      await refresh();
+      toast.success("תגית המדיה נוצרה");
+    } catch (error) {
+      toast.error(getTagErrorMessage(error));
+    } finally {
+      setBusyTagId(null);
+    }
+  };
+
+  const updateTag = async (tag: MediaTag) => {
+    const draft = tagDrafts[tag.id];
+    const name = (draft?.name ?? tag.name).trim();
+    const sortOrder = Number(draft?.sortOrder ?? tag.sort_order);
+    if (!name || !Number.isInteger(sortOrder) || sortOrder < 0) {
+      toast.error("יש להזין שם וסדר תקינים לתגית.");
+      return;
+    }
+    setBusyTagId(tag.id);
+    try {
+      const { error } = await supabase.rpc("update_admin_media_tag", {
+        _tag_id: tag.id,
+        _name: name,
+        _sort_order: sortOrder,
+      });
+      if (error) throw error;
+      setTagDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[tag.id];
+        return next;
+      });
+      await refresh();
+      toast.success("תגית המדיה נשמרה");
+    } catch (error) {
+      toast.error(getTagErrorMessage(error));
+    } finally {
+      setBusyTagId(null);
+    }
+  };
+
+  const deleteTag = async () => {
+    if (!tagToDelete) return;
+    const tag = tagToDelete;
+    setBusyTagId(tag.id);
+    try {
+      const { error } = await supabase.rpc("delete_admin_media_tag", { _tag_id: tag.id });
+      if (error) throw error;
+      if (selectedTagId === tag.id) setSelectedTagId("all");
+      await refresh();
+      toast.success("תגית המדיה נמחקה");
+    } catch (error) {
+      toast.error(getTagErrorMessage(error));
+    } finally {
+      setTagToDelete(null);
+      setBusyTagId(null);
+    }
+  };
+
+  const assignAssetTag = async (asset: MediaAsset, tagId: string) => {
+    if (tagId === asset.media_tag_id) return;
+    setBusyAssetId(asset.id);
+    try {
+      const { error } = await supabase.rpc("assign_admin_media_asset_tag", {
+        _asset_id: asset.id,
+        _media_tag_id: tagId,
+      });
+      if (error) throw error;
+      await refresh();
+      toast.success("תגית הנכס עודכנה");
+    } catch (error) {
+      toast.error(getTagErrorMessage(error));
+    } finally {
+      setBusyAssetId(null);
+    }
   };
 
   const processAsset = async (assetId: string, mode: "standard" | "locked" = "standard") => {
@@ -311,6 +452,97 @@ export function CharacterMediaDialog({
           <span className="text-xs text-muted-foreground">JPEG, PNG או WebP עד 5MB</span>
         </div>
 
+        <section className="space-y-3 rounded-md border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-medium">תגיות מדיה</h3>
+              <p className="text-xs text-muted-foreground">מיון וניהול מלאי המדיה של הדמות.</p>
+            </div>
+            <Select value={selectedTagId} onValueChange={setSelectedTagId} disabled={tagsLoading || tags.length === 0}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="סינון לפי תגית" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">כל התגיות</SelectItem>
+                {tags.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex gap-2">
+            <Input
+              value={newTagName}
+              onChange={(event) => setNewTagName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void createTag();
+                }
+              }}
+              placeholder="שם תגית חדשה"
+              maxLength={120}
+              disabled={busyTagId !== null}
+            />
+            <Button size="sm" className="shrink-0" onClick={() => void createTag()} disabled={!newTagName.trim() || busyTagId !== null}>
+              {busyTagId === "create" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 ml-1" />}
+              הוסף תגית
+            </Button>
+          </div>
+
+          {tagsLoading && <Skeleton className="h-16 w-full" />}
+          {tagsError && <p className="text-sm text-destructive">טעינת תגיות המדיה נכשלה.</p>}
+          {!tagsLoading && !tagsError && (
+            <div className="space-y-2">
+              {tags.map((tag) => {
+                const draft = tagDrafts[tag.id];
+                const busy = busyTagId === tag.id;
+                return (
+                  <div key={tag.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+                    <Input
+                      className="min-w-40 flex-1"
+                      value={draft?.name ?? tag.name}
+                      onChange={(event) => setTagDrafts((drafts) => ({
+                        ...drafts,
+                        [tag.id]: { name: event.target.value, sortOrder: drafts[tag.id]?.sortOrder ?? String(tag.sort_order) },
+                      }))}
+                      maxLength={120}
+                      disabled={busy}
+                    />
+                    <Input
+                      className="w-20"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft?.sortOrder ?? String(tag.sort_order)}
+                      onChange={(event) => setTagDrafts((drafts) => ({
+                        ...drafts,
+                        [tag.id]: { name: drafts[tag.id]?.name ?? tag.name, sortOrder: event.target.value },
+                      }))}
+                      aria-label="סדר תגית"
+                      disabled={busy}
+                    />
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{tag.asset_count} נכסים{tag.is_default ? " · ברירת מחדל" : ""}</span>
+                    <Button size="icon" variant="outline" title="שמור תגית" onClick={() => void updateTag(tag)} disabled={busy}>
+                      {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title={tag.is_default ? "לא ניתן למחוק תגית ברירת מחדל" : tag.asset_count > 0 ? "העבר נכסים לפני מחיקת התגית" : "מחק תגית"}
+                      onClick={() => setTagToDelete(tag)}
+                      disabled={busy || tag.is_default || tag.asset_count > 0}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         {isLoading && <Skeleton className="h-40 w-full" />}
         {isError && <div className="py-10 text-center text-sm text-muted-foreground">טעינת המדיה נכשלה</div>}
         {!isLoading && !isError && assets.length === 0 && (
@@ -318,11 +550,13 @@ export function CharacterMediaDialog({
         )}
         {!isLoading && assets.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {assets.map((asset) => (
+            {assets.filter((asset) => selectedTagId === "all" || asset.media_tag_id === selectedTagId).map((asset) => (
               <AssetCard
                 key={asset.id}
                 asset={asset}
                 busy={busyAssetId === asset.id}
+                tags={tags}
+                onAssignTag={(tagId) => void assignAssetTag(asset, tagId)}
                 onDisable={() => void runAssetAction(asset, "disable")}
                 onRestore={() => void runAssetAction(asset, "restore")}
                 onRetry={() => void runAssetAction(asset, "retry")}
@@ -339,7 +573,24 @@ export function CharacterMediaDialog({
             ))}
           </div>
         )}
+        {!isLoading && assets.length > 0 && selectedTagId !== "all" && assets.every((asset) => asset.media_tag_id !== selectedTagId) && (
+          <div className="py-6 text-center text-sm text-muted-foreground">אין נכסים בתגית שנבחרה.</div>
+        )}
       </DialogContent>
+      <AlertDialog open={tagToDelete !== null} onOpenChange={(open) => !open && setTagToDelete(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>למחוק תגית מדיה?</AlertDialogTitle>
+            <AlertDialogDescription>
+              התגית "{tagToDelete?.name}" תימחק רק אם אין לה נכסים משויכים.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteTag()}>מחק תגית</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

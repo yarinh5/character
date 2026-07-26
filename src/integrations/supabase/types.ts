@@ -2158,6 +2158,10 @@ export type Database = {
         Args: { _amount: number; _reason: string; _user_id: string }
         Returns: Json
       }
+      assign_admin_media_asset_tag: {
+        Args: { _asset_id: string; _media_tag_id: string }
+        Returns: Json
+      }
       begin_character_media_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string }
         Returns: {
@@ -2220,6 +2224,10 @@ export type Database = {
         Args: { _asset_id: string; _price_credits?: number }
         Returns: Json
       }
+      create_admin_media_tag: {
+        Args: { _character_id: string; _name: string; _sort_order?: number }
+        Returns: Json
+      }
       create_character_media_upload_intent_for_server: {
         Args: {
           _actor_user_id: string
@@ -2272,6 +2280,7 @@ export type Database = {
         Args: { _asset_id: string; _reason?: string }
         Returns: Json
       }
+      delete_admin_media_tag: { Args: { _tag_id: string }; Returns: Json }
       fail_character_media_ingest_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
         Returns: Json
@@ -2356,6 +2365,18 @@ export type Database = {
           my_reservation_id: string
           status: string
           width: number
+        }[]
+      }
+      get_admin_media_tags: {
+        Args: { _character_id: string }
+        Returns: {
+          asset_count: number
+          created_at: string
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
         }[]
       }
       get_admin_new_queue_overview: {
@@ -2773,6 +2794,10 @@ export type Database = {
           _operator_id?: string
         }
         Returns: string
+      }
+      update_admin_media_tag: {
+        Args: { _name: string; _sort_order?: number; _tag_id: string }
+        Returns: Json
       }
       unlock_locked_message_attachment: {
         Args: { _attachment_id: string; _idempotency_key: string }
