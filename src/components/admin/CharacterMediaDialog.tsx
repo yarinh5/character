@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ImagePlus, LoaderCircle, LockKeyhole, Plus, RefreshCw, RotateCcw, ShieldOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -245,6 +245,23 @@ export function CharacterMediaDialog({
     },
   });
 
+  const filteredAssets = useMemo(
+    () => assets.filter((asset) => selectedTagId === "all" || asset.media_tag_id === selectedTagId),
+    [assets, selectedTagId],
+  );
+
+  useEffect(() => {
+    const tagIds = new Set(tags.map((tag) => tag.id));
+    setTagDrafts((drafts) => {
+      const retainedEntries = Object.entries(drafts).filter(([tagId]) => tagIds.has(tagId));
+      return retainedEntries.length === Object.keys(drafts).length
+        ? drafts
+        : Object.fromEntries(retainedEntries);
+    });
+    if (selectedTagId !== "all" && !tagIds.has(selectedTagId)) setSelectedTagId("all");
+    if (tagToDelete && !tagIds.has(tagToDelete.id)) setTagToDelete(null);
+  }, [selectedTagId, tagToDelete, tags]);
+
   const refresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey }),
@@ -254,16 +271,20 @@ export function CharacterMediaDialog({
 
   const getTagErrorMessage = (error: unknown) => {
     const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
-    if (message.includes("media_tag_in_use")) return "לא ניתן למחוק תגית עם נכסים. העבר את הנכסים תחילה.";
+    if (message.includes("media_tag_in_use")) return "אי אפשר למחוק תגית שיש לה מדיה. העבר את המדיה לתגית אחרת קודם.";
     if (message.includes("default_media_tag_cannot_be_deleted")) return "לא ניתן למחוק תגית ברירת מחדל.";
-    if (message.includes("media_tag_name_conflict")) return "כבר קיימת תגית בשם זה לדמות.";
+    if (message.includes("media_tag_name_invalid") || message.includes("media_tags_name_check")) return "יש להזין שם תגית תקין.";
+    if (message.includes("media_tag_name_conflict") || message.includes("media_tags_character_name_idx")) return "כבר קיימת תגית בשם זה לדמות.";
     if (message.includes("media_tag_character_mismatch")) return "אפשר לשייך נכס רק לתגית של אותה דמות.";
     return "לא ניתן לשמור את תגית המדיה כרגע.";
   };
 
   const createTag = async () => {
     const name = newTagName.trim();
-    if (!name) return;
+    if (!name) {
+      toast.error("יש להזין שם לתגית.");
+      return;
+    }
     setBusyTagId("create");
     try {
       const { error } = await supabase.rpc("create_admin_media_tag", {
@@ -548,9 +569,9 @@ export function CharacterMediaDialog({
         {!isLoading && !isError && assets.length === 0 && (
           <div className="py-10 text-center text-sm text-muted-foreground">אין מדיה לדמות זו</div>
         )}
-        {!isLoading && assets.length > 0 && (
+        {!isLoading && filteredAssets.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {assets.filter((asset) => selectedTagId === "all" || asset.media_tag_id === selectedTagId).map((asset) => (
+            {filteredAssets.map((asset) => (
               <AssetCard
                 key={asset.id}
                 asset={asset}
@@ -573,7 +594,7 @@ export function CharacterMediaDialog({
             ))}
           </div>
         )}
-        {!isLoading && assets.length > 0 && selectedTagId !== "all" && assets.every((asset) => asset.media_tag_id !== selectedTagId) && (
+        {!isLoading && assets.length > 0 && selectedTagId !== "all" && filteredAssets.length === 0 && (
           <div className="py-6 text-center text-sm text-muted-foreground">אין נכסים בתגית שנבחרה.</div>
         )}
       </DialogContent>
