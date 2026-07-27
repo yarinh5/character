@@ -1648,6 +1648,54 @@ export type Database = {
           },
         ]
       }
+      operator_client_reports: {
+        Row: {
+          client_id: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          operator_id: string
+          reason: string
+          source: string
+        }
+        Insert: {
+          client_id: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          operator_id: string
+          reason: string
+          source?: string
+        }
+        Update: {
+          client_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          operator_id?: string
+          reason?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_client_reports_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_client_reports_operator_id_fkey"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       operator_monthly_scores: {
         Row: {
           message_count: number
@@ -2237,6 +2285,16 @@ export type Database = {
           sticker_id: string
         }[]
       }
+      block_client_for_operator: {
+        Args: {
+          _client_id: string
+          _conversation_id?: string | null
+          _notes?: string | null
+          _reason: string
+          _source?: string
+        }
+        Returns: Json
+      }
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
       complete_client_onboarding: { Args: { _payload: Json }; Returns: Json }
@@ -2433,6 +2491,21 @@ export type Database = {
           updated_at: string
         }[]
       }
+      get_admin_operator_client_reports: {
+        Args: never
+        Returns: {
+          client_display_name: string | null
+          client_id: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          operator_id: string
+          operator_name: string
+          reason: string
+          source: string
+        }[]
+      }
       get_admin_new_queue_overview: {
         Args: never
         Returns: {
@@ -2580,6 +2653,10 @@ export type Database = {
         }[]
       }
       get_my_operator_id: { Args: never; Returns: string }
+      get_my_operator_client_block_status: {
+        Args: { _client_id: string }
+        Returns: Json
+      }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
@@ -2725,6 +2802,16 @@ export type Database = {
         Args: { _conversation_id: string; _reason?: string }
         Returns: Json
       }
+      report_client_as_operator: {
+        Args: {
+          _client_id: string
+          _conversation_id?: string | null
+          _notes?: string | null
+          _reason: string
+          _source?: string
+        }
+        Returns: Json
+      }
       reserve_admin_character_media_asset: {
         Args: { _asset_id: string; _conversation_id: string }
         Returns: Json
@@ -2866,6 +2953,10 @@ export type Database = {
       }
       update_admin_media_tag: {
         Args: { _name: string; _sort_order?: number; _tag_id: string }
+        Returns: Json
+      }
+      unblock_client_for_operator: {
+        Args: { _client_id: string }
         Returns: Json
       }
       unlock_locked_message_attachment: {

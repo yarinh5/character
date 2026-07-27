@@ -53,6 +53,15 @@ function ReportsPage() {
     },
   });
 
+  const { data: operatorReports = [], isLoading: isLoadingOperatorReports } = useQuery({
+    queryKey: ["admin-operator-client-reports"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_admin_operator_client_reports");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const filtered = (data ?? []).filter((r: any) => filter === "all" || r.status === filter);
 
   const setStatus = async (id: string, status: string) => {
@@ -122,6 +131,41 @@ function ReportsPage() {
                     </div>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => setSelected(r)}>פרטים</Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardContent className="p-0">
+          <div className="border-b px-4 py-3">
+            <h2 className="font-semibold">דיווחי עובדים</h2>
+          </div>
+          {isLoadingOperatorReports && <div className="p-6"><Skeleton className="h-20" /></div>}
+          {!isLoadingOperatorReports && operatorReports.length === 0 && (
+            <p className="text-center text-muted-foreground py-8">אין דיווחי עובדים</p>
+          )}
+          {!isLoadingOperatorReports && operatorReports.length > 0 && (
+            <div className="divide-y">
+              {operatorReports.map((report) => (
+                <div key={report.id} className="p-4 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium truncate">{report.reason}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{new Date(report.created_at).toLocaleString("he-IL")}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    עובד: {report.operator_name} · לקוח: {report.client_display_name ?? report.client_id}
+                  </p>
+                  {report.notes && <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{report.notes}</p>}
+                  {report.conversation_id && (
+                    <Button asChild variant="link" className="mt-1 h-auto px-0 text-xs">
+                      <Link to="/admin/conversations/$conversationId" params={{ conversationId: report.conversation_id }}>
+                        מעבר לשיחה
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

@@ -31,6 +31,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile, RotateCcw, Inbox } from "lucide-react";
 import { toast } from "sonner";
@@ -139,6 +146,11 @@ function OperatorChatPage() {
   const [responsibility, setResponsibility] = useState<ConversationResponsibility | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
   const [releasingConversation, setReleasingConversation] = useState(false);
+  const [clientBlocked, setClientBlocked] = useState(false);
+  const [clientAction, setClientAction] = useState<"block" | "report" | null>(null);
+  const [clientActionReason, setClientActionReason] = useState("");
+  const [clientActionNotes, setClientActionNotes] = useState("");
+  const [clientActionBusy, setClientActionBusy] = useState(false);
   const [, setLockClock] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -177,6 +189,21 @@ function OperatorChatPage() {
       setResponsibility(state);
     }
   }, [conversationId, isAdmin, operator?.id]);
+
+  const refreshClientBlockStatus = useCallback(
+    async (clientId: string) => {
+      if (isAdmin || !operator?.id) {
+        setClientBlocked(false);
+        return;
+      }
+
+      const { data, error } = await supabase.rpc("get_my_operator_client_block_status", {
+        _client_id: clientId,
+      });
+      if (!error) setClientBlocked(Boolean((data as { is_blocked?: boolean } | null)?.is_blocked));
+    },
+    [isAdmin, operator?.id],
+  );
 
   const hydrateMessageDecorations = async (message: Msg) => {
     const [{ data: attachments }, { data: stickers }] = await Promise.all([
@@ -273,6 +300,7 @@ function OperatorChatPage() {
       }
       setConv(c as unknown as Conv);
       await refreshResponsibility();
+      await refreshClientBlockStatus(c.client_id);
 
       await (supabase as any).rpc("cleanup_expired_conversation_locks");
 
@@ -590,6 +618,63 @@ function OperatorChatPage() {
     }
   };
 
+  const closeClientAction = () => {
+    if (clientActionBusy) return;
+    setClientAction(null);
+    setClientActionReason("");
+    setClientActionNotes("");
+  };
+
+  const submitClientAction = async () => {
+    if (!conv || !clientAction) return;
+    const reason = clientActionReason.trim();
+    if (reason.length < 3) {
+      toast.error("נא להזין סיבה של לפחות 3 תווים");
+      return;
+    }
+
+    setClientActionBusy(true);
+    const { error } = await supabase.rpc(
+      clientAction === "block" ? "block_client_for_operator" : "report_client_as_operator",
+      {
+        _client_id: conv.client_id,
+        _conversation_id: conversationId,
+        _reason: reason,
+        _notes: clientActionNotes.trim() || null,
+        _source: "chat",
+      },
+    );
+    setClientActionBusy(false);
+
+    if (error) {
+      toast.error(clientAction === "block" ? "חסימת הלקוח נכשלה" : "דיווח הלקוח נכשל");
+      return;
+    }
+
+    if (clientAction === "block") {
+      setClientBlocked(true);
+      await newQueue.refetch();
+      toast.success("הלקוח נחסם עבורך בלבד");
+    } else {
+      toast.success("הדיווח נשלח לאדמין");
+    }
+    closeClientAction();
+  };
+
+  const unblockClient = async () => {
+    if (!conv) return;
+    setClientActionBusy(true);
+    const { error } = await supabase.rpc("unblock_client_for_operator", { _client_id: conv.client_id });
+    setClientActionBusy(false);
+    if (error) {
+      toast.error("שחרור החסימה נכשל");
+      return;
+    }
+    setClientBlocked(false);
+    await newQueue.refetch();
+    toast.success("החסימה שוחררה");
+  };
+
   const handleComposerActivity = () => {
     if (concurrencyMode !== "open") {
       void acquireLock();
@@ -789,6 +874,24 @@ function OperatorChatPage() {
           </p>
         </div>
         <div className="hidden md:flex gap-1">
+          {operator && !isAdmin && conv && (
+            <>
+              <Button
+                variant={clientBlocked ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                disabled={clientActionBusy}
+                className="shrink-0"
+              >
+                {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
+              </Button>
+              {!clientBlocked && (
+                <Button variant="outline" size="sm" onClick={() => setClientAction("report")} className="shrink-0">
+                  דווח
+                </Button>
+              )}
+            </>
+          )}
           {!closed && operator && !isAdmin && canReleaseConversation && (
             <Button
               variant="outline"
@@ -848,6 +951,21 @@ function OperatorChatPage() {
                 <SheetTitle>פרטי לקוח והערות</SheetTitle>
               </SheetHeader>
               <div className="mt-4 space-y-4">
+                {operator && !isAdmin && conv && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant={clientBlocked ? "secondary" : "outline"}
+                      className="flex-1"
+                      onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                      disabled={clientActionBusy}
+                    >
+                      {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
+                    </Button>
+                    {!clientBlocked && (
+                      <Button variant="outline" onClick={() => setClientAction("report")}>דווח</Button>
+                    )}
+                  </div>
+                )}
                 <ClientInfoPanel client={client} />
                 <InternalNotesPanel
                   notes={notes}
@@ -1110,6 +1228,24 @@ function OperatorChatPage() {
         {/* Side panel desktop */}
         <aside className="hidden md:flex w-80 shrink-0 flex-col border-r border-border bg-card overflow-y-auto">
           <div className="p-4 space-y-4">
+            {operator && !isAdmin && conv && (
+              <div className="space-y-2">
+                {clientBlocked && <p className="text-xs font-medium text-destructive">הלקוח חסום עבורך בלבד</p>}
+                <div className="flex gap-2">
+                  <Button
+                    variant={clientBlocked ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                    disabled={clientActionBusy}
+                  >
+                    {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
+                  </Button>
+                  {!clientBlocked && (
+                    <Button variant="outline" size="sm" onClick={() => setClientAction("report")}>דווח</Button>
+                  )}
+                </div>
+              </div>
+            )}
             <ClientInfoPanel client={client} />
             <InternalNotesPanel
               notes={notes}
@@ -1143,6 +1279,35 @@ function OperatorChatPage() {
         role="operator"
         onSent={handleStickerSent}
       />
+      <Dialog open={clientAction !== null} onOpenChange={(open) => !open && closeClientAction()}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{clientAction === "block" ? "חסימת לקוח" : "דיווח על לקוח"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              value={clientActionReason}
+              onChange={(event) => setClientActionReason(event.target.value)}
+              placeholder="סיבה קצרה"
+              maxLength={500}
+              disabled={clientActionBusy}
+            />
+            <Textarea
+              value={clientActionNotes}
+              onChange={(event) => setClientActionNotes(event.target.value)}
+              placeholder="הערות פנימיות (אופציונלי)"
+              maxLength={2000}
+              disabled={clientActionBusy}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeClientAction} disabled={clientActionBusy}>ביטול</Button>
+            <Button variant={clientAction === "block" ? "destructive" : "default"} onClick={() => void submitClientAction()} disabled={clientActionBusy}>
+              {clientAction === "block" ? "חסום לקוח" : "שלח דיווח"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
