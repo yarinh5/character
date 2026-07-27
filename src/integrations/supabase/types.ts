@@ -2162,12 +2162,38 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      admin_add_conversation_note: {
+        Args: { _conversation_id: string; _note: string }
+        Returns: string
+      }
+      admin_add_customer_info_entry: {
+        Args: { _content: string; _conversation_id: string }
+        Returns: string
+      }
       adjust_operator_credits: {
         Args: { _amount: number; _operator_id: string; _reason: string }
         Returns: Json
       }
       admin_adjust_client_credits: {
         Args: { _amount: number; _reason: string; _user_id: string }
+        Returns: Json
+      }
+      admin_reassign_conversation: {
+        Args: { _conversation_id: string; _operator_id: string }
+        Returns: Json
+      }
+      admin_set_conversation_status: {
+        Args: {
+          _conversation_id: string
+          _status: Database["public"]["Enums"]["conversation_status"]
+        }
+        Returns: Json
+      }
+      admin_update_report_status: {
+        Args: {
+          _report_id: string
+          _status: Database["public"]["Enums"]["report_status"]
+        }
         Returns: Json
       }
       assign_admin_media_asset_tag: {

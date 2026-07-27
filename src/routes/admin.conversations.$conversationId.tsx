@@ -395,10 +395,10 @@ function ConvView() {
   }, [messages.length]);
 
   const reassign = async (opId: string) => {
-    const { error } = await supabase
-      .from("conversations")
-      .update({ assigned_operator_id: opId, status: "open" })
-      .eq("id", conversationId);
+    const { error } = await supabase.rpc("admin_reassign_conversation", {
+      _conversation_id: conversationId,
+      _operator_id: opId,
+    });
     if (error) {
       toast.error("עדכון שיוך legacy נכשל: " + error.message);
       return;
@@ -408,10 +408,10 @@ function ConvView() {
   };
 
   const setStatus = async (status: string) => {
-    const { error } = await supabase
-      .from("conversations")
-      .update({ status: status as "open" | "waiting" | "answered" | "closed" | "reported" })
-      .eq("id", conversationId);
+    const { error } = await supabase.rpc("admin_set_conversation_status", {
+      _conversation_id: conversationId,
+      _status: status as "open" | "waiting" | "answered" | "closed" | "reported",
+    });
     if (error) {
       toast.error("עדכון נכשל");
       return;
@@ -494,10 +494,9 @@ function ConvView() {
     const text = noteInput.trim();
     if (!text || savingNote) return;
     setSavingNote(true);
-    const { error } = await supabase.from("internal_notes").insert({
-      conversation_id: conversationId,
-      operator_id: data?.currentOperator?.id ?? null,
-      note: text.slice(0, 2000),
+    const { error } = await supabase.rpc("admin_add_conversation_note", {
+      _conversation_id: conversationId,
+      _note: text,
     });
     setSavingNote(false);
     if (error) {
@@ -517,12 +516,9 @@ function ConvView() {
       return;
     }
     setSavingCustomerInfo(true);
-    const { error } = await supabase.from("customer_info_entries").insert({
-      client_id: data.conv.client_id,
-      conversation_id: conversationId,
-      operator_id: data.currentOperator.id,
-      created_by_user_id: user.id,
-      content: text.slice(0, 2000),
+    const { error } = await supabase.rpc("admin_add_customer_info_entry", {
+      _conversation_id: conversationId,
+      _content: text,
     });
     setSavingCustomerInfo(false);
     if (error) {

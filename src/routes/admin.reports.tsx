@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { adminSetClientStatus } from "@/lib/admin-clients.functions";
 
 export const Route = createFileRoute("/admin/reports")({
   component: ReportsPage,
@@ -30,6 +32,7 @@ function ReportsPage() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<string>("open");
   const [selected, setSelected] = useState<any | null>(null);
+  const setClientStatus = useServerFn(adminSetClientStatus);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-reports"],
@@ -53,10 +56,10 @@ function ReportsPage() {
   const filtered = (data ?? []).filter((r: any) => filter === "all" || r.status === filter);
 
   const setStatus = async (id: string, status: string) => {
-    const { error } = await supabase
-      .from("reports")
-      .update({ status: status as "open" | "reviewed" | "resolved" | "dismissed" })
-      .eq("id", id);
+    const { error } = await supabase.rpc("admin_update_report_status", {
+      _report_id: id,
+      _status: status as "open" | "reviewed" | "resolved" | "dismissed",
+    });
     if (error) {
       toast.error("עדכון נכשל");
       return;
@@ -67,8 +70,9 @@ function ReportsPage() {
   };
 
   const blockClient = async (uid: string) => {
-    const { error } = await supabase.from("profiles").update({ status: "blocked" }).eq("user_id", uid);
-    if (error) {
+    try {
+      await setClientStatus({ data: { user_id: uid, is_active: false } });
+    } catch {
       toast.error("חסימה נכשלה");
       return;
     }
