@@ -1287,6 +1287,9 @@ export type Database = {
           position: number
           price_credits_snapshot: number | null
           reservation_id: string
+          view_mode: string
+          view_once_completed_at: string | null
+          view_once_opened_at: string | null
         }
         Insert: {
           access_mode?: string
@@ -1300,6 +1303,9 @@ export type Database = {
           position?: number
           price_credits_snapshot?: number | null
           reservation_id: string
+          view_mode?: string
+          view_once_completed_at?: string | null
+          view_once_opened_at?: string | null
         }
         Update: {
           access_mode?: string
@@ -1313,6 +1319,9 @@ export type Database = {
           position?: number
           price_credits_snapshot?: number | null
           reservation_id?: string
+          view_mode?: string
+          view_once_completed_at?: string | null
+          view_once_opened_at?: string | null
         }
         Relationships: [
           {
@@ -2202,6 +2211,10 @@ export type Database = {
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
       complete_client_onboarding: { Args: { _payload: Json }; Returns: Json }
+      complete_free_view_once_attachment: {
+        Args: { _attachment_id: string }
+        Returns: Json
+      }
       complete_sticker_hard_delete_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string }
         Returns: undefined
@@ -2511,7 +2524,12 @@ export type Database = {
           is_unlocked: boolean
           price_credits_snapshot: number
           render_state: string
+          view_mode: string
         }[]
+      }
+      get_message_attachment_view_url_ttl_for_server: {
+        Args: { _actor_user_id: string; _attachment_id: string }
+        Returns: number
       }
       get_my_conversation_unread_counts: {
         Args: { _conversation_ids: string[] }
@@ -2525,6 +2543,10 @@ export type Database = {
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
+      }
+      open_free_view_once_attachment: {
+        Args: { _attachment_id: string; _idempotency_key?: string }
+        Returns: Json
       }
       get_operator_conversation_client_profile: {
         Args: { _conversation_id: string }
@@ -2733,7 +2755,7 @@ export type Database = {
         Returns: Json
       }
       send_operator_media_message: {
-        Args: { _caption?: string; _reservation_id: string }
+        Args: { _caption?: string; _reservation_id: string; _view_mode?: string }
         Returns: Json
       }
       send_operator_message: {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, Image, LoaderCircle, LockKeyhole, RefreshCw, Send, X } from "lucide-react";
+import { Clock3, Eye, Image, LoaderCircle, LockKeyhole, RefreshCw, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +26,7 @@ type OperatorCatalogAsset = Database["public"]["Functions"]["get_operator_media_
 type AdminCatalogAsset = Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
 type CatalogAsset = OperatorCatalogAsset | AdminCatalogAsset;
 type DeliveryMode = "standard" | "locked";
+type ViewMode = "permanent" | "view_once";
 type MediaPickerActor = "operator" | "admin";
 
 type SelectedReservation = {
@@ -149,6 +150,7 @@ export function OperatorMediaPicker({
   const [selectedTagId, setSelectedTagId] = useState("all");
   const [reservation, setReservation] = useState<SelectedReservation | null>(null);
   const [caption, setCaption] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("permanent");
   const [reservingAssetId, setReservingAssetId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [clock, setClock] = useState(Date.now());
@@ -161,6 +163,7 @@ export function OperatorMediaPicker({
     reservationRef.current = null;
     setReservation(null);
     setCaption("");
+    setViewMode("permanent");
   }, []);
 
   const loadCatalog = useCallback(async () => {
@@ -340,6 +343,7 @@ export function OperatorMediaPicker({
     };
     reservationRef.current = nextReservation;
     setReservation(nextReservation);
+    if (reservationAccessMode === "locked") setViewMode("permanent");
     setCatalog((current) =>
       current.map((currentAsset) =>
         currentAsset.id === asset.id
@@ -382,6 +386,7 @@ export function OperatorMediaPicker({
           {
             _reservation_id: reservation.reservationId,
             _caption: caption.trim() || undefined,
+            _view_mode: viewMode,
           },
         );
     setSending(false);
@@ -448,6 +453,35 @@ export function OperatorMediaPicker({
           {preview.status === "error" && (
             <div className="flex aspect-[4/3] w-full items-center justify-center rounded-md border border-border bg-muted/40 px-4 text-center text-sm text-muted-foreground">
               התצוגה המקדימה אינה זמינה. אי אפשר לשלוח עד לטעינה תקינה או לבחירה חדשה.
+            </div>
+          )}
+          {actor === "operator" && reservation.accessMode === "standard" && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">אופן צפייה</p>
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="אופן צפייה במדיה">
+                <Button
+                  type="button"
+                  variant={viewMode === "permanent" ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => setViewMode("permanent")}
+                  disabled={sending}
+                >
+                  קבוע
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewMode === "view_once" ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => setViewMode("view_once")}
+                  disabled={sending}
+                >
+                  <Eye className="h-4 w-4" />
+                  צפייה חד-פעמית
+                </Button>
+              </div>
+              {viewMode === "view_once" && (
+                <p className="text-xs text-muted-foreground">התמונה זמינה ללקוח לפתיחה אחת בלבד.</p>
+              )}
             </div>
           )}
           {preview.status === "ready" && preview.url && (

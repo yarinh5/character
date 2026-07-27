@@ -196,13 +196,28 @@ Deno.serve(async (request) => {
     return errorResponse(404, "media_not_available", origin);
   }
 
+  let ttlSeconds = target.ttlSeconds;
+  if (target.targetKind === "message_attachment") {
+    const { data: messageAttachmentTtl, error: ttlError } = await trusted.rpc(
+      "get_message_attachment_view_url_ttl_for_server",
+      {
+        _actor_user_id: userData.user.id,
+        _attachment_id: target.targetId,
+      },
+    );
+    if (ttlError || typeof messageAttachmentTtl !== "number" || messageAttachmentTtl < 1) {
+      return errorResponse(404, "media_not_available", origin);
+    }
+    ttlSeconds = messageAttachmentTtl;
+  }
+
   const bucket =
     target.targetKind === "message_sticker" || target.targetKind === "conversation_sticker" || target.targetKind === "admin_sticker_preview"
       ? "sticker-media"
       : "character-media";
   const { data: signedUrl, error: signError } = await trusted.storage
     .from(bucket)
-    .createSignedUrl(previewPath, target.ttlSeconds);
+    .createSignedUrl(previewPath, ttlSeconds);
   if (signError || !signedUrl?.signedUrl) {
     console.error("media_view_url_sign_failed");
     return errorResponse(404, "media_not_available", origin);
@@ -211,7 +226,7 @@ Deno.serve(async (request) => {
   return new Response(
     JSON.stringify({
       url: signedUrl.signedUrl,
-      expires_at: new Date(Date.now() + target.ttlSeconds * 1000).toISOString(),
+      expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
     }),
     { status: 200, headers: responseHeaders(origin) },
   );

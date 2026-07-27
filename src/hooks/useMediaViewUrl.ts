@@ -21,15 +21,15 @@ type ViewUrlResponse = {
   expires_at?: unknown;
 };
 
-export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversationId?: string) {
+export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversationId?: string, enabled = true) {
   const [state, setState] = useState<ViewState>(() =>
-    targetId ? { status: "loading", url: null } : { status: "idle", url: null },
+    targetId && enabled ? { status: "loading", url: null } : { status: "idle", url: null },
   );
   const requestVersionRef = useRef(0);
   const retriedRef = useRef(false);
 
   const load = useCallback(async () => {
-    if (!targetId) {
+    if (!targetId || !enabled) {
       setState({ status: "idle", url: null });
       return;
     }
@@ -67,7 +67,7 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversa
     }
 
     setState({ status: "ready", url: response.url });
-  }, [conversationId, kind, targetId]);
+  }, [conversationId, enabled, kind, targetId]);
 
   useEffect(() => {
     retriedRef.current = false;
