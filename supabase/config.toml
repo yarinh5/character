@@ -22,3 +22,8 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/process-character-media/deno.json"
 entrypoint = "./functions/process-character-media/index.ts"
+
+[functions.delete-character-media]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/delete-character-media/index.ts"

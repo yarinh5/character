@@ -39,6 +39,14 @@ type UploadIntentResponse = {
 const ACCEPTED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 
+async function functionErrorCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("context" in error)) return null;
+  const context = (error as { context?: unknown }).context;
+  if (!(context instanceof Response)) return null;
+  const body = await context.clone().json().catch(() => null);
+  return body && typeof body.code === "string" ? body.code : null;
+}
+
 function formatBytes(value: number | null) {
   if (!value) return null;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
@@ -95,6 +103,7 @@ function AssetCard({
   onPrepareLocked,
   onConfigureLocked,
   onConfigurePaidOpen,
+  onHardDelete,
   tags,
   onAssignTag,
 }: {
@@ -106,6 +115,7 @@ function AssetCard({
   onPrepareLocked: () => void;
   onConfigureLocked: (priceCredits: number | null) => void;
   onConfigurePaidOpen: (priceCredits: number | null) => void;
+  onHardDelete: () => void;
   tags: MediaTag[];
   onAssignTag: (tagId: string) => void;
 }) {
@@ -169,6 +179,9 @@ function AssetCard({
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
           )}
+          <Button size="sm" variant="ghost" onClick={onHardDelete} disabled={busy} title="מחיקה מוחלטת">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </Button>
         </div>
         {!disabled && asset.ingest_status === "ready" && (
           <div className="space-y-2 border-t border-border pt-2">
@@ -260,6 +273,7 @@ export function CharacterMediaDialog({
   const [tagDrafts, setTagDrafts] = useState<Record<string, { name: string; sortOrder: string }>>({});
   const [selectedTagId, setSelectedTagId] = useState("all");
   const [tagToDelete, setTagToDelete] = useState<MediaTag | null>(null);
+  const [assetToHardDelete, setAssetToHardDelete] = useState<MediaAsset | null>(null);
   const queryKey = ["admin-character-media", character.id] as const;
   const tagQueryKey = ["admin-character-media-tags", character.id] as const;
   const { data: assets = [], isLoading, isError } = useQuery({
@@ -437,6 +451,31 @@ export function CharacterMediaDialog({
     } catch {
       toast.error("לא ניתן לשמור את הגדרת הפתיחה בתשלום");
     } finally {
+      setBusyAssetId(null);
+    }
+  };
+
+  const hardDeleteAsset = async () => {
+    if (!assetToHardDelete) return;
+    const asset = assetToHardDelete;
+    setBusyAssetId(asset.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-character-media", {
+        body: { asset_id: asset.id },
+      });
+      if (error) throw new Error((await functionErrorCode(error)) ?? "media_delete_failed");
+      if (!data || data.deleted !== true) throw new Error("media_delete_failed");
+      await refresh();
+      toast.success("המדיה נמחקה לצמיתות");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      toast.error(
+        message.includes("media_asset_in_use")
+          ? "אי אפשר למחוק מדיה שכבר נשלחה או נמצאת בשימוש."
+          : "לא ניתן למחוק את המדיה כרגע. אפשר לנסות שוב.",
+      );
+    } finally {
+      setAssetToHardDelete(null);
       setBusyAssetId(null);
     }
   };
@@ -642,6 +681,7 @@ export function CharacterMediaDialog({
                 }}
                 onConfigureLocked={(priceCredits) => void configureLocked(asset.id, priceCredits)}
                 onConfigurePaidOpen={(priceCredits) => void configurePaidOpen(asset.id, priceCredits)}
+                onHardDelete={() => setAssetToHardDelete(asset)}
               />
             ))}
           </div>
@@ -661,6 +701,26 @@ export function CharacterMediaDialog({
           <AlertDialogFooter>
             <AlertDialogCancel>ביטול</AlertDialogCancel>
             <AlertDialogAction onClick={() => void deleteTag()}>מחק תגית</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={assetToHardDelete !== null} onOpenChange={(open) => !open && setAssetToHardDelete(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת מדיה מוחלטת</AlertDialogTitle>
+            <AlertDialogDescription>
+              המדיה וכל הנגזרות שלה יימחקו לצמיתות. הפעולה זמינה רק כאשר המדיה לא נשלחה ולא נמצאת בשימוש, ולא ניתן לשחזר אותה.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busyAssetId)}>ביטול</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void hardDeleteAsset()}
+              disabled={Boolean(busyAssetId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {busyAssetId ? "מוחק..." : "מחק לצמיתות"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

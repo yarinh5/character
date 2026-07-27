@@ -110,6 +110,8 @@ export type Database = {
           content_type: string
           created_at: string
           created_by_user_id: string | null
+          deletion_started_at: string | null
+          deletion_started_by_user_id: string | null
           disabled_at: string | null
           disabled_by_user_id: string | null
           disabled_reason: string | null
@@ -149,6 +151,8 @@ export type Database = {
           content_type: string
           created_at?: string
           created_by_user_id?: string | null
+          deletion_started_at?: string | null
+          deletion_started_by_user_id?: string | null
           disabled_at?: string | null
           disabled_by_user_id?: string | null
           disabled_reason?: string | null
@@ -188,6 +192,8 @@ export type Database = {
           content_type?: string
           created_at?: string
           created_by_user_id?: string | null
+          deletion_started_at?: string | null
+          deletion_started_by_user_id?: string | null
           disabled_at?: string | null
           disabled_by_user_id?: string | null
           disabled_reason?: string | null
@@ -2382,6 +2388,17 @@ export type Database = {
         Args: { _client_id: string; _confirm: string; _reason: string }
         Returns: Json
       }
+      begin_character_media_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
+        Returns: {
+          asset_id: string
+          bucket_id: string
+          locked_delivery_path: string
+          locked_teaser_path: string
+          preview_path: string
+          source_path: string
+        }[]
+      }
       create_sticker_upload_intent_for_server: {
         Args: {
           _actor_user_id: string
@@ -2427,6 +2444,10 @@ export type Database = {
           _sha256: string
           _width: number
         }
+        Returns: Json
+      }
+      finalize_character_media_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
         Returns: Json
       }
       finalize_locked_media_derivatives_for_server: {
