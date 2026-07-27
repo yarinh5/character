@@ -6,6 +6,7 @@ export type MessageAttachmentAccess = {
   render_state: string;
   price_credits_snapshot: number | null;
   is_unlocked: boolean | null;
+  session_expires_at: string | null;
   view_mode: string;
 };
 
@@ -77,6 +78,7 @@ export function useMessageAttachmentAccessMap(attachmentIds: readonly string[]) 
             render_state: access.render_state,
             price_credits_snapshot: access.price_credits_snapshot,
             is_unlocked: access.is_unlocked,
+            session_expires_at: access.session_expires_at,
             view_mode: access.view_mode,
           } satisfies MessageAttachmentAccess,
         ]),
@@ -106,6 +108,7 @@ export function useMessageAttachmentAccessMap(attachmentIds: readonly string[]) 
       render_state: access.render_state,
       price_credits_snapshot: access.price_credits_snapshot,
       is_unlocked: access.is_unlocked,
+      session_expires_at: access.session_expires_at,
       view_mode: access.view_mode,
     };
     setAccessByAttachmentId((previous) => ({ ...previous, [attachmentId]: resolvedAccess }));

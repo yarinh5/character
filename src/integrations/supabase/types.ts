@@ -125,6 +125,7 @@ export type Database = {
           locked_derivative_status: string
           locked_derivatives_generated_at: string | null
           locked_price_credits: number | null
+          paid_open_price_credits: number | null
           locked_teaser_path: string | null
           media_tag_id: string
           metadata: Json
@@ -163,6 +164,7 @@ export type Database = {
           locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
+          paid_open_price_credits?: number | null
           locked_teaser_path?: string | null
           media_tag_id: string
           metadata?: Json
@@ -201,6 +203,7 @@ export type Database = {
           locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
+          paid_open_price_credits?: number | null
           locked_teaser_path?: string | null
           media_tag_id?: string
           metadata?: Json
@@ -2211,8 +2214,16 @@ export type Database = {
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
       complete_client_onboarding: { Args: { _payload: Json }; Returns: Json }
+      complete_paid_message_attachment_session: {
+        Args: { _session_id: string }
+        Returns: Json
+      }
       complete_free_view_once_attachment: {
         Args: { _attachment_id: string }
+        Returns: Json
+      }
+      configure_character_media_asset_paid_open: {
+        Args: { _asset_id: string; _price_credits?: number }
         Returns: Json
       }
       complete_sticker_hard_delete_for_server: {
@@ -2349,6 +2360,7 @@ export type Database = {
           locked_price_credits: number
           media_tag_id: string
           media_tag_name: string
+          paid_open_price_credits: number
           preview_available: boolean
           processing_attempts: number
           processing_error_code: string
@@ -2375,6 +2387,7 @@ export type Database = {
           locked_price_credits: number
           media_tag_id: string
           media_tag_name: string
+          paid_open_price_credits: number
           my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string
@@ -2524,6 +2537,7 @@ export type Database = {
           is_unlocked: boolean
           price_credits_snapshot: number
           render_state: string
+          session_expires_at: string
           view_mode: string
         }[]
       }
@@ -2545,6 +2559,10 @@ export type Database = {
         Returns: Database["public"]["Enums"]["app_role"]
       }
       open_free_view_once_attachment: {
+        Args: { _attachment_id: string; _idempotency_key?: string }
+        Returns: Json
+      }
+      open_paid_message_attachment: {
         Args: { _attachment_id: string; _idempotency_key?: string }
         Returns: Json
       }
@@ -2590,6 +2608,7 @@ export type Database = {
           my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string
+          paid_open_price_credits: number
           status: string
           width: number
         }[]

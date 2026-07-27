@@ -94,6 +94,7 @@ function AssetCard({
   onRetry,
   onPrepareLocked,
   onConfigureLocked,
+  onConfigurePaidOpen,
   tags,
   onAssignTag,
 }: {
@@ -104,10 +105,12 @@ function AssetCard({
   onRetry: () => void;
   onPrepareLocked: () => void;
   onConfigureLocked: (priceCredits: number | null) => void;
+  onConfigurePaidOpen: (priceCredits: number | null) => void;
   tags: MediaTag[];
   onAssignTag: (tagId: string) => void;
 }) {
   const [price, setPrice] = useState(asset.locked_price_credits?.toString() ?? "");
+  const [paidOpenPrice, setPaidOpenPrice] = useState(asset.paid_open_price_credits?.toString() ?? "");
   const details = [asset.content_type.replace("image/", ""), formatBytes(asset.byte_size), asset.width && asset.height ? `${asset.width} x ${asset.height}` : null]
     .filter(Boolean)
     .join(" · ");
@@ -203,6 +206,37 @@ function AssetCard({
                 שמור
               </Button>
             </div>
+          </div>
+        )}
+        {!disabled && asset.ingest_status === "ready" && (
+          <div className="space-y-2 border-t border-border pt-2">
+            <p className="text-xs font-medium">פתיחה בתשלום</p>
+            <div className="flex gap-1">
+              <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={paidOpenPrice}
+                onChange={(event) => setPaidOpenPrice(event.target.value)}
+                placeholder="מחיר בקרדיטים"
+                disabled={busy}
+              />
+              <Button
+                size="sm"
+                onClick={() => {
+                  const parsed = paidOpenPrice.trim() === "" ? null : Number(paidOpenPrice);
+                  if (parsed !== null && (!Number.isInteger(parsed) || parsed <= 0)) {
+                    toast.error("יש להזין מחיר חיובי במספר שלם");
+                    return;
+                  }
+                  onConfigurePaidOpen(parsed);
+                }}
+                disabled={busy}
+              >
+                שמור
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">השאר ריק כדי לבטל פתיחה בתשלום עבור נכס זה.</p>
           </div>
         )}
       </div>
@@ -385,6 +419,23 @@ export function CharacterMediaDialog({
       toast.success(priceCredits === null ? "הגדרת המדיה הנעולה הוסרה" : "מחיר המדיה הנעולה נשמר");
     } catch {
       toast.error("לא ניתן לשמור את הגדרת המדיה הנעולה");
+    } finally {
+      setBusyAssetId(null);
+    }
+  };
+
+  const configurePaidOpen = async (assetId: string, priceCredits: number | null) => {
+    setBusyAssetId(assetId);
+    try {
+      const { error } = await supabase.rpc("configure_character_media_asset_paid_open", {
+        _asset_id: assetId,
+        _price_credits: priceCredits ?? undefined,
+      });
+      if (error) throw error;
+      await refresh();
+      toast.success(priceCredits === null ? "פתיחה בתשלום בוטלה" : "מחיר הפתיחה בתשלום נשמר");
+    } catch {
+      toast.error("לא ניתן לשמור את הגדרת הפתיחה בתשלום");
     } finally {
       setBusyAssetId(null);
     }
@@ -590,6 +641,7 @@ export function CharacterMediaDialog({
                     .finally(() => setBusyAssetId(null));
                 }}
                 onConfigureLocked={(priceCredits) => void configureLocked(asset.id, priceCredits)}
+                onConfigurePaidOpen={(priceCredits) => void configurePaidOpen(asset.id, priceCredits)}
               />
             ))}
           </div>

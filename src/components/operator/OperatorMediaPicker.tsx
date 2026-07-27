@@ -26,7 +26,7 @@ type OperatorCatalogAsset = Database["public"]["Functions"]["get_operator_media_
 type AdminCatalogAsset = Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
 type CatalogAsset = OperatorCatalogAsset | AdminCatalogAsset;
 type DeliveryMode = "standard" | "locked";
-type ViewMode = "permanent" | "view_once";
+type ViewMode = "permanent" | "view_once" | "paid_open";
 type MediaPickerActor = "operator" | "admin";
 
 type SelectedReservation = {
@@ -35,6 +35,7 @@ type SelectedReservation = {
   expiresAt: string;
   reservationId: string;
   accessMode: DeliveryMode;
+  paidOpenPriceCredits: number | null;
 };
 
 type ReservationResponse = {
@@ -60,6 +61,12 @@ function getCatalogTag(asset: CatalogAsset): CatalogTag | null {
 
 function toDeliveryMode(value: unknown): DeliveryMode {
   return value === "locked" ? "locked" : "standard";
+}
+
+function getPaidOpenPrice(asset: CatalogAsset) {
+  return typeof asset.paid_open_price_credits === "number" && asset.paid_open_price_credits > 0
+    ? asset.paid_open_price_credits
+    : null;
 }
 
 function getErrorMessage(error: { message?: string } | null) {
@@ -195,6 +202,7 @@ export function OperatorMediaPicker({
         expiresAt: ownReservation.my_reservation_expires_at,
         reservationId: ownReservation.my_reservation_id,
         accessMode: toDeliveryMode(ownReservation.my_reservation_access_mode),
+        paidOpenPriceCredits: getPaidOpenPrice(ownReservation),
       };
       reservationRef.current = nextReservation;
       setReservation(nextReservation);
@@ -294,6 +302,7 @@ export function OperatorMediaPicker({
         expiresAt: asset.my_reservation_expires_at,
         reservationId: asset.my_reservation_id,
         accessMode: toDeliveryMode(asset.my_reservation_access_mode),
+        paidOpenPriceCredits: getPaidOpenPrice(asset),
       };
       reservationRef.current = nextReservation;
       setReservation(nextReservation);
@@ -340,6 +349,7 @@ export function OperatorMediaPicker({
       expiresAt,
       reservationId,
       accessMode: reservationAccessMode,
+      paidOpenPriceCredits: getPaidOpenPrice(asset),
     };
     reservationRef.current = nextReservation;
     setReservation(nextReservation);
@@ -458,7 +468,11 @@ export function OperatorMediaPicker({
           {actor === "operator" && reservation.accessMode === "standard" && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">אופן צפייה</p>
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="אופן צפייה במדיה">
+              <div
+                className={reservation.paidOpenPriceCredits === null ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}
+                role="group"
+                aria-label="אופן צפייה במדיה"
+              >
                 <Button
                   type="button"
                   variant={viewMode === "permanent" ? "default" : "outline"}
@@ -478,9 +492,26 @@ export function OperatorMediaPicker({
                   <Eye className="h-4 w-4" />
                   צפייה חד-פעמית
                 </Button>
+                {reservation.paidOpenPriceCredits !== null && (
+                  <Button
+                    type="button"
+                    variant={viewMode === "paid_open" ? "default" : "outline"}
+                    className="shrink-0"
+                    onClick={() => setViewMode("paid_open")}
+                    disabled={sending}
+                  >
+                    <LockKeyhole className="h-4 w-4" />
+                    בתשלום
+                  </Button>
+                )}
               </div>
               {viewMode === "view_once" && (
                 <p className="text-xs text-muted-foreground">התמונה זמינה ללקוח לפתיחה אחת בלבד.</p>
+              )}
+              {viewMode === "paid_open" && reservation.paidOpenPriceCredits !== null && (
+                <p className="text-xs text-muted-foreground">
+                  הלקוח ישלם {reservation.paidOpenPriceCredits} קרדיטים עבור כל פתיחה קצרה.
+                </p>
               )}
             </div>
           )}
