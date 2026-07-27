@@ -47,7 +47,7 @@ async function getClientContext(userId: string) {
     supabaseAdmin.from("user_roles").select("role").eq("user_id", userId),
     supabaseAdmin
       .from("profiles")
-      .select("user_id, email, display_name, status, deleted_at")
+      .select("user_id, email, display_name, status, deleted_at, pii_archived_at")
       .eq("user_id", userId)
       .maybeSingle(),
     supabaseAdmin.from("client_profiles").select("id").eq("user_id", userId).maybeSingle(),
@@ -70,6 +70,32 @@ async function setAuthBan(userId: string, blocked: boolean) {
     ban_duration: blocked ? "876000h" : "none",
   });
   if (error) throw new Error(error.message);
+}
+
+async function deleteUserAvatarPrefix(userId: string) {
+  const bucket = supabaseAdmin.storage.from("user-avatars");
+  const paths: string[] = [];
+
+  const collect = async (prefix: string) => {
+    const { data, error } = await bucket.list(prefix, { limit: 100 });
+    if (error) throw new Error("ניקוי תמונת הפרופיל נכשל");
+
+    for (const entry of data ?? []) {
+      const path = `${prefix}/${entry.name}`;
+      if (entry.id) {
+        paths.push(path);
+      } else {
+        await collect(path);
+      }
+    }
+  };
+
+  await collect(userId);
+  if (!paths.length) return 0;
+
+  const { error } = await bucket.remove(paths);
+  if (error) throw new Error("ניקוי תמונת הפרופיל נכשל");
+  return paths.length;
 }
 
 export const adminListClients = createServerFn({ method: "GET" })
@@ -104,7 +130,7 @@ export const adminListClients = createServerFn({ method: "GET" })
 
     let profileQuery = supabaseAdmin
       .from("profiles")
-      .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at")
+      .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at, pii_archived_at")
       .in("user_id", ids)
       .order("created_at", { ascending: false });
 
@@ -157,6 +183,7 @@ export const adminListClients = createServerFn({ method: "GET" })
         status: profile.deleted_at ? "archived" : profile.status,
         created_at: profile.created_at,
         deleted_at: profile.deleted_at,
+        pii_archived_at: profile.pii_archived_at,
         credits_balance: walletMap.get(profile.user_id) ?? 0,
         conversations_count: stats?.conversations ?? 0,
         active_conversations_count: stats?.active ?? 0,
@@ -175,7 +202,7 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
     const [profile, clientProfile, wallet, conversations, transactions, messageCounts] = await Promise.all([
       supabaseAdmin
         .from("profiles")
-        .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at")
+        .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at, pii_archived_at")
         .eq("user_id", data.user_id)
         .maybeSingle(),
       supabaseAdmin
@@ -509,6 +536,7 @@ export const adminArchiveClient = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
     if (data.user_id === context.userId) throw new Error("לא ניתן לארכב את החשבון שלך מכאן");
     const { profile } = await getClientContext(data.user_id);
+    if (profile.pii_archived_at) throw new Error("לקוח שעבר אנונימיזציית PII לא ניתן לארכוב רגיל");
     if (profile.deleted_at) return { ok: true };
 
     const { error } = await supabaseAdmin
@@ -527,6 +555,7 @@ export const adminRestoreClient = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
     const { profile } = await getClientContext(data.user_id);
+    if (profile.pii_archived_at) throw new Error("לקוח שעבר אנונימיזציית PII לא ניתן לשחזור");
     if (!profile.deleted_at) return { ok: true };
 
     const { error } = await supabaseAdmin
@@ -537,6 +566,38 @@ export const adminRestoreClient = createServerFn({ method: "POST" })
     await setAuthBan(data.user_id, true);
     await logAudit(context.userId, "client.restored", "user", data.user_id, { status: "blocked" });
     return { ok: true };
+  });
+
+export const adminArchiveClientPii = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        user_id: z.string().uuid(),
+        reason: z.string().trim().min(3).max(500),
+        confirm: z.literal("ARCHIVE_CLIENT_PII"),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await ensureAdmin(context.userId);
+    if (data.user_id === context.userId) throw new Error("לא ניתן לבצע אנונימיזציית PII לחשבון שלך");
+    await getClientContext(data.user_id);
+
+    const { data: result, error } = await context.supabase.rpc("archive_client_pii", {
+      _client_id: data.user_id,
+      _reason: data.reason,
+      _confirm: data.confirm,
+    });
+    if (error) throw new Error(error.message);
+
+    await setAuthBan(data.user_id, true);
+    const avatarObjectsDeleted = await deleteUserAvatarPrefix(data.user_id);
+
+    return {
+      ...(result as Record<string, unknown>),
+      avatar_objects_deleted: avatarObjectsDeleted,
+    };
   });
 
 export const adminAdjustClientCredits = createServerFn({ method: "POST" })

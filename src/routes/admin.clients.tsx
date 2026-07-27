@@ -54,6 +54,7 @@ import {
 import {
   adminAdjustClientCredits,
   adminArchiveClient,
+  adminArchiveClientPii,
   adminGetClientDetails,
   adminListClients,
   adminRestoreClient,
@@ -73,6 +74,7 @@ type ClientRow = {
   display_name: string | null;
   avatar_url: string | null;
   status: string;
+  pii_archived_at: string | null;
   created_at: string;
   deleted_at: string | null;
   credits_balance: number;
@@ -136,6 +138,7 @@ function ClientsPage() {
   const [editing, setEditing] = useState<ClientRow | null>(null);
   const [creditsClient, setCreditsClient] = useState<ClientRow | null>(null);
   const [archiveClient, setArchiveClient] = useState<ClientRow | null>(null);
+  const [piiArchiveClient, setPiiArchiveClient] = useState<ClientRow | null>(null);
   const [restoreClient, setRestoreClient] = useState<ClientRow | null>(null);
   const [resetClient, setResetClient] = useState<ClientRow | null>(null);
   const [promoteClient, setPromoteClient] = useState<ClientRow | null>(null);
@@ -289,6 +292,7 @@ function ClientsPage() {
           }}
           onReset={(client) => setResetClient(client)}
           onArchive={(client) => setArchiveClient(client)}
+          onPiiArchive={(client) => setPiiArchiveClient(client)}
           onPromote={(client) => setPromoteClient(client)}
           onDone={refresh}
         />
@@ -320,6 +324,17 @@ function ClientsPage() {
           onClose={() => setArchiveClient(null)}
           onDone={() => {
             setArchiveClient(null);
+            refresh();
+          }}
+        />
+      )}
+      {piiArchiveClient && (
+        <PiiArchiveClientConfirm
+          client={piiArchiveClient}
+          onClose={() => setPiiArchiveClient(null)}
+          onDone={() => {
+            setPiiArchiveClient(null);
+            setSelected(null);
             refresh();
           }}
         />
@@ -382,6 +397,7 @@ function ClientDetailsDialog({
   onCredits,
   onReset,
   onArchive,
+  onPiiArchive,
   onPromote,
   onDone,
 }: {
@@ -391,6 +407,7 @@ function ClientDetailsDialog({
   onCredits: (client: ClientRow) => void;
   onReset: (client: ClientRow) => void;
   onArchive: (client: ClientRow) => void;
+  onPiiArchive: (client: ClientRow) => void;
   onPromote: (client: ClientRow) => void;
   onDone: () => void;
 }) {
@@ -405,6 +422,7 @@ function ClientDetailsDialog({
   });
   const detailClient = data?.profile ?? client;
   const isArchived = Boolean(detailClient.deleted_at);
+  const isPiiArchived = Boolean(detailClient.pii_archived_at);
   const isBlocked = detailClient.status === "blocked";
 
   const submitStatusAction = async () => {
@@ -465,6 +483,9 @@ function ClientDetailsDialog({
                 </Button>
                 <Button variant="destructive" onClick={() => onArchive(detailClient)} disabled={isArchived}>
                   <Archive className="h-4 w-4 ml-1" /> מחיקת לקוח
+                </Button>
+                <Button variant="destructive" onClick={() => onPiiArchive(detailClient)} disabled={isPiiArchived}>
+                  <Archive className="h-4 w-4 ml-1" /> אנונימיזציית PII
                 </Button>
               </div>
             </section>
@@ -806,6 +827,76 @@ function ArchiveClientConfirm({ client, onClose, onDone }: { client: ClientRow; 
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function PiiArchiveClientConfirm({ client, onClose, onDone }: { client: ClientRow; onClose: () => void; onDone: () => void }) {
+  const archivePii = useServerFn(adminArchiveClientPii);
+  const [reason, setReason] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const canSubmit = reason.trim().length >= 3 && confirm === "ARCHIVE_CLIENT_PII";
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    try {
+      await archivePii({
+        data: {
+          user_id: client.user_id,
+          reason: reason.trim(),
+          confirm,
+        },
+      });
+      toast.success("פרטי ה־PII של הלקוח עברו אנונימיזציה");
+      onDone();
+    } catch (error) {
+      toast.error((error as Error).message || "אנונימיזציית PII נכשלה");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent dir="rtl" className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>אנונימיזציית PII בלתי הפיכה</DialogTitle>
+          <DialogDescription>
+            הפעולה מוחקת את פרטי הזיהוי והאווטאר של הלקוח, חוסמת את החשבון, וסוגרת טיפול פעיל. השיחות, ההודעות, הקרדיטים, הדיווחים וה־audit נשמרים.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="pii-archive-reason">סיבת האנונימיזציה</Label>
+            <Textarea
+              id="pii-archive-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              maxLength={500}
+              placeholder="נדרשת סיבה קצרה לתיעוד"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pii-archive-confirm">להקליד לאישור: ARCHIVE_CLIENT_PII</Label>
+            <Input
+              id="pii-archive-confirm"
+              value={confirm}
+              onChange={(event) => setConfirm(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              dir="ltr"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>ביטול</Button>
+          <Button variant="destructive" onClick={submit} disabled={!canSubmit || busy}>
+            {busy ? "מאנונימיזציה..." : "ביצוע אנונימיזציית PII"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

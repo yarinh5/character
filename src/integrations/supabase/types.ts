@@ -1913,6 +1913,9 @@ export type Database = {
           display_name: string | null
           email: string | null
           id: string
+          pii_archive_reason: string | null
+          pii_archived_at: string | null
+          pii_archived_by: string | null
           status: string
           updated_at: string
           user_id: string
@@ -1924,6 +1927,9 @@ export type Database = {
           display_name?: string | null
           email?: string | null
           id?: string
+          pii_archive_reason?: string | null
+          pii_archived_at?: string | null
+          pii_archived_by?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -1935,6 +1941,9 @@ export type Database = {
           display_name?: string | null
           email?: string | null
           id?: string
+          pii_archive_reason?: string | null
+          pii_archived_at?: string | null
+          pii_archived_by?: string | null
           status?: string
           updated_at?: string
           user_id?: string
@@ -2368,6 +2377,10 @@ export type Database = {
           _user_id: string
         }
         Returns: string
+      }
+      archive_client_pii: {
+        Args: { _client_id: string; _confirm: string; _reason: string }
+        Returns: Json
       }
       create_sticker_upload_intent_for_server: {
         Args: {
