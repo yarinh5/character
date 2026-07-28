@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
+import { useOperatorNewSlaSummary } from "@/hooks/useOperatorNewQueue";
 
 export type OperatorRecord = {
   id: string;
@@ -166,6 +167,7 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { operator, isAdmin, walletBalance } = useOperator();
+  const newSla = useOperatorNewSlaSummary(operator?.id);
 
   const isActive = (to: string, exact?: boolean) => (exact ? pathname === to : pathname.startsWith(to));
 
@@ -226,8 +228,15 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
               )}
             >
-              <Icon className="h-4 w-4" />
-              {label}
+              <span className="flex min-w-0 items-center gap-3">
+                <Icon className="h-4 w-4" />
+                {label}
+              </span>
+              {to === "/operator/new" && newSla.summary.critical_count > 0 && (
+                <span className="min-w-5 rounded-full bg-destructive px-1.5 py-0.5 text-center text-[10px] font-semibold text-destructive-foreground">
+                  {newSla.summary.critical_count}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
@@ -263,12 +272,17 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
               key={to}
               to={to}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-3 text-xs",
+                "relative flex flex-col items-center justify-center gap-1 py-3 text-xs",
                 isActive(to, exact) ? "text-primary" : "text-muted-foreground",
               )}
             >
               <Icon className="h-5 w-5" />
               {label}
+              {to === "/operator/new" && newSla.summary.critical_count > 0 && (
+                <span className="absolute top-1 rounded-full bg-destructive px-1 text-[9px] font-semibold text-destructive-foreground">
+                  {newSla.summary.critical_count}
+                </span>
+              )}
             </Link>
           ))}
         </div>

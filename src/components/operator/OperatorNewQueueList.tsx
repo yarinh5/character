@@ -1,4 +1,4 @@
-import { Clock3, Inbox, MessageCircle } from "lucide-react";
+import { AlertTriangle, Clock3, Inbox, MessageCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { OperatorNewQueueItem } from "@/hooks/useOperatorNewQueue";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,10 @@ type QueueListProps = {
   emptyTitle?: string;
   emptyDescription?: string;
   onRetry?: () => void;
+  queueUpdatedAt?: number;
 };
 
-function relativeTime(iso: string, now: number) {
-  const seconds = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1_000));
+function relativeWait(seconds: number) {
   if (seconds < 60) return `לפני ${seconds} שניות`;
 
   const minutes = Math.floor(seconds / 60);
@@ -27,16 +27,27 @@ function relativeTime(iso: string, now: number) {
   return `לפני ${Math.floor(minutes / 60)} שעות`;
 }
 
-function QueueBadges({ item, now }: { item: OperatorNewQueueItem; now: number }) {
-  const isWaitingLong = now - new Date(item.last_activity_at).getTime() >= 15 * 60 * 1_000;
+function currentWaitSeconds(item: OperatorNewQueueItem, now: number, queueUpdatedAt: number) {
+  return Math.max(0, item.wait_seconds + Math.floor((now - queueUpdatedAt) / 1_000));
+}
+
+function QueueBadges({ item }: { item: OperatorNewQueueItem }) {
+  const label = item.sla_state === "critical" ? "חריגה קריטית" : item.sla_state === "warning" ? "ממתינה" : null;
+  const className =
+    item.sla_state === "critical"
+      ? "bg-destructive/10 text-destructive"
+      : "bg-warning/15 text-warning";
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
         {item.queue_state === "returned" ? "חזרה לתור" : "חדשה"}
       </span>
-      {isWaitingLong && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">ממתינה</span>
+      {label && (
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
+          <AlertTriangle className="h-3 w-3" />
+          {label}
+        </span>
       )}
     </div>
   );
@@ -52,6 +63,7 @@ export function OperatorNewQueueList({
   emptyTitle = "אין פניות חדשות",
   emptyDescription,
   onRetry,
+  queueUpdatedAt = Date.now(),
 }: QueueListProps) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -112,12 +124,12 @@ export function OperatorNewQueueList({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{item.character_name}</span>
                 {!compact && <span className="text-xs text-muted-foreground">מול {item.client_display_name ?? "לקוח"}</span>}
-                {!compact && <QueueBadges item={item} now={now} />}
+                <QueueBadges item={item} />
               </div>
               <p className="mt-1 truncate text-sm text-muted-foreground">{item.last_client_preview || "הודעה חדשה"}</p>
               <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock3 className="h-3.5 w-3.5" />
-                {relativeTime(item.last_activity_at, now)}
+                {relativeWait(currentWaitSeconds(item, now, queueUpdatedAt))}
               </div>
             </div>
 

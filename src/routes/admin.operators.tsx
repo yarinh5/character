@@ -119,6 +119,16 @@ type NewQueueOverview = {
   returned_to_queue_count: number;
 };
 
+type AdminNewSlaSummary = {
+  character_id: string;
+  character_name: string;
+  total_new: number;
+  warning_count: number;
+  critical_count: number;
+  oldest_wait_seconds: number;
+  eligible_operator_count: number;
+};
+
 function formatLastSeen(value: string | null) {
   if (!value) return "לא נצפה";
 
@@ -128,6 +138,13 @@ function formatLastSeen(value: string | null) {
 
   const hours = Math.floor(minutes / 60);
   return hours < 24 ? `לפני ${hours} שע׳` : new Date(value).toLocaleDateString("he-IL");
+}
+
+function formatWaitSeconds(value: number) {
+  if (value < 60) return `${value} שנ׳`;
+  const minutes = Math.floor(value / 60);
+  if (minutes < 60) return `${minutes} דק׳`;
+  return `${Math.floor(minutes / 60)} שע׳`;
 }
 
 function PresenceBadge({ status }: { status: OperatorPresenceOverview["presence_status"] }) {
@@ -184,6 +201,16 @@ function OperatorsPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: newSlaData } = useQuery({
+    queryKey: ["admin-new-sla-summary"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_admin_new_sla_summary");
+      if (error) throw error;
+      return (data ?? []) as AdminNewSlaSummary[];
+    },
+    refetchInterval: 30_000,
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["admin-operators"] });
     qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -199,6 +226,7 @@ function OperatorsPage() {
     refresh();
     qc.invalidateQueries({ queryKey: ["admin-operator-presence-overview"] });
     qc.invalidateQueries({ queryKey: ["admin-new-queue-overview"] });
+    qc.invalidateQueries({ queryKey: ["admin-new-sla-summary"] });
   };
 
   useEffect(() => {
@@ -225,6 +253,15 @@ function OperatorsPage() {
     }),
     { total: 0, waiting: 0, returned: 0 },
   );
+  const newSlaTotals = (newSlaData ?? []).reduce(
+    (totals, item) => ({
+      total: totals.total + item.total_new,
+      warning: totals.warning + item.warning_count,
+      critical: totals.critical + item.critical_count,
+      oldest: Math.max(totals.oldest, item.oldest_wait_seconds),
+    }),
+    { total: 0, warning: 0, critical: 0, oldest: 0 },
+  );
   const onlineOperators = (presenceData ?? []).filter((item) => item.presence_status === "online").length;
 
   return (
@@ -247,10 +284,12 @@ function OperatorsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 mb-6 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MonitoringStat label="עובדים מחוברים" value={onlineOperators} />
-        <MonitoringStat label="פניות NEW" value={newQueueTotals.total} />
-        <MonitoringStat label="ממתינות זמן רב" value={newQueueTotals.waiting} />
+        <MonitoringStat label="פניות NEW" value={newSlaTotals.total} />
+        <MonitoringStat label="אזהרת SLA" value={newSlaTotals.warning} />
+        <MonitoringStat label="חריגה קריטית" value={newSlaTotals.critical} />
+        <MonitoringStat label="הוותיקה ביותר" value={formatWaitSeconds(newSlaTotals.oldest)} />
         <MonitoringStat label="חזרו לתור" value={newQueueTotals.returned} />
       </div>
 
@@ -491,7 +530,7 @@ type OperatorCreditTransaction = {
   metadata: unknown | null;
 };
 
-function MonitoringStat({ label, value }: { label: string; value: number }) {
+function MonitoringStat({ label, value }: { label: string; value: number | string }) {
   return (
     <Card>
       <CardContent className="p-4">

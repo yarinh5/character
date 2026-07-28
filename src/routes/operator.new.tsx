@@ -16,12 +16,6 @@ export const Route = createFileRoute("/operator/new")({
 type QueueFilter = "all" | "new" | "returned" | "waiting";
 type QueueSort = "newest" | "oldest";
 
-const WAITING_LONG_MS = 15 * 60 * 1000;
-
-function ageInMinutes(iso: string) {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
-}
-
 function OperatorNewQueuePage() {
   const { operator } = useOperator();
   const navigate = useNavigate();
@@ -44,7 +38,7 @@ function OperatorNewQueuePage() {
       if (characterFilter !== "all" && item.character_id !== characterFilter) return false;
       if (statusFilter === "new" && item.queue_state !== "new") return false;
       if (statusFilter === "returned" && item.queue_state !== "returned") return false;
-      if (statusFilter === "waiting" && ageInMinutes(item.last_activity_at) < 15) return false;
+      if (statusFilter === "waiting" && item.sla_state === "normal") return false;
       if (!normalizedSearch) return true;
 
       return [item.client_display_name, item.last_client_preview, item.character_name]
@@ -79,6 +73,11 @@ function OperatorNewQueuePage() {
         <div>
           <h1 className="text-2xl font-bold md:text-3xl">פניות חדשות</h1>
           <p className="mt-1 text-sm text-muted-foreground">פניות לדמויות שאליהן את/ה משויך/ת.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full bg-muted px-2 py-1">{queue.slaSummary.total_new} בתור</span>
+            <span className="rounded-full bg-warning/15 px-2 py-1 font-medium text-warning">{queue.slaSummary.warning_count} ממתינות</span>
+            <span className="rounded-full bg-destructive/10 px-2 py-1 font-medium text-destructive">{queue.slaSummary.critical_count} קריטיות</span>
+          </div>
         </div>
         <Button
           variant="outline"
@@ -123,7 +122,7 @@ function OperatorNewQueuePage() {
             <SelectItem value="all">כל המצבים</SelectItem>
             <SelectItem value="new">חדשות</SelectItem>
             <SelectItem value="returned">חזרו לתור</SelectItem>
-            <SelectItem value="waiting">ממתינות</SelectItem>
+            <SelectItem value="waiting">ממתינות SLA</SelectItem>
           </SelectContent>
         </Select>
         <Select value={sort} onValueChange={(value) => setSort(value as QueueSort)}>
@@ -145,6 +144,7 @@ function OperatorNewQueuePage() {
         isLoading={queue.isLoading}
         error={queue.error}
         onRetry={() => void queue.refetch()}
+        queueUpdatedAt={queue.dataUpdatedAt}
         emptyTitle={hasActiveFilters ? "לא נמצאו פניות תואמות" : "אין פניות חדשות"}
         emptyDescription={hasActiveFilters ? "נסו לשנות את החיפוש או את הסינון." : "פניות חדשות לדמויות שלך יופיעו כאן."}
       />

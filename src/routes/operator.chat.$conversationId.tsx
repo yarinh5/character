@@ -934,6 +934,7 @@ function OperatorChatPage() {
                 isLoading={newQueue.isLoading}
                 error={newQueue.error}
                 onRetry={() => void newQueue.refetch()}
+                queueUpdatedAt={newQueue.dataUpdatedAt}
                 emptyDescription="פניות שממתינות לטיפול יופיעו כאן."
               />
             </SheetContent>
@@ -1221,6 +1222,7 @@ function OperatorChatPage() {
             isLoading={newQueue.isLoading}
             error={newQueue.error}
             onRetry={() => void newQueue.refetch()}
+            queueUpdatedAt={newQueue.dataUpdatedAt}
             emptyDescription="פניות שממתינות לטיפול יופיעו כאן."
           />
         </aside>

@@ -2550,6 +2550,18 @@ export type Database = {
           waiting_long_count: number
         }[]
       }
+      get_admin_new_sla_summary: {
+        Args: never
+        Returns: {
+          character_id: string
+          character_name: string
+          critical_count: number
+          eligible_operator_count: number
+          oldest_wait_seconds: number
+          total_new: number
+          warning_count: number
+        }[]
+      }
       get_admin_operator_presence_overview: {
         Args: never
         Returns: {
@@ -2762,8 +2774,19 @@ export type Database = {
           last_activity_at: string
           last_client_preview: string
           queue_state: string
+          sla_state: string
           status: string
+          wait_seconds: number
           work_item_id: string
+        }[]
+      }
+      get_operator_new_sla_summary: {
+        Args: never
+        Returns: {
+          critical_count: number
+          oldest_wait_seconds: number
+          total_new: number
+          warning_count: number
         }[]
       }
       get_sla_risk_conversations: {
