@@ -127,10 +127,10 @@ export type Database = {
           locked_derivative_status: string
           locked_derivatives_generated_at: string | null
           locked_price_credits: number | null
-          paid_open_price_credits: number | null
           locked_teaser_path: string | null
           media_tag_id: string
           metadata: Json
+          paid_open_price_credits: number | null
           preview_generated_at: string | null
           preview_path: string | null
           processing_attempts: number
@@ -168,10 +168,10 @@ export type Database = {
           locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
-          paid_open_price_credits?: number | null
           locked_teaser_path?: string | null
           media_tag_id: string
           metadata?: Json
+          paid_open_price_credits?: number | null
           preview_generated_at?: string | null
           preview_path?: string | null
           processing_attempts?: number
@@ -209,10 +209,10 @@ export type Database = {
           locked_derivative_status?: string
           locked_derivatives_generated_at?: string | null
           locked_price_credits?: number | null
-          paid_open_price_credits?: number | null
           locked_teaser_path?: string | null
           media_tag_id?: string
           metadata?: Json
+          paid_open_price_credits?: number | null
           preview_generated_at?: string | null
           preview_path?: string | null
           processing_attempts?: number
@@ -1219,6 +1219,50 @@ export type Database = {
         }
         Relationships: []
       }
+      media_tags: {
+        Row: {
+          character_id: string | null
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_tags_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_attachment_unlocks: {
         Row: {
           attachment_id: string
@@ -1478,50 +1522,6 @@ export type Database = {
             columns: ["operator_id"]
             isOneToOne: false
             referencedRelation: "operators"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      media_tags: {
-        Row: {
-          character_id: string | null
-          created_at: string
-          created_by_user_id: string | null
-          id: string
-          is_default: boolean
-          name: string
-          sort_order: number
-          updated_at: string
-          updated_by_user_id: string | null
-        }
-        Insert: {
-          character_id?: string | null
-          created_at?: string
-          created_by_user_id?: string | null
-          id?: string
-          is_default?: boolean
-          name: string
-          sort_order?: number
-          updated_at?: string
-          updated_by_user_id?: string | null
-        }
-        Update: {
-          character_id?: string | null
-          created_at?: string
-          created_by_user_id?: string | null
-          id?: string
-          is_default?: boolean
-          name?: string
-          sort_order?: number
-          updated_at?: string
-          updated_by_user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "media_tags_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "characters"
             referencedColumns: ["id"]
           },
         ]
@@ -2225,6 +2225,10 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: Json
       }
+      adjust_operator_credits: {
+        Args: { _amount: number; _operator_id: string; _reason: string }
+        Returns: Json
+      }
       admin_add_conversation_note: {
         Args: { _conversation_id: string; _note: string }
         Returns: string
@@ -2232,10 +2236,6 @@ export type Database = {
       admin_add_customer_info_entry: {
         Args: { _content: string; _conversation_id: string }
         Returns: string
-      }
-      adjust_operator_credits: {
-        Args: { _amount: number; _operator_id: string; _reason: string }
-        Returns: Json
       }
       admin_adjust_client_credits: {
         Args: { _amount: number; _reason: string; _user_id: string }
@@ -2259,9 +2259,24 @@ export type Database = {
         }
         Returns: Json
       }
+      archive_client_pii: {
+        Args: { _client_id: string; _confirm: string; _reason: string }
+        Returns: Json
+      }
       assign_admin_media_asset_tag: {
         Args: { _asset_id: string; _media_tag_id: string }
         Returns: Json
+      }
+      begin_character_media_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
+        Returns: {
+          asset_id: string
+          bucket_id: string
+          locked_delivery_path: string
+          locked_teaser_path: string
+          preview_path: string
+          source_path: string
+        }[]
       }
       begin_character_media_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string }
@@ -2303,8 +2318,8 @@ export type Database = {
       block_client_for_operator: {
         Args: {
           _client_id: string
-          _conversation_id?: string | null
-          _notes?: string | null
+          _conversation_id?: string
+          _notes?: string
           _reason: string
           _source?: string
         }
@@ -2313,16 +2328,12 @@ export type Database = {
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json }
       cleanup_expired_conversation_locks: { Args: never; Returns: number }
       complete_client_onboarding: { Args: { _payload: Json }; Returns: Json }
-      complete_paid_message_attachment_session: {
-        Args: { _session_id: string }
-        Returns: Json
-      }
       complete_free_view_once_attachment: {
         Args: { _attachment_id: string }
         Returns: Json
       }
-      configure_character_media_asset_paid_open: {
-        Args: { _asset_id: string; _price_credits?: number }
+      complete_paid_message_attachment_session: {
+        Args: { _session_id: string }
         Returns: Json
       }
       complete_sticker_hard_delete_for_server: {
@@ -2344,6 +2355,10 @@ export type Database = {
         }[]
       }
       configure_character_media_asset_locked: {
+        Args: { _asset_id: string; _price_credits?: number }
+        Returns: Json
+      }
+      configure_character_media_asset_paid_open: {
         Args: { _asset_id: string; _price_credits?: number }
         Returns: Json
       }
@@ -2384,21 +2399,6 @@ export type Database = {
         }
         Returns: string
       }
-      archive_client_pii: {
-        Args: { _client_id: string; _confirm: string; _reason: string }
-        Returns: Json
-      }
-      begin_character_media_hard_delete_for_server: {
-        Args: { _actor_user_id: string; _asset_id: string }
-        Returns: {
-          asset_id: string
-          bucket_id: string
-          locked_delivery_path: string
-          locked_teaser_path: string
-          preview_path: string
-          source_path: string
-        }[]
-      }
       create_sticker_upload_intent_for_server: {
         Args: {
           _actor_user_id: string
@@ -2414,11 +2414,11 @@ export type Database = {
           sticker_id: string
         }[]
       }
+      delete_admin_media_tag: { Args: { _tag_id: string }; Returns: Json }
       disable_character_media_asset: {
         Args: { _asset_id: string; _reason?: string }
         Returns: Json
       }
-      delete_admin_media_tag: { Args: { _tag_id: string }; Returns: Json }
       emit_new_sla_critical_notifications: { Args: never; Returns: number }
       fail_character_media_ingest_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
@@ -2436,6 +2436,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      finalize_character_media_hard_delete_for_server: {
+        Args: { _actor_user_id: string; _asset_id: string }
+        Returns: Json
+      }
       finalize_character_media_ingest_for_server: {
         Args: {
           _actor_user_id: string
@@ -2445,10 +2449,6 @@ export type Database = {
           _sha256: string
           _width: number
         }
-        Returns: Json
-      }
-      finalize_character_media_hard_delete_for_server: {
-        Args: { _actor_user_id: string; _asset_id: string }
         Returns: Json
       }
       finalize_locked_media_derivatives_for_server: {
@@ -2504,12 +2504,10 @@ export type Database = {
           locked_derivative_status: string
           locked_images_enabled: boolean
           locked_price_credits: number
-          media_tag_id: string
-          media_tag_name: string
-          paid_open_price_credits: number
           my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string
+          paid_open_price_credits: number
           status: string
           width: number
         }[]
@@ -2524,21 +2522,6 @@ export type Database = {
           name: string
           sort_order: number
           updated_at: string
-        }[]
-      }
-      get_admin_operator_client_reports: {
-        Args: never
-        Returns: {
-          client_display_name: string | null
-          client_id: string
-          conversation_id: string | null
-          created_at: string
-          id: string
-          notes: string | null
-          operator_id: string
-          operator_name: string
-          reason: string
-          source: string
         }[]
       }
       get_admin_new_queue_overview: {
@@ -2561,6 +2544,21 @@ export type Database = {
           oldest_wait_seconds: number
           total_new: number
           warning_count: number
+        }[]
+      }
+      get_admin_operator_client_reports: {
+        Args: never
+        Returns: {
+          client_display_name: string
+          client_id: string
+          conversation_id: string
+          created_at: string
+          id: string
+          notes: string
+          operator_id: string
+          operator_name: string
+          reason: string
+          source: string
         }[]
       }
       get_admin_operator_presence_overview: {
@@ -2699,22 +2697,14 @@ export type Database = {
           unread_count: number
         }[]
       }
-      get_my_operator_id: { Args: never; Returns: string }
       get_my_operator_client_block_status: {
         Args: { _client_id: string }
         Returns: Json
       }
+      get_my_operator_id: { Args: never; Returns: string }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
-      }
-      open_free_view_once_attachment: {
-        Args: { _attachment_id: string; _idempotency_key?: string }
-        Returns: Json
-      }
-      open_paid_message_attachment: {
-        Args: { _attachment_id: string; _idempotency_key?: string }
-        Returns: Json
       }
       get_operator_conversation_client_profile: {
         Args: { _conversation_id: string }
@@ -2728,16 +2718,6 @@ export type Database = {
         Args: { _conversation_id: string }
         Returns: {
           state: string
-        }[]
-      }
-      get_operator_online_candidates: {
-        Args: { _filters?: Json }
-        Returns: {
-          avatar_url: string
-          character_options: Json
-          client_id: string
-          display_name: string
-          has_existing_conversation: boolean
         }[]
       }
       get_operator_media_catalog: {
@@ -2755,6 +2735,8 @@ export type Database = {
           locked_derivative_status: string
           locked_images_enabled: boolean
           locked_price_credits: number
+          media_tag_id: string
+          media_tag_name: string
           my_reservation_access_mode: string
           my_reservation_expires_at: string
           my_reservation_id: string
@@ -2790,6 +2772,16 @@ export type Database = {
           warning_count: number
         }[]
       }
+      get_operator_online_candidates: {
+        Args: { _filters?: Json }
+        Returns: {
+          avatar_url: string
+          character_options: Json
+          client_id: string
+          display_name: string
+          has_existing_conversation: boolean
+        }[]
+      }
       get_sla_risk_conversations: {
         Args: { _limit?: number; _notify?: boolean }
         Returns: {
@@ -2806,6 +2798,10 @@ export type Database = {
         }[]
       }
       grant_signup_credits: { Args: never; Returns: Json }
+      has_current_user_role: {
+        Args: { _role: Database["public"]["Enums"]["app_role"] }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2839,6 +2835,14 @@ export type Database = {
         Args: { _as: string; _conversation_id: string }
         Returns: undefined
       }
+      open_free_view_once_attachment: {
+        Args: { _attachment_id: string; _idempotency_key?: string }
+        Returns: Json
+      }
+      open_paid_message_attachment: {
+        Args: { _attachment_id: string; _idempotency_key: string }
+        Returns: Json
+      }
       operator_can_access_character: {
         Args: { _character_id: string }
         Returns: boolean
@@ -2863,8 +2867,8 @@ export type Database = {
       report_client_as_operator: {
         Args: {
           _client_id: string
-          _conversation_id?: string | null
-          _notes?: string | null
+          _conversation_id?: string
+          _notes?: string
           _reason: string
           _source?: string
         }
@@ -2945,7 +2949,11 @@ export type Database = {
         Returns: Json
       }
       send_operator_media_message: {
-        Args: { _caption?: string; _reservation_id: string; _view_mode?: string }
+        Args: {
+          _caption?: string
+          _reservation_id: string
+          _view_mode?: string
+        }
         Returns: Json
       }
       send_operator_message: {
@@ -2981,10 +2989,6 @@ export type Database = {
         Args: { _price_credits: number; _sticker_id: string }
         Returns: undefined
       }
-      start_or_get_conversation: {
-        Args: { _character_id: string }
-        Returns: string
-      }
       start_operator_outreach: {
         Args: {
           _character_id: string
@@ -2993,6 +2997,10 @@ export type Database = {
           _message: string
         }
         Returns: Json
+      }
+      start_or_get_conversation: {
+        Args: { _character_id: string }
+        Returns: string
       }
       touch_active_conversation: {
         Args: { _conversation_id: string; _role: string }
@@ -3009,16 +3017,16 @@ export type Database = {
         }
         Returns: string
       }
-      update_admin_media_tag: {
-        Args: { _name: string; _sort_order?: number; _tag_id: string }
-        Returns: Json
-      }
       unblock_client_for_operator: {
         Args: { _client_id: string }
         Returns: Json
       }
       unlock_locked_message_attachment: {
         Args: { _attachment_id: string; _idempotency_key: string }
+        Returns: Json
+      }
+      update_admin_media_tag: {
+        Args: { _name: string; _sort_order?: number; _tag_id: string }
         Returns: Json
       }
     }

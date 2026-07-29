@@ -640,7 +640,7 @@ function OperatorChatPage() {
         _client_id: conv.client_id,
         _conversation_id: conversationId,
         _reason: reason,
-        _notes: clientActionNotes.trim() || null,
+        _notes: clientActionNotes.trim() || undefined,
         _source: "chat",
       },
     );
