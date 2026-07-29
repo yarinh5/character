@@ -1212,3 +1212,48 @@ Feature flags לפי תחום: NEW, ONLINE, media V2, paid sessions, mandatory o
 - מערכת רמות.
 - וידאו.
 - Rewrite של האפליקציה.
+
+---
+
+## V2 Closeout Status
+
+### Completed Modules
+
+- NEW queue, handling cycles, release/timeout, and SLA indicators.
+- ONLINE operator outreach foundation and UI.
+- Client profile and controlled mandatory-onboarding foundation.
+- Discovery filters and character profile routes.
+- Media tags, admin tag management, and operator media filtering.
+- Free View Once media and Paid Image Open Sessions.
+- Paid Sticker responsibility alignment with handling cycles.
+- Operator-level client blocks and reports.
+- Admin sensitive-action RPC hardening and client PII archive.
+- Notifications and analytics events foundation, plus QA/security/release gates.
+
+### Deferred Or Not Enabled
+
+- Production app deployment remains deferred by product decision.
+- SLA critical scheduling via pg_cron is deferred; critical notifications require an explicit authorized RPC call.
+- SLA warning Bell notifications and `media-inventory-low` notifications are deferred.
+- `mandatory_onboarding_enabled` remains controlled and disabled unless product explicitly enables it.
+- Environment-specific runtime QA requires isolated Admin, Operator A, Operator B, and Client QA sessions when rerun.
+
+### Product Source Of Truth
+
+- Gifts are removed from the product. Stickers remain the monetized gift-like mechanic.
+- Credits, stickers, and payout rules are closed; changes require explicit product approval.
+- NEW and ONLINE responsibility rules are the current conversation-routing source of truth.
+- Paid Image Open Sessions charge per open and are not permanent unlocks.
+
+### Release State
+
+- Source is pushed to `origin/main` at `c9aa3f9759c7b79ecd0f091dc926c39c356621e9`.
+- Production app deployment has not been executed.
+- QA-only V2-33 notification migrations were applied to the confirmed QA runtime; no scheduler/cron is enabled.
+- Relevant Edge Function sources were deployed only where separately approved; no additional deployment is implied by this closeout.
+- Known local-only ignored change: `supabase/.temp/cli-latest`.
+
+### Next Planning
+
+- V3 starts from this closeout and the current V2 product contracts.
+- New work proceeds one phase at a time using `Loop Type: Phase`, `QA`, `Regression`, or `Release`.
