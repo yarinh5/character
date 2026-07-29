@@ -2419,6 +2419,7 @@ export type Database = {
         Returns: Json
       }
       delete_admin_media_tag: { Args: { _tag_id: string }; Returns: Json }
+      emit_new_sla_critical_notifications: { Args: never; Returns: number }
       fail_character_media_ingest_for_server: {
         Args: { _actor_user_id: string; _asset_id: string; _error_code: string }
         Returns: Json
