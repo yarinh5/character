@@ -8,7 +8,9 @@
   "region": "eu-west-1",
   "cleanup_owner": "Yarin",
   "created_at": "2026-07-31T12:07:36Z",
-  "delete_by": "2026-08-02T12:07:36Z",
+  "delete_by": null,
+  "retention_policy": "owner_managed",
+  "cleanup_authorization": "owner_explicit_decision_required",
   "migration_baseline": {
     "local_count": 104,
     "local_first": "20260512194305_343cc389-05cd-47ac-8a65-f42104c4d6d1.sql",

@@ -14,6 +14,14 @@ BEGIN
     RAISE EXCEPTION 'load_fixture_inventory_guard_failed';
   END IF;
 
+  IF EXISTS (
+    SELECT 1 FROM load_v3_2.fixture_runs
+    WHERE run_id = _run_id
+      AND delete_by IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'fixture_run_delete_by_must_be_null';
+  END IF;
+
   SELECT count(*) INTO _count
   FROM auth.users
   WHERE email LIKE 'load_v3_2_20260731_pilot_01_%@example.invalid';

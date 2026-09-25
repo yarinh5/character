@@ -10,7 +10,7 @@ be executed against QA or production.
 - Run ID: `load_v3_2_20260731_pilot_01`
 - Tier: `pilot`
 - Cleanup owner: `Yarin`
-- Delete no later than: `2026-08-02T12:07:36Z`
+- Retention: owner-managed; no automatic deletion deadline
 - Migration baseline: 104 local files / 104 target history entries
 - Target history range: `20260731134101` through `20260731134814`
 
@@ -30,6 +30,9 @@ financial RPC.
 
 Run each file through an authorized SQL channel scoped to the disposable
 project. Do not use a connection string or key from QA or production.
+Before running any fixture or `cleanup.sql`, manually confirm the Supabase
+project ref is `micmgokyckvfpewxgrzf`. The stored ref is documentation and
+fixture metadata, not a SQL-enforced environment guard.
 
 Every UUID created by the fixture is deterministic and is recorded in
 `load_v3_2.fixture_manifest`. Composite keys are recorded in the same table as
@@ -55,8 +58,9 @@ physical-cache cold read.
 
 ## Cleanup
 
-Run `cleanup.sql`, verify that the generated rows are absent, and then delete
-the entire disposable project. Project deletion is the final cleanup guarantee.
+Run `cleanup.sql` and delete the disposable project only after an explicit
+Owner decision. When authorized, verify that the generated rows are absent;
+project deletion remains the final cleanup guarantee.
 
 The historical migration chain creates an empty `gift-media` bucket before the
 later Gifts removal migration. The bucket has no objects, callers, tables,

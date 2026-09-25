@@ -11,11 +11,14 @@ CREATE TABLE IF NOT EXISTS load_v3_2.fixture_runs (
   target_project_ref TEXT NOT NULL,
   cleanup_owner TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
-  delete_by TIMESTAMPTZ NOT NULL,
+  delete_by TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'preparing',
   expected_counts JSONB NOT NULL,
   notes JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE load_v3_2.fixture_runs
+  ALTER COLUMN delete_by DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS load_v3_2.fixture_manifest (
   run_id TEXT NOT NULL REFERENCES load_v3_2.fixture_runs(run_id) ON DELETE CASCADE,
@@ -64,7 +67,7 @@ VALUES (
   'micmgokyckvfpewxgrzf',
   'Yarin',
   '2026-07-31T12:07:36Z'::timestamptz,
-  '2026-08-02T12:07:36Z'::timestamptz,
+  NULL,
   '{
     "clients": 1000,
     "operators": 25,
@@ -94,6 +97,7 @@ VALUES (
     'gift_media_bucket_exception', 'empty historical bucket; no product contract or objects'
   )
 )
-ON CONFLICT (run_id) DO NOTHING;
+ON CONFLICT (run_id) DO UPDATE
+SET delete_by = NULL;
 
 COMMIT;
