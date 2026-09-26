@@ -78,21 +78,68 @@ Every flag change requires explicit Product Owner approval, a QA preflight, and 
 | Product events | `analytics_events` | Product Owner / Engineering | Unknown | On-demand review | Event dashboard and retention unknown | Medium |
 | User-facing events | `notifications` | Product Owner / Operations/Auth Owner | Unknown | Bell only | No verified escalation path | Medium |
 | Financial invariants | `credit_transactions`, wallet invariants | Database Owner / Product Owner | Known in ledger, retention unknown | Manual QA/query | No automatic invariant alert | Critical |
-| NEW/SLA lifecycle | Queue RPCs and lifecycle analytics | Operations/Auth Owner | Unknown | UI indicators/manual RPC | Critical scheduler is not active | High |
+| NEW/SLA lifecycle | Queue RPCs, lifecycle analytics, and QA cron | Operations/Auth Owner | QA cron history: 14 days | QA scheduler/manual UI indicators | Production scheduler is not provisioned | High |
 | Outreach lifecycle | Outreach attempts and analytics events | Operations/Auth Owner | Unknown | On-demand review | No operational alerting | Medium |
 | Media hard delete | Edge response and `audit_logs` | Engineering / Database Owner | Unknown | Manual | No automatic Storage-delete failure alert | High |
 | Migration state | Supabase migration history | Database Owner | Known in project history | Manual reconciliation | No release dashboard | Medium |
 
-## 8. Known Monitoring Gaps
+## 8. V3-3 QA SLA Scheduler
+
+### Environment
+
+- QA project: `qmgkmsarzfjnqltljkjl`.
+- Production scheduler: disabled and not provisioned.
+
+### Approved QA Jobs
+
+| Job | Schedule | Owner/database | Command or retention |
+| --- | --- | --- | --- |
+| `qa_v3_3_new_sla_critical_each_minute` | `* * * * *` | `postgres` / `postgres` | `SELECT private.run_new_sla_critical_scheduler();` |
+| `qa_v3_3_cron_history_cleanup_daily` | `17 3 * * *` UTC | `postgres` / `postgres` | Removes `cron.job_run_details` older than 14 days. Expected history size is approximately 20,000 rows. |
+
+### Safety Contracts
+
+- Transaction-scoped advisory lock, with no wait when another run holds the lock.
+- `45` second statement timeout and a deterministic, bounded batch of `100` work items.
+- `FOR UPDATE SKIP LOCKED`, eligibility revalidation, and semantic notification deduplication.
+- Dashboard reads remain side-effect free.
+
+### Live QA Result
+
+- The SLA Bell appeared 41 seconds after the 15-minute threshold for five eligible recipients.
+- No semantic duplicate groups or SLA-warning Bells were created.
+- Claim and close prevented further alerts, and the scheduler made no ledger changes.
+- Hebrew notification literals were repaired, and V3-3-D QA notification artifacts were cleaned.
+
+### Monitoring
+
+- Inspect scheduled jobs with `SELECT jobname, active, schedule, command, database, username FROM cron.job ORDER BY jobname;`.
+- Inspect recent execution status and duration with `SELECT jobid, status, start_time, end_time, end_time - start_time AS duration FROM cron.job_run_details ORDER BY start_time DESC LIMIT 100;`.
+- Check semantic duplicates by grouping `notifications` on the SLA-critical dedupe key and investigating any group with a count greater than one.
+- Stop on failed runs, duplicate Bells, an ineligible recipient, or any unexpected ledger mutation.
+
+### Rollback
+
+- Unschedule the product job with `SELECT cron.unschedule('qa_v3_3_new_sla_critical_each_minute');`.
+- Unschedule the retention job separately with `SELECT cron.unschedule('qa_v3_3_cron_history_cleanup_daily');`.
+- Do not drop `pg_cron` until confirming that no jobs remain.
+- Database changes are rollback-forward only; do not reverse applied migrations destructively.
+
+### Known Limitation
+
+- A true two-session advisory-lock test remains environmentally blocked and is required before any Production scheduler activation.
+- Production remains `NO-GO` without explicit Owner approval.
+
+## 9. Known Monitoring Gaps
 
 - No verified external application error monitoring.
 - No verified alert routing or retention policy.
-- SLA-critical scheduler is not active; manual/Admin RPC is the current QA-only path.
+- Production SLA scheduling is not provisioned; QA scheduling remains the only active scheduler path.
 - No automatic financial-invariant alert.
 - No automatic Storage hard-delete failure alert.
 - Performance advisors and load targets require a separate evidence-based phase.
 
-## 9. Pre-Deploy Checklist
+## 10. Pre-Deploy Checklist
 
 - [ ] Product Owner explicitly approves a Production deploy.
 - [ ] Production project, app host, Database Owner, Operations/Auth Owner, and rollback authority are identified.
@@ -105,7 +152,7 @@ Every flag change requires explicit Product Owner approval, a QA preflight, and 
 - [ ] Isolated Admin, Operator A, Operator B, and Client QA sessions are available.
 - [ ] Rollback authority and owner contact path are confirmed.
 
-## 10. Deployment Order
+## 11. Deployment Order
 
 Planning sequence only; each step requires its own approval gate:
 
@@ -117,7 +164,7 @@ Planning sequence only; each step requires its own approval gate:
 6. Run the smoke-test matrix.
 7. Observe logs, ledgers, queue behavior, and audit evidence for an approved window.
 
-## 11. Smoke Test Matrix
+## 12. Smoke Test Matrix
 
 Use isolated Admin, Operator A, Operator B, and Client QA sessions. Stop immediately for RLS/IDOR exposure, wrong financial debit or payout, duplicate message/transaction, media URL/path leakage, broken NEW ownership, failed Auth flow, or missing audit evidence.
 
@@ -135,7 +182,7 @@ Use isolated Admin, Operator A, Operator B, and Client QA sessions. Stop immedia
 | Admin hardening | Admin, non-admin | Sensitive actions succeed only for Admin and create audit evidence. |
 | Dashboard reads | Admin, Operator | Reads do not create notifications. |
 
-## 12. Rollback Runbook
+## 13. Rollback Runbook
 
 1. Stop traffic or disable the affected approved flow before financial repair.
 2. Preserve `audit_logs`, ledger, transaction, and relevant Edge-log evidence.
@@ -145,16 +192,16 @@ Use isolated Admin, Operator A, Operator B, and Client QA sessions. Stop immedia
 6. Disable an approved feature flag where applicable, then verify the guard and user route recovery.
 7. Never reset a shared environment.
 
-## 13. Open Operational Blockers
+## 14. Open Operational Blockers
 
 - Production environment and accountable owner are unknown.
 - Legacy Gift-function deletion permission is unavailable.
 - Auth Dashboard access for leaked-password-protection QA is unavailable.
 - External monitoring ownership and alert routing are undefined.
-- SLA scheduler decision is deferred.
+- Production scheduler activation requires explicit Owner approval and a true two-session advisory-lock test.
 - Representative load targets are undefined.
 
-## 14. Go/No-Go Template
+## 15. Go/No-Go Template
 
 | Dependency | Owner | Status | Evidence | Blocker | Approval |
 | --- | --- | --- | --- | --- | --- |
