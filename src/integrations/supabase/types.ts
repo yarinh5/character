@@ -2546,6 +2546,37 @@ export type Database = {
           warning_count: number
         }[]
       }
+      get_admin_operations_snapshot: {
+        Args: never
+        Returns: {
+          active_handling_cycle_count: number
+          active_media_reservation_count: number
+          active_media_tag_count: number
+          active_operator_client_block_count: number
+          active_operator_count: number
+          activity_window_started_at: string
+          archived_client_count: number
+          generated_at: string
+          media_asset_available_count: number
+          media_asset_disabled_count: number
+          media_asset_reserved_count: number
+          media_asset_restored_count: number
+          media_asset_sent_count: number
+          media_asset_total: number
+          new_critical_count: number
+          new_normal_count: number
+          new_oldest_wait_seconds: number
+          new_returned_count: number
+          new_total: number
+          new_warning_count: number
+          offline_operator_count: number
+          online_operator_count: number
+          open_client_report_count: number
+          open_operator_report_count: number
+          outreach_replied_count: number
+          outreach_sent_count: number
+        }[]
+      }
       get_admin_operator_client_reports: {
         Args: never
         Returns: {
