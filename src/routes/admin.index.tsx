@@ -3,22 +3,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { AdminOperationsSnapshot } from "@/components/admin/AdminOperationsSnapshot";
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminAnalytics } from "@/lib/analytics.functions";
-import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
 import {
   Activity,
-  AlertTriangle,
   Coins,
-  Flag,
   MessageCircle,
   Sparkles,
   Timer,
   TrendingDown,
   TrendingUp,
-  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -41,24 +38,12 @@ function AdminDashboard() {
       const [
         clients,
         clientsToday,
-        operators,
-        operatorsAvailable,
         characters,
-        convsAll,
-        reportsOpen,
         recent,
       ] = await Promise.all([
         supabase.from("user_roles").select("user_id", { count: "exact", head: true }).eq("role", "client"),
         supabase.from("profiles").select("user_id", { count: "exact", head: true }).gte("created_at", iso),
-        supabase.from("operators").select("id", { count: "exact", head: true }),
-        supabase
-          .from("operators")
-          .select("id", { count: "exact", head: true })
-          .eq("availability_status", "available")
-          .eq("is_active", true),
         supabase.from("characters").select("id", { count: "exact", head: true }).eq("is_active", true),
-        supabase.from("conversations").select("id, status"),
-        supabase.from("reports").select("id", { count: "exact", head: true }).eq("status", "open"),
         supabase
           .from("conversations")
           .select("id, status, last_message_at, last_message_preview, characters(name, avatar_url), operators(full_name)")
@@ -66,17 +51,10 @@ function AdminDashboard() {
           .limit(8),
       ]);
 
-      const allConvs = convsAll.data ?? [];
-
       return {
         clients: clients.count ?? 0,
         clientsToday: clientsToday.count ?? 0,
-        operators: operators.count ?? 0,
-        operatorsAvailable: operatorsAvailable.count ?? 0,
         characters: characters.count ?? 0,
-        activeConvs: allConvs.filter((c) => c.status !== "closed").length,
-        waitingConvs: allConvs.filter((c) => c.status === "waiting").length,
-        reportsOpen: reportsOpen.count ?? 0,
         recent: recent.data ?? [],
       };
     },
@@ -87,23 +65,15 @@ function AdminDashboard() {
     queryFn: () => analyticsFn(),
   });
 
-  const { data: slaRisks = [], isLoading: slaLoading } = useQuery({
-    queryKey: ["admin-sla-risks"],
-    queryFn: () => fetchSlaRiskConversations(8, true),
-    refetchInterval: 30000,
-  });
-
   useEffect(() => {
     const ch = supabase
       .channel("admin-dashboard")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
         qc.invalidateQueries({ queryKey: ["admin-stats"] });
         qc.invalidateQueries({ queryKey: ["admin-analytics"] });
-        qc.invalidateQueries({ queryKey: ["admin-sla-risks"] });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
         qc.invalidateQueries({ queryKey: ["admin-analytics"] });
-        qc.invalidateQueries({ queryKey: ["admin-sla-risks"] });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
         qc.invalidateQueries({ queryKey: ["admin-analytics"] }),
@@ -126,57 +96,16 @@ function AdminDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <Stat label="סך לקוחות" value={data?.clients} icon={Users} loading={isLoading} />
         <Stat label="חדשים היום" value={data?.clientsToday} icon={Activity} loading={isLoading} />
-        <Stat label="עובדים" value={data?.operators} icon={UserCog} loading={isLoading} />
-        <Stat label="עובדים זמינים" value={data?.operatorsAvailable} icon={UserCog} loading={isLoading} />
         <Stat label="דמויות פעילות" value={data?.characters} icon={Sparkles} loading={isLoading} />
-        <Stat label="שיחות פעילות" value={data?.activeConvs} icon={MessageCircle} loading={isLoading} />
-        <Stat label="ממתינות" value={data?.waitingConvs} icon={Timer} loading={isLoading} highlight />
-        <Stat label="דיווחים פתוחים" value={data?.reportsOpen} icon={Flag} loading={isLoading} highlight />
         <Stat label="קרדיטים שנוצלו" value={analytics?.totalCreditsSpent} icon={TrendingDown} loading={analyticsLoading} />
         <Stat label="נוספו ידנית" value={analytics?.manualCreditsAdded} icon={Coins} loading={analyticsLoading} />
         <Stat label="הודעות לקוחות" value={analytics?.clientMessages} icon={MessageCircle} loading={analyticsLoading} />
         <Stat label="הודעות עובדים" value={analytics?.operatorMessages} icon={TrendingUp} loading={analyticsLoading} />
-        <Stat label="SLA risk" value={slaRisks.length} icon={AlertTriangle} loading={slaLoading} highlight />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-warning" />
-              SLA risk conversations
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {slaLoading && <Skeleton className="h-32" />}
-            {!slaLoading && slaRisks.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">No conversations are currently over SLA</p>
-            )}
-            {!slaLoading && slaRisks.length > 0 && (
-              <div className="space-y-2">
-                {slaRisks.map((conversation) => (
-                  <Link
-                    key={conversation.conversation_id}
-                    to="/admin/conversations/$conversationId"
-                    params={{ conversationId: conversation.conversation_id }}
-                    className="flex items-center justify-between gap-3 p-3 rounded-lg border border-warning/40 hover:bg-accent transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{conversation.character_name ?? "-"}</div>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {conversation.client_display_name ?? "Client"} · {conversation.last_message_preview ?? "-"}
-                      </p>
-                    </div>
-                    <span className="text-xs font-medium text-warning whitespace-nowrap">
-                      {conversation.minutes_waiting} min
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <AdminOperationsSnapshot />
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">שיחות אחרונות</CardTitle>
@@ -339,16 +268,14 @@ function Stat({
   value,
   icon: Icon,
   loading,
-  highlight,
 }: {
   label: string;
   value: number | undefined;
   icon: LucideIcon;
   loading?: boolean;
-  highlight?: boolean;
 }) {
   return (
-    <Card className={highlight && value && value > 0 ? "border-warning" : undefined}>
+    <Card>
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-muted-foreground">{label}</span>
