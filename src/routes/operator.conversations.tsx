@@ -98,7 +98,7 @@ function OperatorConversationsPage() {
 
       const [unread, slaRisks] = await Promise.all([
         fetchUnreadCounts((data ?? []).map((c) => c.id)),
-        fetchSlaRiskConversations(100, true),
+        fetchSlaRiskConversations(100),
       ]);
       const slaMap = new Map(slaRisks.map((risk) => [risk.conversation_id, risk]));
       return (data ?? []).map((c) => ({

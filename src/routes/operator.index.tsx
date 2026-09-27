@@ -121,7 +121,7 @@ function OperatorDashboard() {
 
       const [unreadCounts, slaRisks] = await Promise.all([
         fetchUnreadCounts((convs ?? []).map((c) => c.id)),
-        fetchSlaRiskConversations(5, true),
+        fetchSlaRiskConversations(5),
       ]);
       const list = (convs ?? []).map((conversation) => ({
         ...conversation,
