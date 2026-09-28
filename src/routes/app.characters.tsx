@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
+import { logSupabaseError } from "@/lib/readStates";
 import { EMPTY_DISCOVERY_FILTERS, type DiscoveryFilters as DiscoveryFiltersState, useDiscovery } from "@/hooks/useDiscovery";
 import { DiscoveryFilters } from "@/components/discovery/DiscoveryFilters";
 import { DiscoveryDeck } from "@/components/discovery/DiscoveryDeck";
@@ -15,10 +16,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 export const Route = createFileRoute("/app/characters")({
   component: CharactersRoute,
 });
-
-function errorMessage(error: unknown, fallback: string) {
-  return typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback;
-}
 
 function CharactersRoute() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -48,7 +45,8 @@ function CharactersPage() {
     try {
       await discovery.swipe(character, action);
     } catch (error) {
-      toast.error(errorMessage(error, "עדכון הבחירה נכשל"));
+      logSupabaseError("client discovery swipe", error);
+      toast.error("לא הצלחנו לעדכן את הבחירה. אפשר לנסות שוב.");
     }
   };
 
@@ -57,7 +55,8 @@ function CharactersPage() {
     try {
       await discovery.setFavorite(character.id, !discovery.isFavorite);
     } catch (error) {
-      toast.error(errorMessage(error, "עדכון המועדפים נכשל"));
+      logSupabaseError("client discovery favorite", error);
+      toast.error("לא הצלחנו לעדכן את המועדפים. אפשר לנסות שוב.");
     }
   };
 
@@ -71,7 +70,8 @@ function CharactersPage() {
       if (error) throw error;
       navigate({ to: "/app/chat/$conversationId", params: { conversationId: data } });
     } catch (error) {
-      toast.error(errorMessage(error, "פתיחת שיחה נכשלה"));
+      logSupabaseError("client discovery start conversation", error);
+      toast.error("לא הצלחנו לפתוח את השיחה. אפשר לנסות שוב.");
     } finally {
       setStartingId(null);
     }

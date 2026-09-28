@@ -9,14 +9,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useFavorites } from "@/hooks/useFavorites";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { logSupabaseError } from "@/lib/readStates";
 
 export const Route = createFileRoute("/app/favorites")({
   component: FavoritesPage,
 });
-
-function errorMessage(error: unknown, fallback: string) {
-  return typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback;
-}
 
 function FavoritesPage() {
   const { user } = useAuth();
@@ -29,7 +26,8 @@ function FavoritesPage() {
     try {
       await favorites.setFavorite(characterId, false);
     } catch (error) {
-      toast.error(errorMessage(error, "עדכון המועדפים נכשל"));
+      logSupabaseError("client favorites remove favorite", error);
+      toast.error("לא הצלחנו לעדכן את המועדפים. אפשר לנסות שוב.");
     }
   };
 
@@ -43,7 +41,8 @@ function FavoritesPage() {
       if (error) throw error;
       navigate({ to: "/app/chat/$conversationId", params: { conversationId: data } });
     } catch (error) {
-      toast.error(errorMessage(error, "פתיחת שיחה נכשלה"));
+      logSupabaseError("client favorites start conversation", error);
+      toast.error("לא הצלחנו לפתוח את השיחה. אפשר לנסות שוב.");
     } finally {
       setStartingId(null);
     }

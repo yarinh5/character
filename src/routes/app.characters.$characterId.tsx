@@ -1,20 +1,17 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, MapPin, MessageCirclePlus, Star, UserRound } from "lucide-react";
+import { ArrowRight, MapPin, MessageCirclePlus, RefreshCw, Star, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
+import { logSupabaseError } from "@/lib/readStates";
 
 export const Route = createFileRoute("/app/characters/$characterId")({
   component: CharacterProfilePage,
 });
-
-function messageForError(error: unknown, fallback: string) {
-  return typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback;
-}
 
 function CharacterProfilePage() {
   const { characterId } = Route.useParams();
@@ -27,7 +24,10 @@ function CharacterProfilePage() {
     enabled: Boolean(user?.id),
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_character_profile", { _character_id: characterId });
-      if (error) throw error;
+      if (error) {
+        logSupabaseError("client character profile", error);
+        throw error;
+      }
       return data?.[0] ?? null;
     },
   });
@@ -71,7 +71,32 @@ function CharacterProfilePage() {
     );
   }
 
-  if (profileQuery.isError || !character) {
+  if (profileQuery.isError) {
+    return (
+      <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-xl flex-col items-center justify-center gap-4 px-4 text-center" dir="rtl">
+        <UserRound className="h-10 w-10 text-muted-foreground" />
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold">טעינת הפרופיל נכשלה</h1>
+          <p className="text-sm text-muted-foreground">לא הצלחנו לטעון את פרטי הדמות. אפשר לנסות שוב.</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <Button
+            variant="outline"
+            disabled={profileQuery.isFetching}
+            onClick={() => void profileQuery.refetch()}
+          >
+            <RefreshCw className={`h-4 w-4 ${profileQuery.isFetching ? "animate-spin" : ""}`} />
+            נסה שוב
+          </Button>
+          <Button asChild variant="ghost">
+            <Link to="/app/characters">חזרה לגילוי</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!character) {
     return (
       <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-xl flex-col items-center justify-center gap-4 px-4 text-center" dir="rtl">
         <UserRound className="h-10 w-10 text-muted-foreground" />
@@ -94,7 +119,8 @@ function CharacterProfilePage() {
     try {
       await favoriteMutation.mutateAsync(!character.is_favorite);
     } catch (error) {
-      toast.error(messageForError(error, "עדכון המועדפים נכשל"));
+      logSupabaseError("client character profile favorite", error);
+      toast.error("לא הצלחנו לעדכן את המועדפים. אפשר לנסות שוב.");
     }
   };
 
@@ -113,7 +139,8 @@ function CharacterProfilePage() {
       });
       await startConversationMutation.mutateAsync();
     } catch (error) {
-      toast.error(messageForError(error, "פתיחת השיחה נכשלה"));
+      logSupabaseError("client character profile start conversation", error);
+      toast.error("לא הצלחנו לפתוח את השיחה. אפשר לנסות שוב.");
     }
   };
 
