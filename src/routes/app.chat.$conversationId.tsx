@@ -523,16 +523,30 @@ function ChatPage() {
                 size="icon"
                 className="h-10 w-10 shrink-0"
                 onClick={() => setStickerPickerOpen(true)}
-                aria-label="Choose sticker"
+                aria-label="בחירת סטיקר לשליחה"
               >
                 <Smile className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Choose sticker</TooltipContent>
+            <TooltipContent>בחירת סטיקר</TooltipContent>
           </Tooltip>
-          <Button className="h-10 w-10 shrink-0" onClick={send} disabled={sending || !input.trim()} size="icon">
-            <Send className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="shrink-0">
+                <Button
+                  className="h-10 w-10"
+                  onClick={send}
+                  disabled={sending || !input.trim()}
+                  size="icon"
+                  aria-label="שליחת הודעה"
+                  aria-busy={sending}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>שליחת הודעה</TooltipContent>
+          </Tooltip>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1 text-end">
           {input.length}/2000

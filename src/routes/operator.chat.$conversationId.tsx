@@ -1194,19 +1194,35 @@ function OperatorChatPage() {
                           className="h-10 w-10 shrink-0"
                           onClick={() => setStickerPickerOpen(true)}
                           disabled={sendBlockedByLock}
-                          aria-label="Choose sticker"
+                          aria-label="בחירת סטיקר לשליחה"
                         >
                           <Smile className="h-4 w-4" />
                         </Button>
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {sendBlockedByLock ? "The conversation is locked by another operator." : "Choose sticker"}
+                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "בחירת סטיקר"}
                     </TooltipContent>
                   </Tooltip>
-                  <Button className="h-10 w-10 shrink-0" onClick={send} disabled={sending || !input.trim() || sendBlockedByLock} size="icon">
-                    <Send className="h-4 w-4" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0">
+                        <Button
+                          className="h-10 w-10"
+                          onClick={send}
+                          disabled={sending || !input.trim() || sendBlockedByLock}
+                          size="icon"
+                          aria-label="שליחת הודעה"
+                          aria-busy={sending}
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "שליחת הודעה"}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1 text-end">{input.length}/2000</p>
               </>

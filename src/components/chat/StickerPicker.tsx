@@ -34,16 +34,16 @@ import { toast } from "sonner";
 type StickerPickerRole = "client" | "operator" | "admin";
 
 function describeSendError(errorCode: string) {
-  if (errorCode.includes("stickers_disabled")) return "Stickers are not available.";
-  if (errorCode.includes("sticker_rate_limited")) return "Please wait a moment before sending another sticker.";
-  if (errorCode.includes("conversation_closed")) return "Stickers cannot be sent in a closed conversation.";
-  if (errorCode.includes("conversation_locked_by_other_operator")) return "This conversation is locked by another operator.";
-  if (errorCode.includes("sticker_not_available")) return "This sticker is no longer available.";
+  if (errorCode.includes("stickers_disabled")) return "סטיקרים אינם זמינים כרגע.";
+  if (errorCode.includes("sticker_rate_limited")) return "יש להמתין מעט לפני שליחת סטיקר נוסף.";
+  if (errorCode.includes("conversation_closed")) return "לא ניתן לשלוח סטיקר בשיחה סגורה.";
+  if (errorCode.includes("conversation_locked_by_other_operator")) return "השיחה נעולה כרגע לעובד אחר.";
+  if (errorCode.includes("sticker_not_available")) return "הסטיקר אינו זמין יותר.";
   if (errorCode.includes("insufficient_credits")) return "אין לך מספיק קרדיטים לסטיקר הזה.";
   if (errorCode.includes("paid_sticker_requires_operator_context")) {
     return "סטיקר בתשלום זמין רק לאחר שעובד הצטרף לשיחה";
   }
-  return "Sticker could not be sent.";
+  return "שליחת הסטיקר נכשלה. אפשר לנסות שוב.";
 }
 
 function StickerTile({
@@ -68,7 +68,7 @@ function StickerTile({
       className="flex min-h-24 flex-col items-center justify-center gap-1 rounded-md border border-border bg-card p-2 text-center text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       onClick={() => onSelect(sticker)}
       disabled={disabled || preview.status !== "ready" || !preview.url}
-      aria-label={`Send ${label}`}
+      aria-label={`שליחת סטיקר ${label}`}
       title={label}
     >
       {preview.status === "ready" && preview.url ? (
@@ -80,14 +80,14 @@ function StickerTile({
           onError={preview.retryAfterImageError}
         />
       ) : preview.status === "error" ? (
-        <span className="text-muted-foreground">Unavailable</span>
+        <span className="text-muted-foreground">לא זמין</span>
       ) : (
         <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" />
       )}
       <span className="line-clamp-2 w-full">{sticker.name}</span>
       {showPrice && (
         <span className="text-[11px] text-muted-foreground">
-          {sticker.price_credits > 0 ? `${sticker.price_credits} credits` : "Free"}
+          {sticker.price_credits > 0 ? `${sticker.price_credits} קרדיטים` : "חינם"}
         </span>
       )}
     </button>
@@ -109,15 +109,15 @@ function PaidStickerConfirmation({
     <AlertDialog open={Boolean(sticker)} onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent dir="rtl">
         <AlertDialogHeader>
-          <AlertDialogTitle>Send paid sticker?</AlertDialogTitle>
+          <AlertDialogTitle>שליחת סטיקר בתשלום</AlertDialogTitle>
           <AlertDialogDescription>
-            {sticker ? `Send ${sticker.name} for ${sticker.price_credits} credits?` : ""}
+            {sticker ? `לשלוח את "${sticker.name}" תמורת ${sticker.price_credits} קרדיטים?` : ""}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>ביטול</AlertDialogCancel>
           <AlertDialogAction disabled={busy} onClick={onConfirm}>
-            Send
+            שלח
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -169,32 +169,32 @@ export function StickerPicker({
       {catalog.status === "loading" && (
         <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
           <LoaderCircle className="h-4 w-4 animate-spin" />
-          Loading stickers
+          טוען סטיקרים...
         </div>
       )}
       {catalog.status === "disabled" && (
         <div className="flex h-28 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Smile className="h-5 w-5" />
-          Stickers are unavailable.
+          סטיקרים אינם זמינים כרגע.
         </div>
       )}
       {catalog.status === "error" && (
         <div className="flex h-28 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
-          <span>Could not load stickers.</span>
+          <span>טעינת הסטיקרים נכשלה.</span>
           <Button type="button" variant="outline" size="sm" onClick={() => void catalog.refresh()}>
-            Retry
+            נסה שוב
           </Button>
         </div>
       )}
       {catalog.status === "ready" && catalog.stickers.length === 0 && (
         <div className="flex h-28 items-center justify-center text-center text-sm text-muted-foreground">
-          No stickers are available yet.
+          אין סטיקרים זמינים כרגע.
         </div>
       )}
       {catalog.status === "ready" && catalog.stickers.length > 0 && (
         <>
           {role === "client" && creditBalance !== undefined && creditBalance !== null && (
-            <p className="mb-3 text-sm text-muted-foreground">Your balance: {creditBalance} credits</p>
+            <p className="mb-3 text-sm text-muted-foreground">יתרת קרדיטים: {creditBalance} קרדיטים</p>
           )}
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {catalog.stickers.map((sticker) => (
@@ -232,8 +232,8 @@ export function StickerPicker({
         <Sheet open={open} onOpenChange={onOpenChange}>
           <SheetContent side="bottom" className="flex max-h-[80dvh] flex-col" dir="rtl">
             <SheetHeader>
-              <SheetTitle>Stickers</SheetTitle>
-              <SheetDescription>Choose a sticker to send.</SheetDescription>
+              <SheetTitle>סטיקרים</SheetTitle>
+              <SheetDescription>בחר סטיקר לשליחה.</SheetDescription>
             </SheetHeader>
             {content}
           </SheetContent>
@@ -248,8 +248,8 @@ export function StickerPicker({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="flex max-h-[70vh] max-w-md flex-col" dir="rtl">
           <DialogHeader>
-            <DialogTitle>Stickers</DialogTitle>
-            <DialogDescription>Choose a sticker to send.</DialogDescription>
+            <DialogTitle>סטיקרים</DialogTitle>
+            <DialogDescription>בחר סטיקר לשליחה.</DialogDescription>
           </DialogHeader>
           {content}
         </DialogContent>
