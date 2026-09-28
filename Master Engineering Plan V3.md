@@ -112,3 +112,58 @@ Produce a release-ready operational package without changing product behavior or
 2. Enable mandatory onboarding, keep it disabled, or plan a controlled rollout?
 3. Add pg_cron for SLA-critical alerts after a threshold and ownership review?
 4. Prioritize UX polish, observability, or a separately approved monetization initiative after V3-1?
+
+## V3 Closeout
+
+### Completion Status
+
+- Date: 2026-09-28.
+- Status: Local/QA complete.
+- Production: NO-GO until separately approved.
+- No P0/P1 source or QA contract blockers remain.
+
+### Track Summary
+
+| Track | Completion |
+| --- | --- |
+| V3-1 | Production readiness and security baseline complete. |
+| V3-2 | Representative load baseline complete: 30/30 preflight checks, 66/66 benchmark rows, zero spills, and no performance migration required. |
+| V3-3 | QA notification scheduler operational with two approved cron jobs, no recent failures, and no semantic duplicates. |
+| V3-4 | Canonical Admin operations snapshot and dashboard complete. |
+| V3-5 | Operator SLA fail-closed hardening and targeted Client/Operator UX and accessibility polish complete. |
+
+### Closed Product Contracts
+
+V3 did not reopen the following contracts:
+
+- NEW/ONLINE responsibility.
+- Credits, payouts, and sticker pricing.
+- Paid Image per-open sessions.
+- Media tags and Admin media hard delete.
+- Client PII archive.
+- Gifts remain removed.
+
+### Accepted And Deferred Items
+
+- Global NEW claim disabling is accepted safe behavior; throughput refinement is deferred.
+- Admin and Operator visual QA remains manual and non-blocking.
+- Full keyboard/focus QA and profile fault injection remain manual.
+- True two-session advisory-lock QA is required before any Production scheduler activation.
+- Leaked-password protection requires an Auth-owner decision.
+- Legacy Gift Edge Function deletion remains permission-blocked.
+- External monitoring ownership and backup/restore rehearsal remain open.
+
+### Production Prerequisites
+
+- Explicit Production project and owners.
+- Migration, secret, and flag baseline.
+- Backup and rollback authority.
+- Production smoke-test identities.
+- Monitoring and incident route.
+- Separate scheduler approval.
+- Legal, privacy, and support approval where required.
+
+### Next-Step Rule
+
+- Any Production deployment or new product initiative begins a new, explicitly approved loop.
+- Payments and top-ups remain optional and are not implied by V3 completion.
