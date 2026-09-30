@@ -17,15 +17,20 @@ export type SlaRiskConversation = {
 export async function fetchSlaRiskConversations(limit = 10): Promise<SlaRiskConversation[]> {
   const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 10;
   const boundedLimit = Math.max(1, Math.min(100, requestedLimit));
-  const { data, error } = await supabase.rpc("get_sla_risk_conversations", {
-    _limit: boundedLimit,
-    _notify: false,
-  });
+  try {
+    const { data, error } = await supabase.rpc("get_sla_risk_conversations", {
+      _limit: boundedLimit,
+      _notify: false,
+    });
 
-  if (error) {
+    if (error) {
+      logSupabaseError("get_sla_risk_conversations", error);
+      return [];
+    }
+
+    return data ?? [];
+  } catch (error) {
     logSupabaseError("get_sla_risk_conversations", error);
     return [];
   }
-
-  return data ?? [];
 }
