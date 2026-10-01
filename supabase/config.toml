@@ -1,5 +1,31 @@
 project_id = "qmgkmsarzfjnqltljkjl"
 
+# Local collision-free port range for this repository's isolated Supabase stack.
+[api]
+port = 60421
+
+[db]
+shadow_port = 60420
+port = 60422
+
+[db.pooler]
+port = 60429
+
+[studio]
+port = 60423
+
+[inbucket]
+port = 60424
+smtp_port = 60425
+pop3_port = 60426
+
+[analytics]
+port = 60427
+vector_port = 60428
+
+[edge_runtime]
+inspector_port = 60430
+
 [functions.media-view-url]
 enabled = true
 verify_jwt = true

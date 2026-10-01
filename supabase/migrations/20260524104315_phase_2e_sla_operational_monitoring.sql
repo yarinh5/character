@@ -1,4 +1,4 @@
-﻿-- Phase 2E: SLA / Operational Monitoring.
+-- Phase 2E: SLA / Operational Monitoring.
 -- Lightweight dashboard-time monitoring, no scheduled job.
 
 INSERT INTO public.system_settings (key, value)
