@@ -20,6 +20,8 @@ Covered through HTTP:
 - paid sticker authorization, first send, same-key retry, message identity,
   debit/payout identities, signed amounts and wallet balances;
 - anonymous credit-wallet rows are not exposed at the HTTP boundary.
+- Client and Operator denial, Admin success, redaction, cleanup effects, and
+  idempotent replay for the existing client PII archive RPC.
 
 The direct anonymous invocation of the revoked Admin RPC remains explicitly
 skipped because local `public.ecr.aws/supabase/postgres:17.6.1.106` has a
@@ -33,6 +35,12 @@ The paid-sticker suite is also skipped when the existing local
 flags. In the current local stack that setting is `false`, so paid-sticker
 HTTP proof remains blocked by the local feature prerequisite rather than being
 reported as a passed financial regression.
+
+The PII archive suite uses synthetic `example.invalid` users only. It proves
+the database RPC contract, including that an archived Client session cannot
+update its active profile through the Data API. It does not cover the
+application server's Auth ban or avatar Storage deletion, and it does not
+invoke the revoked anonymous RPC path on the affected local image.
 
 Run one suite with:
 
