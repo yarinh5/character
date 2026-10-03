@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "format:check": "node scripts/check-format-changed.mjs",
     "test": "vitest run",
+    "test:http": "node supabase/tests/http/run-local.mjs",
     "test:db": "supabase test db --local supabase/tests/database/v4_3",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --pretty false"
