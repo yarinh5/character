@@ -103,13 +103,13 @@ suite("V4-3-C HTTP paid sticker authorization and idempotency", () => {
           deleteByEq(admin, "message_stickers", "message_id", requireActualMessageId()),
       },
       {
+        label: "private sticker send attempt",
+        run: async () => cleanupPrivateStickerAttempts([ids.idempotency]),
+      },
+      {
         label: "credit transactions by actual message id",
         run: async () =>
           deleteByEq(admin, "credit_transactions", "message_id", requireActualMessageId()),
-      },
-      {
-        label: "private sticker send attempt",
-        run: async () => cleanupPrivateStickerAttempts([ids.idempotency]),
       },
       {
         label: "notifications",

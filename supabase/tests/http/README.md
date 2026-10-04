@@ -45,11 +45,14 @@ checks rather than directly invoking the revoked functions on the affected
 local PostgreSQL image. The suite does not alter `locked_images_enabled` or
 any other feature setting.
 
-The paid-sticker suite is also skipped when the existing local
-`stickers_enabled` setting is not `true`; the suite never changes feature
-flags. In the current local stack that setting is `false`, so paid-sticker
-HTTP proof remains blocked by the local feature prerequisite rather than being
-reported as a passed financial regression.
+The paid-sticker suite is skipped when the existing local `stickers_enabled`
+setting is not `true`; the suite itself never changes feature flags. V4-3-D3
+proved the HTTP contract with a separately approved, journaled local-only
+activation from `false` to `true`, followed by verified restoration to
+`false`. The targeted suite passed both authorization/idempotency tests, and
+the full HTTP run passed all paid-sticker assertions without changing pricing
+or payout rules. Future enabled runs require the same external recovery and
+restoration procedure rather than flag mutation inside the test suite.
 
 The PII archive suite uses synthetic `example.invalid` users only. It proves
 the database RPC contract, including that an archived Client session cannot
