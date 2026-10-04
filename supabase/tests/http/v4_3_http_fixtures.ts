@@ -250,6 +250,45 @@ export async function cleanupPrivateStickerAttempts(keys: string[]) {
   );
 }
 
+export async function cleanupPrivateMediaOpenState(attachmentIds: string[], clientIds: string[]) {
+  if (attachmentIds.length === 0 && clientIds.length === 0) return;
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (![...attachmentIds, ...clientIds].every((value) => uuidPattern.test(value))) {
+    throw new Error("local media cleanup received a non-UUID identifier");
+  }
+  const db = execFileSync(
+    "docker",
+    ["ps", "--filter", "name=supabase_db_qmgkmsarzfjnqltljkjl", "--format", "{{.Names}}"],
+    { encoding: "utf8", windowsHide: true },
+  )
+    .trim()
+    .split(/\r?\n/)[0];
+  if (!db) throw new Error("local media cleanup could not find the target DB container");
+  const attachmentLiterals = attachmentIds.map((value) => `'${value}'::uuid`).join(", ");
+  const clientLiterals = clientIds.map((value) => `'${value}'::uuid`).join(", ");
+  const sessionPredicates = [
+    attachmentLiterals ? `attachment_id IN (${attachmentLiterals})` : "",
+    clientLiterals ? `client_id IN (${clientLiterals})` : "",
+  ].filter(Boolean);
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      db,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `DELETE FROM private.message_attachment_open_sessions WHERE ${sessionPredicates.join(" OR ")}; DELETE FROM private.message_attachment_open_rate_limits WHERE ${sessionPredicates.join(" OR ")};`,
+    ],
+    { encoding: "utf8", windowsHide: true, stdio: "pipe" },
+  );
+}
+
 export async function deleteAuthUser(admin: HttpClient, userId: string) {
   const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) throw new Error(`local fixture auth cleanup failed: ${error.code ?? "unknown"}`);

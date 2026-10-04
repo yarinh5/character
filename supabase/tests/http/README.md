@@ -22,13 +22,28 @@ Covered through HTTP:
 - anonymous credit-wallet rows are not exposed at the HTTP boundary.
 - Client and Operator denial, Admin success, redaction, cleanup effects, and
   idempotent replay for the existing client PII archive RPC.
+- local character-media catalog and reservation authorization for assigned,
+  unassigned, Client and Admin actors;
+- owner/assigned attachment visibility, private Storage access, and the
+  `media-view-url` JWT boundary with short-lived signed URLs;
+- Permanent reissue, View Once open/completion, Paid Open debit/payout and
+  completion, and locked-media denial while the existing flag is disabled.
 
 The direct anonymous invocation of the revoked Admin RPC remains explicitly
 skipped because local `public.ecr.aws/supabase/postgres:17.6.1.106` has a
 known SIGSEGV on the affected revoked-function path. The existing ACL/pgTAP
 coverage remains the evidence for that contract; this phase does not repeat
-the crash. True two-session concurrency, Realtime, and Edge/Storage signed
-path coverage remain deferred.
+the crash. True two-session concurrency and Realtime coverage remain deferred.
+
+The media suite creates one tiny synthetic `character-media` object and uses
+only `v4_3_media_*` names and `example.invalid` identities. It verifies that
+the public Edge response contains only `url` and `expires_at`, while direct
+anonymous and Client Storage reads remain denied. The service role is used
+only for fixture setup, inspection, signing inside the existing Edge Function,
+and best-effort cleanup. Anonymous media RPC denial is proven by ACL pgTAP
+checks rather than directly invoking the revoked functions on the affected
+local PostgreSQL image. The suite does not alter `locked_images_enabled` or
+any other feature setting.
 
 The paid-sticker suite is also skipped when the existing local
 `stickers_enabled` setting is not `true`; the suite never changes feature
