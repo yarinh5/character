@@ -15,6 +15,10 @@ Covered through HTTP:
 
 - canonical NEW queue filtering by assignment and operator block;
 - assigned claim and safe rejection of a competing operator;
+- active-cycle send responsibility: the owning Operator can send, while an
+  assigned non-owner and an Admin acting as Worker are rejected without message,
+  attachment, sticker-attempt, score, ledger, notification, or analytics effects;
+  after explicit release, an assigned Operator can send again;
 - owner-only conversation/message/sticker access;
 - non-Admin rejection and one-row Admin operations snapshot;
 - paid sticker authorization, first send, same-key retry, message identity,
@@ -33,7 +37,8 @@ The direct anonymous invocation of the revoked Admin RPC remains explicitly
 skipped because local `public.ecr.aws/supabase/postgres:17.6.1.106` has a
 known SIGSEGV on the affected revoked-function path. The existing ACL/pgTAP
 coverage remains the evidence for that contract; this phase does not repeat
-the crash. True two-session concurrency and Realtime coverage remain deferred.
+the crash. DB-level two-session NEW claim concurrency is covered by
+`npm run test:concurrency`; HTTP claim races and Realtime remain deferred.
 
 The media suite creates one tiny synthetic `character-media` object and uses
 only `v4_3_media_*` names and `example.invalid` identities. It verifies that
@@ -53,6 +58,12 @@ activation from `false` to `true`, followed by verified restoration to
 the full HTTP run passed all paid-sticker assertions without changing pricing
 or payout rules. Future enabled runs require the same external recovery and
 restoration procedure rather than flag mutation inside the test suite.
+
+The active-cycle suite verifies the Sticker send guard before the disabled
+`stickers_enabled` gate. Locked-media send remains an explicit skip while
+`locked_images_enabled=false`, because that function rejects the disabled flag
+before reaching the shared send guard. No feature flag is changed by these
+tests.
 
 The PII archive suite uses synthetic `example.invalid` users only. It proves
 the database RPC contract, including that an archived Client session cannot

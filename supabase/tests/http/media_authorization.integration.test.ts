@@ -9,10 +9,12 @@ import {
   deleteByEq,
   insertRow,
   localHttpReady,
-  readCount,
+  readLocalPrivateStickerAttemptCount,
   runCleanupSteps,
   seedCharacter,
+  seedClientMessage,
   seedConversation,
+  seedNewWorkItem,
   seedOperator,
   seedWallet,
   setRole,
@@ -38,6 +40,10 @@ const ids = {
   viewOnceAsset: "00000000-0000-4000-8000-000000060702",
   paidAsset: "00000000-0000-4000-8000-000000060703",
   lockedAsset: "00000000-0000-4000-8000-000000060704",
+  ownerSendAsset: "00000000-0000-4000-8000-000000060705",
+  otherSendAsset: "00000000-0000-4000-8000-000000060706",
+  clientMessage: "00000000-0000-4000-8000-000000060750",
+  workItem: "00000000-0000-4000-8000-000000060751",
   viewOnceReservation: "00000000-0000-4000-8000-000000060801",
   paidReservation: "00000000-0000-4000-8000-000000060802",
   lockedReservation: "00000000-0000-4000-8000-000000060803",
@@ -129,15 +135,65 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
   let adminClient: HttpClient;
   let permanentReservationId: string | undefined;
   let paidSessionId: string | undefined;
-  let baselineLedgerCount = 0;
   let lockedImagesEnabled = true;
 
   const trackUser = (email: string) => (user: { id: string }) => users.push({ id: user.id, email });
   const userId = (email: string) => users.find((user) => user.email === email)?.id;
 
+  async function mediaSideEffectCounts() {
+    const { data: messages, error: messageError } = await service
+      .from("messages")
+      .select("id")
+      .eq("conversation_id", ids.conversation);
+    if (messageError) throw messageError;
+    const messageIds = messages.map((message) => message.id);
+    const [attachments, scores, ledger, notifications, analytics, stickerAttempts] =
+      await Promise.all([
+        service
+          .from("message_attachments")
+          .select("id", { count: "exact", head: true })
+          .in("message_id", messageIds),
+        service
+          .from("operator_score_events")
+          .select("id", { count: "exact", head: true })
+          .in("operator_id", [
+            ids.assignedOperator,
+            ids.otherAssignedOperator,
+            ids.unassignedOperator,
+          ]),
+        service
+          .from("credit_transactions")
+          .select("id", { count: "exact", head: true })
+          .in(
+            "user_id",
+            users.map((user) => user.id),
+          ),
+        service
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", ids.conversation),
+        service
+          .from("analytics_events")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", ids.conversation),
+        readLocalPrivateStickerAttemptCount(users.map((user) => user.id)),
+      ]);
+    for (const result of [attachments, scores, ledger, notifications, analytics]) {
+      if (result.error) throw result.error;
+    }
+    return [
+      messages.length,
+      attachments.count ?? 0,
+      scores.count ?? 0,
+      ledger.count ?? 0,
+      notifications.count ?? 0,
+      analytics.count ?? 0,
+      stickerAttempts,
+    ];
+  }
+
   beforeAll(async () => {
     service = createServiceClient();
-    baselineLedgerCount = await readCount(service, "credit_transactions");
     const { data: existingObjects, error: existingObjectError } = await service.storage
       .from(bucket)
       .list(folder, { search: objectName });
@@ -196,6 +252,24 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       ids.character,
       ids.assignedOperator,
     );
+    await seedClientMessage(service, ids.clientMessage, ids.conversation, ownerUser.user.id);
+    await seedNewWorkItem(
+      service,
+      ids.workItem,
+      ids.conversation,
+      ownerUser.user.id,
+      ids.character,
+      ids.clientMessage,
+    );
+    const { error: assignWorkItemError } = await service
+      .from("conversation_work_items")
+      .update({
+        status: "assigned",
+        responsible_operator_id: ids.assignedOperator,
+        assigned_at: new Date().toISOString(),
+      })
+      .eq("id", ids.workItem);
+    if (assignWorkItemError) throw assignWorkItemError;
     await insertRow(service, "media_tags", {
       id: ids.tag,
       character_id: ids.character,
@@ -244,6 +318,8 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         locked_derivative_status: "ready",
         locked_derivatives_generated_at: new Date().toISOString(),
       },
+      { id: ids.ownerSendAsset, source_path: `${folder}/v4_3_media_owner_send_source.webp` },
+      { id: ids.otherSendAsset, source_path: `${folder}/v4_3_media_other_send_source.webp` },
     ];
     for (const asset of assetRows) {
       await insertRow(service, "character_media_assets", { ...baseAsset, ...asset });
@@ -325,6 +401,11 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       .update({ status: "open" })
       .eq("id", ids.conversation);
     if (restoreConversationError) throw restoreConversationError;
+    await insertRow(service, "conversation_handling_cycles", {
+      conversation_id: ids.conversation,
+      work_item_id: ids.workItem,
+      operator_id: ids.assignedOperator,
+    });
     await Promise.all([
       seedWallet(service, ownerUser.user.id, 20),
       seedWallet(service, assignedUser.user.id, 0),
@@ -393,9 +474,6 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       if (objects.error || objects.data?.some((object) => object.name === objectName)) {
         throw new Error("local media Storage cleanup verification failed");
       }
-      if ((await readCount(service, "credit_transactions")) !== baselineLedgerCount) {
-        throw new Error("local media ledger baseline changed after cleanup");
-      }
     };
 
     await runCleanupSteps([
@@ -440,6 +518,16 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       {
         label: "notifications",
         run: async () => deleteByEq(service, "notifications", "conversation_id", ids.conversation),
+      },
+      {
+        label: "handling cycle",
+        run: async () =>
+          deleteByEq(service, "conversation_handling_cycles", "conversation_id", ids.conversation),
+      },
+      {
+        label: "work item",
+        run: async () =>
+          deleteByEq(service, "conversation_work_items", "conversation_id", ids.conversation),
       },
       {
         label: "attachments",
@@ -537,7 +625,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       _conversation_id: ids.conversation,
     });
     expect(catalog.error).toBeNull();
-    expect(catalog.data).toHaveLength(4);
+    expect(catalog.data).toHaveLength(6);
     const permanent = catalog.data?.find((asset) => asset.id === ids.permanentAsset);
     expect(permanent).toMatchObject({ is_reservable: true, is_reserved_by_me: false });
     for (const row of catalog.data ?? []) {
@@ -561,9 +649,20 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     );
     tracked.reservations.push(permanentReservationId);
 
+    const otherReservation = await otherAssigned.rpc("reserve_character_media_asset", {
+      _conversation_id: ids.conversation,
+      _asset_id: ids.otherSendAsset,
+    });
+    expect(otherReservation.error).toBeNull();
+    const otherReservationId = String(
+      (otherReservation.data as { reservation_id: string }).reservation_id,
+    );
+    tracked.reservations.push(otherReservationId);
+
+    const sideEffectsBeforeDeniedSends = await mediaSideEffectCounts();
     const [otherOperatorSend, unassignedSend] = await Promise.all([
       otherAssigned.rpc("send_operator_media_message", {
-        _reservation_id: permanentReservationId,
+        _reservation_id: otherReservationId,
         _caption: "v4_3_media_other_operator_attempt",
         _view_mode: "permanent",
       }),
@@ -573,8 +672,34 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         _view_mode: "permanent",
       }),
     ]);
-    assertSafeBusinessError(otherOperatorSend.error, "media_reservation_not_owned");
+    assertSafeBusinessError(otherOperatorSend.error, "conversation_not_responsible_operator");
     assertSafeBusinessError(unassignedSend.error, "operator_not_assigned_to_character");
+    expect(await mediaSideEffectCounts()).toEqual(sideEffectsBeforeDeniedSends);
+
+    const ownerReservation = await assigned.rpc("reserve_character_media_asset", {
+      _conversation_id: ids.conversation,
+      _asset_id: ids.ownerSendAsset,
+    });
+    expect(ownerReservation.error).toBeNull();
+    const ownerReservationId = String(
+      (ownerReservation.data as { reservation_id: string }).reservation_id,
+    );
+    tracked.reservations.push(ownerReservationId);
+    const ownerSend = await assigned.rpc("send_operator_media_message", {
+      _reservation_id: ownerReservationId,
+      _caption: "v4_3_media_cycle_owner_allowed",
+      _view_mode: "permanent",
+    });
+    expect(ownerSend.error).toBeNull();
+    const ownerSendResult = ownerSend.data as {
+      already_sent: boolean;
+      attachment: { id: string; message_id: string };
+      message: { id: string };
+    };
+    expect(ownerSendResult).toMatchObject({ already_sent: false });
+    expect(ownerSendResult.attachment.message_id).toBe(ownerSendResult.message.id);
+    tracked.messages.push(ownerSendResult.message.id);
+    tracked.attachments.push(ownerSendResult.attachment.id);
 
     await insertRow(service, "messages", {
       id: ids.permanentMessage,
@@ -606,7 +731,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       unassigned.rpc("get_message_attachment_access", { _attachment_ids: attachmentIds }),
     ]);
     expect(ownerAccess.error).toBeNull();
-    expect(ownerAccess.data).toHaveLength(4);
+    expect(ownerAccess.data).toHaveLength(5);
     expect(ownerAccess.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -627,7 +752,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     expect(otherAccess.error).toBeNull();
     expect(otherAccess.data).toEqual([]);
     expect(assignedAccess.error).toBeNull();
-    expect(assignedAccess.data).toHaveLength(4);
+    expect(assignedAccess.data).toHaveLength(5);
     expect(unassignedAccess.error).toBeNull();
     expect(unassignedAccess.data).toEqual([]);
     for (const row of [...(ownerAccess.data ?? []), ...(assignedAccess.data ?? [])]) {

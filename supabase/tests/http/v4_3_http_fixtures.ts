@@ -250,6 +250,46 @@ export async function cleanupPrivateStickerAttempts(keys: string[]) {
   );
 }
 
+export async function readLocalPrivateStickerAttemptCount(actorUserIds: string[] = []) {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!actorUserIds.every((value) => uuidPattern.test(value))) {
+    throw new Error("local sticker-attempt count received a non-UUID actor identifier");
+  }
+  const db = execFileSync(
+    "docker",
+    ["ps", "--filter", "name=supabase_db_qmgkmsarzfjnqltljkjl", "--format", "{{.Names}}"],
+    { encoding: "utf8", windowsHide: true },
+  )
+    .trim()
+    .split(/\r?\n/)[0];
+  if (!db) throw new Error("local fixture inspection could not find the target DB container");
+  const predicate =
+    actorUserIds.length === 0
+      ? ""
+      : ` WHERE actor_user_id IN (${actorUserIds.map((value) => `'${value}'::uuid`).join(", ")})`;
+  const output = execFileSync(
+    "docker",
+    [
+      "exec",
+      db,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-qAt",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `SELECT count(*) FROM private.sticker_send_attempts${predicate};`,
+    ],
+    { encoding: "utf8", windowsHide: true, stdio: "pipe" },
+  ).trim();
+  const count = Number(output);
+  if (!Number.isInteger(count)) throw new Error("local sticker-attempt count was not an integer");
+  return count;
+}
+
 export async function cleanupPrivateMediaOpenState(attachmentIds: string[], clientIds: string[]) {
   if (attachmentIds.length === 0 && clientIds.length === 0) return;
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
