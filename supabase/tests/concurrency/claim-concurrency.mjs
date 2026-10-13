@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
-const container = "supabase_db_qmgkmsarzfjnqltljkjl";
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const projectId = "qmgkmsarzfjnqltljkjl";
+const container = `supabase_db_${projectId}`;
+const apiContainer = `supabase_kong_${projectId}`;
 const run = `v4_3_claim_${randomUUID().replaceAll("-", "")}`;
 const sessions = [];
 const quote = (value) => `'${value.replaceAll("'", "''")}'`;
@@ -15,6 +21,56 @@ function docker(args) {
     timeout: 15000,
     stdio: ["ignore", "pipe", "pipe"],
   });
+}
+
+function configPort(config, section) {
+  const sectionPattern = section.replaceAll(".", "\\.");
+  const match = config.match(new RegExp(`\\[${sectionPattern}\\]([\\s\\S]*?)(?=\\n\\[|$)`));
+  assert.ok(match, `missing [${section}] local configuration`);
+  const port = match[1].match(/^\s*port\s*=\s*(\d+)\s*$/m);
+  assert.ok(port, `missing [${section}].port local configuration`);
+  return Number(port[1]);
+}
+
+function assertLoopbackUrl(value, expectedPort, label) {
+  const url = new URL(String(value));
+  assert.ok(
+    ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname),
+    `${label} must use a loopback host`,
+  );
+  assert.equal(Number(url.port), expectedPort, `${label} must match config.toml`);
+}
+
+function assertDockerPort(info, name, internalPort, expectedPort) {
+  assert.equal(info.Name, `/${name}`);
+  assert.equal(info.State.Running, true, `${name} must be running`);
+  const published = info.NetworkSettings?.Ports?.[internalPort] ?? [];
+  assert.ok(
+    published.some((entry) => Number(entry.HostPort) === expectedPort),
+    `${name} ${internalPort} must match config.toml`,
+  );
+}
+
+function assertLocalTarget() {
+  const config = readFileSync(join(repoRoot, "supabase", "config.toml"), "utf8");
+  assert.match(config, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
+  const apiPort = configPort(config, "api");
+  const dbPort = configPort(config, "db");
+  const status = JSON.parse(
+    execFileSync("supabase", ["status", "--output", "json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+    }),
+  );
+  assertLoopbackUrl(status.API_URL, apiPort, "local API URL");
+  assertLoopbackUrl(status.DB_URL, dbPort, "local DB URL");
+  const db = JSON.parse(docker(["inspect", container]))[0];
+  const api = JSON.parse(docker(["inspect", apiContainer]))[0];
+  assertDockerPort(db, container, "5432/tcp", dbPort);
+  assertDockerPort(api, apiContainer, "8000/tcp", apiPort);
+  return { apiPort, dbPort, db, api };
 }
 
 class Session {
@@ -296,24 +352,21 @@ async function verifyBaseline() {
   }
 }
 try {
-  const info = JSON.parse(docker(["inspect", container]))[0];
-  assert.equal(info.Name, `/${container}`);
-  assert.equal(info.State.Running, true);
+  const localTarget = assertLocalTarget();
+  const info = localTarget.db;
   assert.equal(info.State.Health.Status, "healthy");
-  assert.ok(info.NetworkSettings.Ports["5432/tcp"].some((port) => port.HostPort === "60422"));
-  const api = JSON.parse(docker(["inspect", "supabase_kong_qmgkmsarzfjnqltljkjl"]))[0];
-  assert.equal(api.State.Running, true);
-  assert.ok(api.NetworkSettings.Ports["8000/tcp"].some((port) => port.HostPort === "60421"));
   observer = new Session("observer");
   await observer.initialize();
   await observer.ok("\\set ON_ERROR_STOP on\nSELECT 1;");
   baseline = await observer.json(baselineSql);
-  assert.equal(baseline.migrations.length, 109);
-  assert.equal(baseline.migrations.at(-1), "20260926232222");
+  assert.equal(baseline.migrations.length, 116);
+  assert.equal(baseline.migrations.at(-1), "20261006211102");
   console.log(
     `Baseline counts: ${JSON.stringify(Object.fromEntries(Object.entries(baseline).filter(([key]) => !["migrations", "settings"].includes(key))))}`,
   );
-  console.log("Local stack verified: API 60421, DB 60422, migrations 109/latest 20260926232222.");
+  console.log(
+    `Local stack verified: API ${localTarget.apiPort}, DB ${localTarget.dbPort}, migrations 116/latest 20261006211102.`,
+  );
   await scenario(observer, "forward", false);
   await verifyBaseline();
   await scenario(observer, "reverse", true);

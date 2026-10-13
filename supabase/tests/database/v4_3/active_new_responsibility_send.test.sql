@@ -79,31 +79,27 @@ INSERT INTO public.conversation_handling_cycles (conversation_id, work_item_id, 
 SELECT plan(21);
 
 SELECT is(
-  has_function_privilege(
-    'anon',
-    'private.assert_operator_can_send_conversation_message(uuid,boolean)'::regprocedure,
-    'EXECUTE'
-  ),
-  false,
-  'Anonymous callers cannot execute the two-argument active-cycle guard'
+  to_regprocedure('private.assert_operator_can_send_conversation_message(uuid,boolean)'),
+  NULL::regprocedure,
+  'The obsolete opt-out overload is absent'
 );
 SELECT is(
   has_function_privilege(
     'authenticated',
-    'private.assert_operator_can_send_conversation_message(uuid,boolean)'::regprocedure,
+    'private.assert_operator_can_send_for_cycle(uuid,uuid)'::regprocedure,
     'EXECUTE'
   ),
   false,
-  'Authenticated callers cannot opt out of active-cycle ownership checks'
+  'Authenticated callers cannot execute the strict cycle-token guard directly'
 );
 SELECT is(
   has_function_privilege(
     'service_role',
-    'private.assert_operator_can_send_conversation_message(uuid,boolean)'::regprocedure,
+    'private.assert_operator_can_send_for_cycle(uuid,uuid)'::regprocedure,
     'EXECUTE'
   ),
   false,
-  'service_role has no direct execute grant on the two-argument guard'
+  'service_role has no direct execute grant on the strict cycle-token guard'
 );
 SELECT is(
   has_function_privilege(
@@ -137,10 +133,10 @@ SELECT is(
     SELECT role.rolname
     FROM pg_proc proc
     JOIN pg_roles role ON role.oid = proc.proowner
-    WHERE proc.oid = 'private.assert_operator_can_send_conversation_message(uuid,boolean)'::regprocedure
+    WHERE proc.oid = 'private.assert_operator_can_send_for_cycle(uuid,uuid)'::regprocedure
   ),
   'postgres',
-  'The internal active-cycle guard remains owned by postgres'
+  'The strict cycle-token guard remains owned by postgres'
 );
 
 SELECT set_config('v4_3_e1.before_other', pg_temp.v4_3_e1_counts()::text, true);

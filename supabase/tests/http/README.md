@@ -2,9 +2,11 @@
 
 These suites run only against the repository-local Supabase stack. The
 `test:http` script obtains the local API and service-role values from
-`supabase status --output json` without printing them, verifies ports 60421 and
-60422, and then starts Vitest with those values in memory. No key, password or
-fixture token is stored in the repository.
+`supabase status --output json` without printing them. It verifies that the
+loopback API and database endpoints agree with `supabase/config.toml` and the
+exact local Docker mappings for `qmgkmsarzfjnqltljkjl`, then starts Vitest with
+those values in memory. No key, password or fixture token is stored in the
+repository.
 
 Fixture setup and cleanup use the local service-role/admin boundary. All
 authorization assertions use real PostgREST/Auth clients with anonymous or
@@ -14,11 +16,20 @@ decision.
 Covered through HTTP:
 
 - canonical NEW queue filtering by assignment and operator block;
-- assigned claim and safe rejection of a competing operator;
+- assigned claim and safe rejection of a competing operator; the WP01 claim
+  assertion also proves that a new claim returns its authoritative `cycle_id`,
+  an authenticated replay returns the same ID, and exactly one matching active
+  cycle exists;
 - active-cycle send responsibility: the owning Operator can send, while an
   assigned non-owner and an Admin acting as Worker are rejected without message,
   attachment, sticker-attempt, score, ledger, notification, or analytics effects;
-  after explicit release, an assigned Operator can send again;
+  the owner write records its active-cycle shadow token; after explicit release,
+  an assigned Operator can send again only through legacy compatibility and that
+  no-cycle write is visibly classified as `unclassified` for reconciliation;
+- assigned Operators can update only legacy `status` directly through
+  PostgREST; RLS rejects an unassigned Operator, anonymous access is denied, and
+  column grants reject direct mutation of `needs_handling`, `pending_since` and
+  `handling_next_sequence`; the Admin status RPC remains available;
 - owner-only conversation/message/sticker access;
 - non-Admin rejection and one-row Admin operations snapshot;
 - paid sticker authorization, first send, same-key retry, message identity,
@@ -64,6 +75,11 @@ The active-cycle suite verifies the Sticker send guard before the disabled
 `locked_images_enabled=false`, because that function rejects the disabled flag
 before reaching the shared send guard. No feature flag is changed by these
 tests.
+
+The WP01 shadow assertions do not treat `needs_handling` as active authority.
+They verify only compatibility metadata written in the same database transaction
+as the existing send RPC. Cutover remains disabled, and unresolved no-cycle
+writes are intentionally visible to the private readiness/reconciliation path.
 
 The PII archive suite uses synthetic `example.invalid` users only. It proves
 the database RPC contract, including that an archived Client session cannot

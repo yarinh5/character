@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  createAnonymousClient,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
@@ -23,22 +24,28 @@ const ids = {
   character: "00000000-0000-4000-8000-000000070101",
   ownedConversation: "00000000-0000-4000-8000-000000070201",
   releasedConversation: "00000000-0000-4000-8000-000000070202",
+  claimConversation: "00000000-0000-4000-8000-000000070203",
   ownedWorkItem: "00000000-0000-4000-8000-000000070301",
   releasedWorkItem: "00000000-0000-4000-8000-000000070302",
+  claimWorkItem: "00000000-0000-4000-8000-000000070303",
   ownedClientMessage: "00000000-0000-4000-8000-000000070401",
   releasedClientMessage: "00000000-0000-4000-8000-000000070402",
+  claimClientMessage: "00000000-0000-4000-8000-000000070403",
   ownerOperator: "00000000-0000-4000-8000-000000070501",
   otherOperator: "00000000-0000-4000-8000-000000070502",
   adminOperator: "00000000-0000-4000-8000-000000070503",
+  unassignedOperator: "00000000-0000-4000-8000-000000070504",
 };
 
 const prefix = "v4-3-e1-responsibility";
 const emails = {
   ownedClient: `${prefix}-owned-client@example.invalid`,
   releasedClient: `${prefix}-released-client@example.invalid`,
+  claimClient: `${prefix}-claim-client@example.invalid`,
   owner: `${prefix}-owner@example.invalid`,
   other: `${prefix}-other@example.invalid`,
   adminWorker: `${prefix}-admin-worker@example.invalid`,
+  unassigned: `${prefix}-unassigned@example.invalid`,
 };
 
 const suite = describe.skipIf(!localHttpReady);
@@ -46,9 +53,12 @@ const suite = describe.skipIf(!localHttpReady);
 suite("V4-3-E1 HTTP active NEW responsibility", () => {
   let service: HttpClient;
   const users: Array<{ id: string; email: string }> = [];
+  const profileIds: string[] = [];
   let owner: HttpClient;
   let other: HttpClient;
   let adminWorker: HttpClient;
+  let unassigned: HttpClient;
+  let anonymous: HttpClient;
   const successfulMessageIds: string[] = [];
 
   const trackUser = (email: string) => (user: { id: string }) => users.push({ id: user.id, email });
@@ -86,14 +96,23 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
   }
 
   async function sideEffectCounts() {
-    const conversationIds = [ids.ownedConversation, ids.releasedConversation];
+    const conversationIds = [
+      ids.ownedConversation,
+      ids.releasedConversation,
+      ids.claimConversation,
+    ];
     const { data: messages, error: messageError } = await service
       .from("messages")
       .select("id")
       .in("conversation_id", conversationIds);
     if (messageError) throw messageError;
     const messageIds = messages.map((message) => message.id);
-    const operatorIds = [ids.ownerOperator, ids.otherOperator, ids.adminOperator];
+    const operatorIds = [
+      ids.ownerOperator,
+      ids.otherOperator,
+      ids.adminOperator,
+      ids.unassignedOperator,
+    ];
     const fixtureUserIds = users.map((user) => user.id);
     const [attachments, scores, ledger, notifications, analytics, stickerAttempts] =
       await Promise.all([
@@ -135,23 +154,44 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
 
   beforeAll(async () => {
     service = createServiceClient();
-    const [ownedClient, releasedClient, ownerUser, otherUser, adminUser] = await Promise.all([
+    const [
+      ownedClient,
+      releasedClient,
+      claimClient,
+      ownerUser,
+      otherUser,
+      adminUser,
+      unassignedUser,
+    ] = await Promise.all([
       createSyntheticUser(service, emails.ownedClient, trackUser(emails.ownedClient)),
       createSyntheticUser(service, emails.releasedClient, trackUser(emails.releasedClient)),
+      createSyntheticUser(service, emails.claimClient, trackUser(emails.claimClient)),
       createSyntheticUser(service, emails.owner, trackUser(emails.owner)),
       createSyntheticUser(service, emails.other, trackUser(emails.other)),
       createSyntheticUser(service, emails.adminWorker, trackUser(emails.adminWorker)),
+      createSyntheticUser(service, emails.unassigned, trackUser(emails.unassigned)),
     ]);
     await Promise.all([
       setRole(service, ownerUser.user.id, "operator"),
       setRole(service, otherUser.user.id, "operator"),
       setRole(service, adminUser.user.id, "operator"),
       setRole(service, adminUser.user.id, "admin"),
+      setRole(service, unassignedUser.user.id, "operator"),
     ]);
+    const { data: fixtureProfiles, error: fixtureProfilesError } = await service
+      .from("profiles")
+      .select("id")
+      .in(
+        "user_id",
+        users.map((user) => user.id),
+      );
+    if (fixtureProfilesError) throw fixtureProfilesError;
+    profileIds.push(...fixtureProfiles.map((profile) => profile.id));
     await Promise.all([
       seedOperator(service, ids.ownerOperator, ownerUser.user.id, "V4-3-E1 owner"),
       seedOperator(service, ids.otherOperator, otherUser.user.id, "V4-3-E1 other"),
       seedOperator(service, ids.adminOperator, adminUser.user.id, "V4-3-E1 admin worker"),
+      seedOperator(service, ids.unassignedOperator, unassignedUser.user.id, "V4-3-E1 unassigned"),
     ]);
     await seedCharacter(service, ids.character, "V4-3-E1 responsibility character");
     await Promise.all(
@@ -174,33 +214,76 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       releasedClient.user.id,
       ids.releasedClientMessage,
     );
-    [owner, other, adminWorker] = await Promise.all([
+    await seedConversation(service, ids.claimConversation, claimClient.user.id, ids.character);
+    await seedClientMessage(
+      service,
+      ids.claimClientMessage,
+      ids.claimConversation,
+      claimClient.user.id,
+      "v4_3_e1_claim_client_message",
+    );
+    await seedNewWorkItem(
+      service,
+      ids.claimWorkItem,
+      ids.claimConversation,
+      claimClient.user.id,
+      ids.character,
+      ids.claimClientMessage,
+    );
+    [owner, other, adminWorker, unassigned] = await Promise.all([
       signInSyntheticUser(emails.owner, ownerUser.password),
       signInSyntheticUser(emails.other, otherUser.password),
       signInSyntheticUser(emails.adminWorker, adminUser.password),
+      signInSyntheticUser(emails.unassigned, unassignedUser.password),
     ]);
+    anonymous = createAnonymousClient();
   });
 
   afterAll(async () => {
     if (!service) return;
-    const conversationIds = [ids.ownedConversation, ids.releasedConversation];
+    const conversationIds = [
+      ids.ownedConversation,
+      ids.releasedConversation,
+      ids.claimConversation,
+    ];
     await runCleanupSteps([
       ...successfulMessageIds.map((messageId) => ({
         label: `credit transactions ${messageId}`,
         run: async () => deleteByEq(service, "credit_transactions", "message_id", messageId),
       })),
-      ...[ids.ownerOperator, ids.otherOperator, ids.adminOperator].flatMap((operatorId) => [
-        {
-          label: `operator score events ${operatorId}`,
-          run: async () => deleteByEq(service, "operator_score_events", "operator_id", operatorId),
+      ...[ids.ownerOperator, ids.otherOperator, ids.adminOperator, ids.unassignedOperator].flatMap(
+        (operatorId) => [
+          {
+            label: `operator score events ${operatorId}`,
+            run: async () =>
+              deleteByEq(service, "operator_score_events", "operator_id", operatorId),
+          },
+          {
+            label: `operator monthly scores ${operatorId}`,
+            run: async () =>
+              deleteByEq(service, "operator_monthly_scores", "operator_id", operatorId),
+          },
+        ],
+      ),
+      ...users.map((user) => ({
+        label: `notifications for fixture user ${user.id}`,
+        run: async () => deleteByEq(service, "notifications", "user_id", user.id),
+      })),
+      ...profileIds.map((profileId) => ({
+        label: `analytics for fixture profile ${profileId}`,
+        run: async () => {
+          const { error } = await service
+            .from("analytics_events")
+            .delete()
+            .contains("metadata", { profile_id: profileId });
+          if (error) throw error;
         },
-        {
-          label: `operator monthly scores ${operatorId}`,
-          run: async () =>
-            deleteByEq(service, "operator_monthly_scores", "operator_id", operatorId),
-        },
-      ]),
+      })),
       ...conversationIds.flatMap((conversationId) => [
+        {
+          label: `audit logs ${conversationId}`,
+          run: async () => deleteByEq(service, "audit_logs", "entity_id", conversationId),
+        },
         {
           label: `analytics ${conversationId}`,
           run: async () =>
@@ -238,10 +321,12 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
         label: "character",
         run: async () => deleteByEq(service, "characters", "id", ids.character),
       },
-      ...[ids.ownerOperator, ids.otherOperator, ids.adminOperator].map((operatorId) => ({
-        label: `operator ${operatorId}`,
-        run: async () => deleteByEq(service, "operators", "id", operatorId),
-      })),
+      ...[ids.ownerOperator, ids.otherOperator, ids.adminOperator, ids.unassignedOperator].map(
+        (operatorId) => ({
+          label: `operator ${operatorId}`,
+          run: async () => deleteByEq(service, "operators", "id", operatorId),
+        }),
+      ),
       ...users.flatMap((user) => [
         {
           label: `user role ${user.id}`,
@@ -254,6 +339,91 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
         { label: `Auth user ${user.id}`, run: async () => deleteAuthUser(service, user.id) },
       ]),
     ]);
+  });
+
+  it("allows only the RLS-authorized status update and denies direct shadow mutation", async () => {
+    const baseline = await service
+      .from("conversations")
+      .select("status, needs_handling, pending_since, handling_next_sequence")
+      .eq("id", ids.ownedConversation)
+      .single();
+    expect(baseline.error).toBeNull();
+    const baselineShadow = {
+      needs_handling: baseline.data.needs_handling,
+      pending_since: baseline.data.pending_since,
+      handling_next_sequence: baseline.data.handling_next_sequence,
+    };
+
+    const assignedStatus = await owner
+      .from("conversations")
+      .update({ status: "waiting" })
+      .eq("id", ids.ownedConversation)
+      .select("status");
+    expect(assignedStatus.error).toBeNull();
+    expect(assignedStatus.data).toEqual([{ status: "waiting" }]);
+
+    const assignedRestore = await owner
+      .from("conversations")
+      .update({ status: "open" })
+      .eq("id", ids.ownedConversation)
+      .select("status");
+    expect(assignedRestore.error).toBeNull();
+    expect(assignedRestore.data).toEqual([{ status: "open" }]);
+
+    const unassignedStatus = await unassigned
+      .from("conversations")
+      .update({ status: "waiting" })
+      .eq("id", ids.ownedConversation)
+      .select("status");
+    if (unassignedStatus.error) {
+      expect(unassignedStatus.error.code).toMatch(/^(42501|PGRST\d+)$/);
+    } else {
+      expect(unassignedStatus.data).toEqual([]);
+    }
+
+    for (const payload of [
+      { needs_handling: false },
+      { pending_since: null },
+      { handling_next_sequence: 999 },
+    ]) {
+      const denied = await owner
+        .from("conversations")
+        .update(payload)
+        .eq("id", ids.ownedConversation)
+        .select("id");
+      expect(denied.error?.code).toBe("42501");
+    }
+
+    const anonymousStatus = await anonymous
+      .from("conversations")
+      .update({ status: "waiting" })
+      .eq("id", ids.ownedConversation)
+      .select("status");
+    expect(anonymousStatus.error?.code).toBe("42501");
+
+    const after = await service
+      .from("conversations")
+      .select("status, needs_handling, pending_since, handling_next_sequence")
+      .eq("id", ids.ownedConversation)
+      .single();
+    expect(after.error).toBeNull();
+    expect(after.data).toEqual({ status: "open", ...baselineShadow });
+  });
+
+  it("preserves the Admin status RPC", async () => {
+    const waiting = await adminWorker.rpc("admin_set_conversation_status", {
+      _conversation_id: ids.claimConversation,
+      _status: "waiting",
+    });
+    expect(waiting.error).toBeNull();
+    expect(waiting.data).toMatchObject({ status: "waiting" });
+
+    const restored = await adminWorker.rpc("admin_set_conversation_status", {
+      _conversation_id: ids.claimConversation,
+      _status: "open",
+    });
+    expect(restored.error).toBeNull();
+    expect(restored.data).toMatchObject({ status: "open" });
   });
 
   it("rejects another assigned Operator and an Admin Worker without side effects", async () => {
@@ -283,6 +453,53 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     const messageId = String((result.data as { message: { id: string } }).message.id);
     successfulMessageIds.push(messageId);
     expect(messageId).toMatch(/^[0-9a-f-]{36}$/i);
+
+    const shadowResult = await service.from("messages").select("*").eq("id", messageId).single();
+    expect(shadowResult.error).toBeNull();
+    const shadow = shadowResult.data as unknown as {
+      handling_cycle_id: string | null;
+      handling_effect: string | null;
+      handling_sequence: number | null;
+    };
+    expect(shadow.handling_effect).toBe("staff_response");
+    expect(shadow.handling_cycle_id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(shadow.handling_sequence).toBeGreaterThan(0);
+  });
+
+  it("returns the authoritative cycle token and replays the same claim", async () => {
+    const first = await owner.rpc("claim_new_conversation", {
+      _work_item_id: ids.claimWorkItem,
+    });
+    expect(first.error).toBeNull();
+    expect(first.data).toMatchObject({ claimed: true, already_claimed: false });
+    const firstCycleId = String((first.data as { cycle_id: string }).cycle_id);
+    expect(firstCycleId).toMatch(/^[0-9a-f-]{36}$/i);
+
+    const retry = await owner.rpc("claim_new_conversation", {
+      _work_item_id: ids.claimWorkItem,
+    });
+    expect(retry.error).toBeNull();
+    expect(retry.data).toMatchObject({
+      claimed: true,
+      already_claimed: true,
+      cycle_id: firstCycleId,
+    });
+
+    const cycle = await service
+      .from("conversation_handling_cycles")
+      .select("id, conversation_id, work_item_id, operator_id, ended_at")
+      .eq("conversation_id", ids.claimConversation)
+      .is("ended_at", null);
+    expect(cycle.error).toBeNull();
+    expect(cycle.data).toEqual([
+      {
+        id: firstCycleId,
+        conversation_id: ids.claimConversation,
+        work_item_id: ids.claimWorkItem,
+        operator_id: ids.ownerOperator,
+        ended_at: null,
+      },
+    ]);
   });
 
   it("allows an assigned Operator to send after the owner explicitly releases responsibility", async () => {
@@ -301,5 +518,18 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     const messageId = String((result.data as { message: { id: string } }).message.id);
     successfulMessageIds.push(messageId);
     expect(messageId).toMatch(/^[0-9a-f-]{36}$/i);
+
+    const shadowResult = await service.from("messages").select("*").eq("id", messageId).single();
+    expect(shadowResult.error).toBeNull();
+    const shadow = shadowResult.data as unknown as {
+      handling_cycle_id: string | null;
+      handling_effect: string | null;
+      handling_sequence: number | null;
+    };
+    expect(shadow).toMatchObject({
+      handling_cycle_id: null,
+      handling_effect: "unclassified",
+    });
+    expect(shadow.handling_sequence).toBeGreaterThan(0);
   });
 });

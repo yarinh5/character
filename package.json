@@ -14,8 +14,10 @@
     "format:check": "node scripts/check-format-changed.mjs",
     "test": "vitest run",
     "test:http": "node supabase/tests/http/run-local.mjs",
-    "test:db": "supabase test db --local supabase/tests/database/v4_3",
+    "test:db": "node supabase/tests/run-db-local.mjs",
     "test:concurrency": "node supabase/tests/concurrency/claim-concurrency.mjs",
+    "test:handling-concurrency": "node supabase/tests/concurrency/handling-shadow-concurrency.mjs",
+    "test:upgrade:wp01": "node supabase/tests/upgrades/wp01-shadow-113-to-116.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --pretty false"
   },
