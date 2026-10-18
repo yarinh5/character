@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  assertNoFixtureEvents,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
   deleteByEq,
+  deleteFixtureEventsForOwnership,
   insertRow,
   localHttpReady,
   runCleanupSteps,
@@ -143,6 +145,7 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
   afterAll(async () => {
     if (!admin) return;
     const targetUserId = userId(emails.client);
+    const ownedEventTokens = [...Object.values(ids), ...users.map((user) => user.id)];
     const assertFixtureCleanup = async () => {
       const [profiles, conversations, workItems, cycles, audits] = await Promise.all([
         admin
@@ -177,6 +180,12 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
     };
 
     await runCleanupSteps([
+      {
+        label: "fixture events before parent cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
       {
         label: "archive audit row",
         run: async () => deleteByEq(admin, "audit_logs", "entity_id", targetUserId ?? ""),
@@ -244,6 +253,16 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
         },
         { label: `Auth user ${user.id}`, run: async () => deleteAuthUser(admin, user.id) },
       ]),
+      {
+        label: "fixture events created during cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
+      {
+        label: "fixture event residue verification",
+        run: async () => assertNoFixtureEvents(admin, ownedEventTokens),
+      },
       { label: "fixture cleanup verification", run: assertFixtureCleanup },
     ]);
   });

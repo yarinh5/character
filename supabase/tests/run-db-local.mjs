@@ -17,6 +17,18 @@ function fail(message) {
   throw new Error(`Refusing local database tests: ${message}`);
 }
 
+export class LocalDbTargetError extends Error {
+  constructor(code, message, { retryable = false } = {}) {
+    super(`Refusing local database tests: ${message}`);
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+function targetFailure(code, message, options) {
+  throw new LocalDbTargetError(code, message, options);
+}
+
 function command(commandName, args, options = {}) {
   return execFileSync(commandName, args, {
     cwd: repositoryRoot,
@@ -84,19 +96,38 @@ function mappedHostPort(container, containerPort) {
   return Number(binding.HostPort);
 }
 
-function validateContainer(container, expectedName, expectedPort, containerPort, healthRequired) {
+function validateContainer(
+  container,
+  expectedName,
+  expectedPort,
+  containerPort,
+  healthRequired,
+  targetKind,
+) {
+  const retryableDbState = targetKind === "db";
   if (!container || container.Name !== `/${expectedName}`) {
-    fail(`${expectedName} container identity does not match`);
+    targetFailure(`${targetKind}_identity`, `${expectedName} container identity does not match`, {
+      retryable: retryableDbState,
+    });
   }
   if (!/^[a-f0-9]{64}$/i.test(container.Id ?? "")) {
-    fail(`${expectedName} container ID is invalid`);
+    targetFailure(`${targetKind}_id`, `${expectedName} container ID is invalid`);
   }
-  if (container.State?.Running !== true) fail(`${expectedName} is not running`);
+  if (container.State?.Running !== true) {
+    targetFailure(`${targetKind}_running`, `${expectedName} is not running`, {
+      retryable: retryableDbState,
+    });
+  }
   if (healthRequired && container.State?.Health?.Status !== "healthy") {
-    fail(`${expectedName} is not healthy`);
+    targetFailure(`${targetKind}_health`, `${expectedName} is not healthy`, {
+      retryable: retryableDbState,
+    });
   }
   if (mappedHostPort(container, containerPort) !== expectedPort) {
-    fail(`${expectedName} port mapping does not match supabase/config.toml`);
+    targetFailure(
+      `${targetKind}_mapping`,
+      `${expectedName} port mapping does not match supabase/config.toml`,
+    );
   }
   return { id: container.Id, name: expectedName };
 }
@@ -116,8 +147,8 @@ export function validateLocalDbTarget({ configBytes, status, dbContainer, apiCon
     configHash: createHash("sha256").update(configBytes).digest("hex"),
     apiPort,
     dbPort,
-    api: validateContainer(apiContainer, apiContainerName, apiPort, "8000/tcp", false),
-    db: validateContainer(dbContainer, dbContainerName, dbPort, "5432/tcp", true),
+    api: validateContainer(apiContainer, apiContainerName, apiPort, "8000/tcp", false, "api"),
+    db: validateContainer(dbContainer, dbContainerName, dbPort, "5432/tcp", true, "db"),
   };
 }
 
@@ -129,11 +160,13 @@ export function assertValidatedTargetIdentity(target, currentTarget) {
   }
 }
 
-function inspectContainer(name) {
+function inspectContainer(name, targetKind) {
   try {
     return JSON.parse(command("docker", ["inspect", name]))[0];
   } catch {
-    fail(`${name} is unavailable`);
+    targetFailure(`${targetKind}_unavailable`, `${name} is unavailable`, {
+      retryable: targetKind === "db",
+    });
   }
 }
 
@@ -143,11 +176,15 @@ function readLocalStatus() {
     encoding: "utf8",
     windowsHide: true,
   });
-  if (result.status !== 0) fail("local Supabase status is unavailable");
+  if (result.status !== 0) {
+    targetFailure("status_unavailable", "local Supabase status is unavailable", {
+      retryable: true,
+    });
+  }
   try {
     return JSON.parse(result.stdout);
   } catch {
-    fail("local Supabase status is not valid JSON");
+    targetFailure("status_invalid", "local Supabase status is not valid JSON", { retryable: true });
   }
 }
 
@@ -156,9 +193,76 @@ export function discoverLocalDbTarget() {
   return validateLocalDbTarget({
     configBytes,
     status: readLocalStatus(),
-    dbContainer: inspectContainer(dbContainerName),
-    apiContainer: inspectContainer(apiContainerName),
+    dbContainer: inspectContainer(dbContainerName, "db"),
+    apiContainer: inspectContainer(apiContainerName, "api"),
   });
+}
+
+function targetsMatch(left, right) {
+  try {
+    assert.deepEqual(left, right);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeTargetCause(error) {
+  const message = error instanceof Error ? error.message : "local target discovery failed";
+  return message
+    .replace(/:\/\/[^\s]+/g, "<endpoint>")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+function sleepSynchronously(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+export function waitForStableLocalDbTarget({
+  discoverTarget,
+  now = Date.now,
+  sleep = sleepSynchronously,
+  timeoutMs = 120_000,
+  pollMs = 1_000,
+  requiredStableSamples = 3,
+}) {
+  if (typeof discoverTarget !== "function") fail("local target discovery callback is required");
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) fail("target stability timeout is invalid");
+  if (!Number.isInteger(pollMs) || pollMs < 1) fail("target stability polling interval is invalid");
+  if (!Number.isInteger(requiredStableSamples) || requiredStableSamples < 3) {
+    fail("target stability requires at least three samples");
+  }
+
+  const deadline = now() + timeoutMs;
+  let stableTarget;
+  let stableSamples = 0;
+  let lastTransientCause;
+
+  while (true) {
+    try {
+      const currentTarget = discoverTarget();
+      stableSamples = targetsMatch(stableTarget, currentTarget) ? stableSamples + 1 : 1;
+      stableTarget = currentTarget;
+      if (stableSamples >= requiredStableSamples) return stableTarget;
+    } catch (error) {
+      if (!(error instanceof LocalDbTargetError) || !error.retryable) throw error;
+      stableTarget = undefined;
+      stableSamples = 0;
+      lastTransientCause = error;
+    }
+
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      const cause = sanitizeTargetCause(lastTransientCause);
+      fail(
+        `local target did not stabilize before timeout; manual inspection is required (${cause})`,
+      );
+    }
+    sleep(Math.min(pollMs, remaining));
+  }
 }
 
 function listDatabaseTests() {
@@ -300,7 +404,8 @@ function removeTemporaryDirectory(target, temporaryDirectory) {
 }
 
 export function runValidatedDbSuite(operations) {
-  const target = operations.validateTarget();
+  const target = operations.target;
+  if (!target) fail("a stable validated local target is required before database test execution");
   let temporaryDirectory;
   let mutationStarted = false;
   let primaryError;
@@ -329,9 +434,9 @@ export function runValidatedDbSuite(operations) {
 
 function main() {
   const testFiles = listDatabaseTests();
-  const target = discoverLocalDbTarget();
+  const target = waitForStableLocalDbTarget({ discoverTarget: discoverLocalDbTarget });
   const assertionCount = runValidatedDbSuite({
-    validateTarget: () => target,
+    target,
     verifyTarget: (expectedTarget) =>
       assertValidatedTargetIdentity(expectedTarget, discoverLocalDbTarget()),
     createTemporaryDirectory,

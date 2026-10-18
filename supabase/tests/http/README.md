@@ -105,3 +105,10 @@ Partial setup and failed-test paths track every Auth user immediately and
 attempt every cleanup step; any cleanup failure is reported after all attempts
 instead of being hidden. A clean baseline is claimed only after the explicit
 postflight checks pass.
+
+The runner records sanitized counts for `notifications`, `analytics_events`
+and `audit_logs` before and after each HTTP invocation and fails on any delta.
+Suites collect fixture-owned event IDs before deleting parents that can apply
+`SET NULL`, repeat that collection after cleanup, and assert that no owned
+events remain. The active-responsibility suite also proves that a synthetic
+non-owned sentinel survives fixture cleanup and then removes it separately.

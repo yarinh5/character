@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +24,7 @@ const fixturePath = join(repoRoot, "supabase", "tests", "upgrades", "wp01-shadow
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
-    cwd: repoRoot,
+    cwd: options.cwd ?? repoRoot,
     encoding: "utf8",
     windowsHide: true,
     stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
@@ -24,8 +33,8 @@ function run(command, args, options = {}) {
   });
 }
 
-function supabase(args) {
-  return run("supabase", args, { timeout: 300_000 });
+function supabase(args, options = {}) {
+  return run("supabase", args, { timeout: 300_000, ...options });
 }
 
 function sql(statement) {
@@ -51,6 +60,22 @@ function sql(statement) {
 
 function json(statement) {
   return JSON.parse(sql(statement));
+}
+
+export function assertMigrationAbsenceResult(result) {
+  assert.equal(typeof result, "object", "migration absence result must be an object");
+  assert.notEqual(result, null, "migration absence result must not be null");
+  assert.equal(Array.isArray(result), false, "migration absence result must not be an array");
+  assert.ok(
+    Object.hasOwn(result, "m117_present"),
+    "migration absence result must include m117_present",
+  );
+  assert.equal(typeof result.m117_present, "boolean", "m117_present must be a boolean");
+  assert.equal(
+    result.m117_present,
+    false,
+    "M117 must be absent from the isolated migration history",
+  );
 }
 
 function configPort(config, section) {
@@ -105,12 +130,44 @@ export function validateLocalTarget({ config, status, db, api }) {
 
 function assertLocalTarget() {
   const config = readFileSync(join(repoRoot, "supabase", "config.toml"));
-  const status = JSON.parse(supabase(["status", "--output", "json"]));
-  const [db] = JSON.parse(run("docker", ["inspect", container]));
+  const configText = config.toString("utf8");
+  assert.match(configText, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
+  const apiPort = configPort(configText, "api");
+  const dbPort = configPort(configText, "db");
   const [api] = JSON.parse(run("docker", ["inspect", apiContainer]));
-  return validateLocalTarget({ config, status, db, api });
-}
+  const verifiedApi = assertDockerPort(api, apiContainer, "8000/tcp", apiPort);
 
+  let db;
+  try {
+    [db] = JSON.parse(run("docker", ["inspect", container]));
+  } catch (error) {
+    throw new ResetReadinessError("db_unavailable", `${container} is temporarily unavailable`, {
+      cause: error,
+    });
+  }
+  const verifiedDb = assertExpectedDatabaseContainer(db, dbPort);
+
+  let status;
+  try {
+    status = JSON.parse(supabase(["status", "--output", "json"]));
+  } catch (error) {
+    throw new ResetReadinessError(
+      "status_unavailable",
+      "local Supabase status is temporarily unavailable",
+      { cause: error },
+    );
+  }
+  assertLoopbackUrl(status.API_URL, apiPort, "local API URL");
+  assertLoopbackUrl(status.DB_URL, dbPort, "local DB URL");
+  return {
+    apiContainer: verifiedApi,
+    apiPort,
+    configHash: createHash("sha256").update(config).digest("hex"),
+    dbContainer: verifiedDb,
+    dbPort,
+    projectId,
+  };
+}
 export function assertValidatedTargetIdentity(target, currentTarget) {
   assert.deepEqual(
     currentTarget,
@@ -253,6 +310,92 @@ export function isTransientResetReadinessError(error) {
   );
 }
 
+function assertStableAcquisitionIdentity(reference, candidate) {
+  assert.equal(
+    candidate.projectId,
+    reference.projectId,
+    "project identity changed during target acquisition",
+  );
+  assert.equal(
+    candidate.configHash,
+    reference.configHash,
+    "config identity changed during target acquisition",
+  );
+  assert.equal(candidate.apiPort, reference.apiPort, "API port changed during target acquisition");
+  assert.equal(candidate.dbPort, reference.dbPort, "DB port changed during target acquisition");
+  assert.deepEqual(
+    candidate.apiContainer,
+    reference.apiContainer,
+    "API container identity drift during target acquisition",
+  );
+  assert.equal(
+    candidate.dbContainer.name,
+    reference.dbContainer.name,
+    "DB container name changed during target acquisition",
+  );
+}
+
+export function acquireStableLocalTarget({
+  discoverTarget,
+  deadlineMilliseconds = 120_000,
+  intervalMilliseconds = 1_000,
+  now = Date.now,
+  sleep = defaultSleep,
+  requiredSamples = 3,
+} = {}) {
+  assert.ok(typeof discoverTarget === "function", "a local target discovery function is required");
+  assert.ok(
+    Number.isFinite(deadlineMilliseconds) && deadlineMilliseconds >= 0,
+    "deadline must be non-negative",
+  );
+  assert.ok(
+    Number.isFinite(intervalMilliseconds) && intervalMilliseconds > 0,
+    "polling interval must be positive",
+  );
+  assert.equal(
+    requiredSamples,
+    3,
+    "local target acquisition requires exactly three stable samples",
+  );
+
+  const deadline = now() + deadlineMilliseconds;
+  let candidate;
+  let stableSamples = 0;
+  let lastError;
+
+  while (true) {
+    try {
+      const current = discoverTarget();
+      if (!candidate) {
+        candidate = current;
+        stableSamples = 1;
+      } else {
+        assertStableAcquisitionIdentity(candidate, current);
+        if (current.dbContainer.id !== candidate.dbContainer.id) {
+          candidate = current;
+          stableSamples = 1;
+        } else {
+          stableSamples += 1;
+        }
+      }
+      if (stableSamples === requiredSamples) return candidate;
+    } catch (error) {
+      if (!isTransientResetReadinessError(error)) throw error;
+      candidate = undefined;
+      stableSamples = 0;
+      lastError = error;
+    }
+
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      throw new Error(
+        `local target did not remain stable for ${requiredSamples} samples within ${deadlineMilliseconds}ms: ${lastError?.message ?? "insufficient stable samples"}`,
+        { cause: lastError },
+      );
+    }
+    sleep(Math.min(intervalMilliseconds, remaining));
+  }
+}
 export function waitForValidatedTargetAfterReset(
   target,
   {
@@ -350,6 +493,234 @@ export function runValidatedUpgrade({
   }
 }
 
+const expectedUpgradeVersions = ["20261006211051", "20261006211056", "20261006211102"];
+
+export function buildThroughVersionManifest(fileNames, cutoffVersion = version116) {
+  const versions = new Set();
+  const parsed = fileNames.map((name) => {
+    const match = /^(\d{14})_(.+)\.sql$/.exec(name);
+    assert.ok(match, `invalid migration filename: ${name}`);
+    assert.ok(!versions.has(match[1]), `duplicate migration version: ${match[1]}`);
+    versions.add(match[1]);
+    return { name, version: match[1] };
+  });
+  const manifest = parsed
+    .filter((entry) => entry.version <= cutoffVersion)
+    .sort((left, right) => left.version.localeCompare(right.version));
+  for (const version of expectedUpgradeVersions) {
+    assert.ok(
+      manifest.some((entry) => entry.version === version),
+      `missing required migration: ${version}`,
+    );
+  }
+  assert.ok(
+    !manifest.some((entry) => entry.version >= "20261013113744"),
+    "manifest must exclude M117 and later migrations",
+  );
+  return manifest;
+}
+
+export function assertBeforeVersionsInManifest(beforeVersions, manifest) {
+  const manifestVersions = new Set(manifest.map((entry) => entry.version));
+  for (const version of beforeVersions) {
+    assert.ok(
+      manifestVersions.has(version),
+      `applied migration is missing from temporary manifest: ${version}`,
+    );
+  }
+}
+
+export function assertExactUpgradeDifference(beforeVersions, afterVersions) {
+  const before = new Set(beforeVersions);
+  const after = new Set(afterVersions);
+  assert.equal(before.size, beforeVersions.length, "before migration history contains duplicates");
+  assert.equal(after.size, afterVersions.length, "after migration history contains duplicates");
+  for (const version of before)
+    assert.ok(after.has(version), `migration disappeared during upgrade: ${version}`);
+  const added = [...after].filter((version) => !before.has(version)).sort();
+  assert.deepEqual(added, expectedUpgradeVersions, "upgrade must add exactly M114-M116");
+  return added;
+}
+
+export function assertCopiedConfigMatches(sourceConfig, copiedConfig) {
+  assert.deepEqual(
+    copiedConfig,
+    sourceConfig,
+    "temporary config.toml must match the active config byte-for-byte",
+  );
+}
+export function assertIsolatedMigrationManifest(files, { expectedManifest, expectedHashes } = {}) {
+  const expected =
+    expectedManifest ??
+    files.map((file) => ({ name: file.name, version: /^(\d{14})_/.exec(file.name)?.[1] }));
+  const normalizedExpected = expected
+    .map((file) => ({ name: file.name, version: file.version }))
+    .sort((left, right) => left.version.localeCompare(right.version));
+  const normalizedActual = files
+    .map((file) => ({
+      name: file.name,
+      version: file.version ?? /^(\d{14})_/.exec(file.name)?.[1],
+    }))
+    .sort((left, right) => left.version.localeCompare(right.version));
+  assert.deepEqual(
+    normalizedActual,
+    normalizedExpected,
+    "temporary migration manifest differs from the expected full-through-M116 manifest",
+  );
+  if (expectedHashes) {
+    for (const file of files) {
+      assert.equal(
+        file.hash,
+        expectedHashes.get(file.name),
+        `isolated migration hash mismatch: ${file.name}`,
+      );
+    }
+  }
+}
+
+export function createIsolatedUpgradeWorkdir({
+  sourceRoot = repoRoot,
+  temporaryRoot = tmpdir(),
+} = {}) {
+  const workdir = mkdtempSync(join(temporaryRoot, "wp01-shadow-113-116-"));
+  const sourceSupabase = join(sourceRoot, "supabase");
+  const destinationSupabase = join(workdir, "supabase");
+  const sourceMigrations = join(sourceSupabase, "migrations");
+  const destinationMigrations = join(destinationSupabase, "migrations");
+  try {
+    const sourceNames = readdirSync(sourceMigrations);
+    for (const name of sourceNames) {
+      assert.ok(
+        lstatSync(join(sourceMigrations, name)).isFile(),
+        `migration source must be a regular file: ${name}`,
+      );
+    }
+    const manifest = buildThroughVersionManifest(sourceNames);
+    const sourceConfig = readFileSync(join(sourceSupabase, "config.toml"));
+    mkdirSync(destinationMigrations, { recursive: true });
+    copyFileSync(join(sourceSupabase, "config.toml"), join(destinationSupabase, "config.toml"));
+    const expectedHashes = new Map();
+    for (const entry of manifest) {
+      const source = join(sourceMigrations, entry.name);
+      const bytes = readFileSync(source);
+      expectedHashes.set(entry.name, createHash("sha256").update(bytes).digest("hex"));
+      copyFileSync(source, join(destinationMigrations, entry.name));
+    }
+    const copiedConfig = readFileSync(join(destinationSupabase, "config.toml"));
+    assertCopiedConfigMatches(sourceConfig, copiedConfig);
+    const copiedManifest = readdirSync(destinationMigrations).map((name) => ({
+      name,
+      version: /^(\d{14})_/.exec(name)?.[1],
+      hash: createHash("sha256")
+        .update(readFileSync(join(destinationMigrations, name)))
+        .digest("hex"),
+    }));
+    assertIsolatedMigrationManifest(copiedManifest, { expectedManifest: manifest, expectedHashes });
+    return {
+      workdir,
+      manifest,
+      destroy: () => rmSync(workdir, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    rmSync(workdir, { recursive: true, force: true });
+    throw error;
+  }
+}
+export class ResetResultError extends Error {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "ResetResultError";
+    this.kind = "fatal_failure";
+  }
+}
+
+export function isLocalStorageReadinessTimeout(error) {
+  const diagnostics = `${error?.stderr ?? ""}\n${error?.message ?? ""}`;
+  return (
+    diagnostics.includes("/storage/v1/bucket") && diagnostics.includes("context deadline exceeded")
+  );
+}
+
+export function runResetWithVerifiedState({
+  target,
+  reset,
+  waitForReady,
+  expectedState,
+  verifyState,
+}) {
+  let resetError;
+  try {
+    reset(target);
+  } catch (error) {
+    resetError = error;
+  }
+
+  if (resetError && !isLocalStorageReadinessTimeout(resetError)) {
+    throw new ResetResultError("local reset failed before state verification", {
+      cause: resetError,
+    });
+  }
+
+  let readyTarget;
+  try {
+    readyTarget = waitForReady(target);
+  } catch (error) {
+    throw new ResetResultError("local reset did not reach a verified healthy target", {
+      cause: error,
+    });
+  }
+
+  try {
+    verifyState(readyTarget, expectedState);
+  } catch (error) {
+    throw new ResetResultError("local reset state did not match the expected baseline", {
+      cause: error,
+    });
+  }
+
+  return {
+    kind: resetError ? "state_verified_after_local_service_timeout" : "clean_success",
+    target: readyTarget,
+  };
+}
+const resetStateSql = `SELECT json_build_object(
+  'migrations',(SELECT count(DISTINCT version) FROM supabase_migrations.schema_migrations),
+  'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
+  'm117',(SELECT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='20261013113744')),
+  'users',(SELECT count(*) FROM auth.users),
+  'profiles',(SELECT count(*) FROM public.profiles),
+  'conversations',(SELECT count(*) FROM public.conversations),
+  'messages',(SELECT count(*) FROM public.messages),
+  'cycles',(SELECT count(*) FROM public.conversation_handling_cycles),
+  'work_items',(SELECT count(*) FROM public.conversation_work_items),
+  'ledger',(SELECT count(*) FROM public.credit_transactions),
+  'notifications',(SELECT count(*) FROM public.notifications),
+  'analytics',(SELECT count(*) FROM public.analytics_events)
+);`;
+
+function verifyResetState(_target, expected) {
+  assert.deepEqual(json(resetStateSql), expected);
+}
+
+function resetLocal(target, version, expectedState) {
+  const result = runResetWithVerifiedState({
+    target,
+    reset: () => {
+      const args = ["db", "reset", "--local", "--no-seed"];
+      if (version) args.push("--version", version);
+      supabase(args);
+    },
+    waitForReady: () => rebindLocalTargetAfterDatabaseReset(target),
+    expectedState,
+    verifyState: verifyResetState,
+  });
+  return result.target;
+}
+function readMigrationVersions() {
+  return json(
+    "SELECT coalesce(json_agg(version ORDER BY version), '[]'::json) FROM supabase_migrations.schema_migrations;",
+  );
+}
 const preUpgradeStateSql = `SELECT json_build_object(
   'migrations',(SELECT count(DISTINCT version) FROM supabase_migrations.schema_migrations),
   'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
@@ -386,7 +757,7 @@ function main() {
 
   runValidatedUpgrade({
     validateTarget: () => {
-      const localTarget = assertLocalTarget();
+      const localTarget = acquireStableLocalTarget({ discoverTarget: assertLocalTarget });
       console.log(
         `Verified isolated local stack: API ${localTarget.apiPort}, DB ${localTarget.dbPort}`,
       );
@@ -396,29 +767,54 @@ function main() {
     resetTo113: (target) => {
       console.log(`Resetting the isolated local stack through migration ${version113}`);
       assertLocalTargetIdentity(target);
-      return resetAndWait({
-        target,
-        reset: () => supabase(["db", "reset", "--local", "--no-seed", "--version", version113]),
-        waitForReady: rebindLocalTargetAfterDatabaseReset,
+      return resetLocal(target, version113, {
+        migrations: 113,
+        latest: version113,
+        m117: false,
+        users: 0,
+        profiles: 0,
+        conversations: 0,
+        messages: 0,
+        cycles: 0,
+        work_items: 0,
+        ledger: 0,
+        notifications: 0,
+        analytics: 0,
       });
     },
     upgrade: (target) => {
       assertLocalTargetIdentity(target);
 
-      sql(readFileSync(fixturePath, "utf8"));
-      const before = json(preUpgradeStateSql);
-      assert.deepEqual(before, {
-        migrations: 113,
-        latest: version113,
-        users: 8,
-        conversations: 6,
-        messages: 7,
-        cycles: 2,
-        work_items: 4,
-      });
+      const beforeVersions = readMigrationVersions();
+      assert.equal(beforeVersions.length, 113);
+      assert.equal(beforeVersions.at(-1), version113);
+      const isolated = createIsolatedUpgradeWorkdir();
+      try {
+        assertBeforeVersionsInManifest(beforeVersions, isolated.manifest);
+        sql(readFileSync(fixturePath, "utf8"));
+        const before = json(preUpgradeStateSql);
+        assert.deepEqual(before, {
+          migrations: 113,
+          latest: version113,
+          users: 8,
+          conversations: 6,
+          messages: 7,
+          cycles: 2,
+          work_items: 4,
+        });
 
-      console.log("Applying migrations 114-116 through the local migration runner");
-      supabase(["migration", "up", "--local"]);
+        console.log(
+          "Applying exactly M114-M116 through a full-through-M116 isolated local migration workdir",
+        );
+        supabase(["--workdir", isolated.workdir, "migration", "up", "--local"]);
+        const afterVersions = readMigrationVersions();
+        assertExactUpgradeDifference(beforeVersions, afterVersions);
+        assert.equal(afterVersions.length, 116);
+        assert.equal(afterVersions.at(-1), version116);
+        assert.equal(afterVersions.includes("20261013113744"), false);
+      } finally {
+        isolated.destroy();
+      }
       const backfill = json("SELECT private.backfill_handling_shadow_batch(1000);");
       assert.equal(backfill.initialized_count, 6);
       assert.equal(backfill.remaining_count, 0);
@@ -426,6 +822,16 @@ function main() {
       const after = json(postUpgradeStateSql);
       assert.equal(after.migrations, 116);
       assert.equal(after.latest, version116);
+      assertMigrationAbsenceResult(
+        json(`SELECT json_build_object(
+        'm117_present',
+        EXISTS (
+          SELECT 1
+          FROM supabase_migrations.schema_migrations
+          WHERE version = '20261013113744'
+        )
+      );`),
+      );
       assert.equal(after.mode, "legacy_shadow");
       assert.equal(after.initialized, 6);
       assert.equal(after.classified, 7);
@@ -456,28 +862,21 @@ function main() {
       );
     },
     cleanup: (target) => {
-      console.log("Restoring a clean local 116-migration baseline");
+      console.log("Restoring a clean local 117-migration baseline");
       assertLocalTargetIdentity(target);
-      resetAndWait({
-        target,
-        reset: () => supabase(["db", "reset", "--local", "--no-seed"]),
-        waitForReady: rebindLocalTargetAfterDatabaseReset,
-      });
-      const clean = json(`SELECT json_build_object(
-    'migrations',(SELECT count(DISTINCT version) FROM supabase_migrations.schema_migrations),
-    'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
-    'users',(SELECT count(*) FROM auth.users),
-    'conversations',(SELECT count(*) FROM public.conversations),
-    'messages',(SELECT count(*) FROM public.messages),
-    'cycles',(SELECT count(*) FROM public.conversation_handling_cycles)
-      );`);
-      assert.deepEqual(clean, {
-        migrations: 116,
-        latest: version116,
+      resetLocal(target, undefined, {
+        migrations: 117,
+        latest: "20261013113744",
+        m117: true,
         users: 0,
+        profiles: 0,
         conversations: 0,
         messages: 0,
         cycles: 0,
+        work_items: 0,
+        ledger: 0,
+        notifications: 0,
+        analytics: 0,
       });
       if (!completed) console.error("WP01 upgrade rehearsal failed before clean-baseline restore");
     },

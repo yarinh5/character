@@ -17,7 +17,9 @@
     "test:db": "node supabase/tests/run-db-local.mjs",
     "test:concurrency": "node supabase/tests/concurrency/claim-concurrency.mjs",
     "test:handling-concurrency": "node supabase/tests/concurrency/handling-shadow-concurrency.mjs",
+    "test:cycle-bound-send-concurrency": "node supabase/tests/concurrency/cycle-bound-send-concurrency.mjs",
     "test:upgrade:wp01": "node supabase/tests/upgrades/wp01-shadow-113-to-116.mjs",
+    "test:upgrade:wp01-strict-send": "node supabase/tests/upgrades/wp01-strict-send-116-to-117.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --pretty false"
   },

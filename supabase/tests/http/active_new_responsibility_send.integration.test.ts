@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  assertNoFixtureEvents,
   createAnonymousClient,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
   deleteByEq,
+  deleteFixtureEventsForOwnership,
   insertRow,
   localHttpReady,
   readLocalPrivateStickerAttemptCount,
@@ -38,6 +40,7 @@ const ids = {
 };
 
 const prefix = "v4-3-e1-responsibility";
+const eventSentinelId = "00000000-0000-4000-8000-000000079999";
 const emails = {
   ownedClient: `${prefix}-owned-client@example.invalid`,
   releasedClient: `${prefix}-released-client@example.invalid`,
@@ -93,6 +96,17 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       work_item_id: workItemId,
       operator_id: ids.ownerOperator,
     });
+  }
+
+  async function activeCycleId(conversationId: string) {
+    const { data, error } = await service
+      .from("conversation_handling_cycles")
+      .select("id")
+      .eq("conversation_id", conversationId)
+      .is("ended_at", null)
+      .single();
+    if (error || !data?.id) throw new Error("local fixture active cycle is unavailable");
+    return data.id;
   }
 
   async function sideEffectCounts() {
@@ -154,6 +168,11 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
 
   beforeAll(async () => {
     service = createServiceClient();
+    await insertRow(service, "analytics_events", {
+      id: eventSentinelId,
+      event_name: "fixture_cleanup_sentinel",
+      metadata: { sentinel: true },
+    });
     const [
       ownedClient,
       releasedClient,
@@ -246,7 +265,19 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       ids.releasedConversation,
       ids.claimConversation,
     ];
+    const ownedEventTokens = [
+      ...Object.values(ids),
+      ...users.map((user) => user.id),
+      ...profileIds,
+      ...successfulMessageIds,
+    ];
     await runCleanupSteps([
+      {
+        label: "fixture events before parent cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(service, ownedEventTokens);
+        },
+      },
       ...successfulMessageIds.map((messageId) => ({
         label: `credit transactions ${messageId}`,
         run: async () => deleteByEq(service, "credit_transactions", "message_id", messageId),
@@ -294,6 +325,10 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
           run: async () => deleteByEq(service, "notifications", "conversation_id", conversationId),
         },
         {
+          label: `messages ${conversationId}`,
+          run: async () => deleteByEq(service, "messages", "conversation_id", conversationId),
+        },
+        {
           label: `handling cycles ${conversationId}`,
           run: async () =>
             deleteByEq(service, "conversation_handling_cycles", "conversation_id", conversationId),
@@ -302,10 +337,6 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
           label: `work item ${conversationId}`,
           run: async () =>
             deleteByEq(service, "conversation_work_items", "conversation_id", conversationId),
-        },
-        {
-          label: `messages ${conversationId}`,
-          run: async () => deleteByEq(service, "messages", "conversation_id", conversationId),
         },
         {
           label: `conversation ${conversationId}`,
@@ -338,6 +369,30 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
         },
         { label: `Auth user ${user.id}`, run: async () => deleteAuthUser(service, user.id) },
       ]),
+      {
+        label: "fixture events created during cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(service, ownedEventTokens);
+        },
+      },
+      {
+        label: "fixture event residue verification",
+        run: async () => assertNoFixtureEvents(service, ownedEventTokens),
+      },
+      {
+        label: "non-owned event sentinel preservation",
+        run: async () => {
+          const { count, error } = await service
+            .from("analytics_events")
+            .select("id", { count: "exact", head: true })
+            .eq("id", eventSentinelId);
+          if (error || count !== 1) throw new Error("non-owned event sentinel was not preserved");
+        },
+      },
+      {
+        label: "separate non-owned event sentinel cleanup",
+        run: async () => deleteByEq(service, "analytics_events", "id", eventSentinelId),
+      },
     ]);
   });
 
@@ -427,10 +482,20 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
   });
 
   it("rejects another assigned Operator and an Admin Worker without side effects", async () => {
+    const expectedCycleId = await activeCycleId(ids.ownedConversation);
     const beforeOther = await sideEffectCounts();
+    const missingToken = await other.rpc("send_operator_message", {
+      _conversation_id: ids.ownedConversation,
+      _content: "v4_3_e1_other_missing_token",
+      _expected_cycle_id: null,
+    });
+    assertSafeBusinessError(missingToken.error, "handling_cycle_token_invalid");
+    expect(await sideEffectCounts()).toEqual(beforeOther);
+
     const otherResult = await other.rpc("send_operator_message", {
       _conversation_id: ids.ownedConversation,
       _content: "v4_3_e1_other_blocked",
+      _expected_cycle_id: expectedCycleId,
     });
     assertSafeBusinessError(otherResult.error, "conversation_not_responsible_operator");
     expect(await sideEffectCounts()).toEqual(beforeOther);
@@ -439,8 +504,9 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     const adminResult = await adminWorker.rpc("send_operator_message", {
       _conversation_id: ids.ownedConversation,
       _content: "v4_3_e1_admin_blocked",
+      _expected_cycle_id: expectedCycleId,
     });
-    assertSafeBusinessError(adminResult.error, "conversation_not_responsible_operator");
+    assertSafeBusinessError(adminResult.error, "admin_takeover_required");
     expect(await sideEffectCounts()).toEqual(beforeAdmin);
   });
 
@@ -448,6 +514,7 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     const result = await owner.rpc("send_operator_message", {
       _conversation_id: ids.ownedConversation,
       _content: "v4_3_e1_owner_allowed",
+      _expected_cycle_id: await activeCycleId(ids.ownedConversation),
     });
     expect(result.error).toBeNull();
     const messageId = String((result.data as { message: { id: string } }).message.id);
@@ -464,6 +531,40 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     expect(shadow.handling_effect).toBe("staff_response");
     expect(shadow.handling_cycle_id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(shadow.handling_sequence).toBeGreaterThan(0);
+    expect(await activeCycleId(ids.ownedConversation)).toBe(shadow.handling_cycle_id);
+
+    const staleToken = await owner.rpc("send_operator_message", {
+      _conversation_id: ids.ownedConversation,
+      _content: "v4_3_e1_owner_stale_token",
+      _expected_cycle_id: "00000000-0000-4000-8000-000000070799",
+    });
+    assertSafeBusinessError(staleToken.error, "handling_cycle_token_invalid");
+
+    const secondOwnerResult = await owner.rpc("send_operator_message", {
+      _conversation_id: ids.ownedConversation,
+      _content: "v4_3_e1_owner_second_allowed",
+      _expected_cycle_id: shadow.handling_cycle_id,
+    });
+    expect(secondOwnerResult.error).toBeNull();
+    successfulMessageIds.push(
+      String((secondOwnerResult.data as { message: { id: string } }).message.id),
+    );
+  });
+
+  it("returns the active cycle token only to its responsible Operator", async () => {
+    const expectedCycleId = await activeCycleId(ids.ownedConversation);
+    const [ownerResponsibility, otherResponsibility] = await Promise.all([
+      owner.rpc("get_operator_conversation_responsibility", {
+        _conversation_id: ids.ownedConversation,
+      }),
+      other.rpc("get_operator_conversation_responsibility", {
+        _conversation_id: ids.ownedConversation,
+      }),
+    ]);
+    expect(ownerResponsibility.error).toBeNull();
+    expect(ownerResponsibility.data).toEqual([{ state: "mine", cycle_id: expectedCycleId }]);
+    expect(otherResponsibility.error).toBeNull();
+    expect(otherResponsibility.data).toEqual([{ state: "other", cycle_id: null }]);
   });
 
   it("returns the authoritative cycle token and replays the same claim", async () => {
@@ -503,6 +604,7 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
   });
 
   it("allows an assigned Operator to send after the owner explicitly releases responsibility", async () => {
+    const releasedCycleId = await activeCycleId(ids.releasedConversation);
     const released = await owner.rpc("release_operator_conversation", {
       _conversation_id: ids.releasedConversation,
       _reason: "released",
@@ -510,9 +612,17 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     expect(released.error).toBeNull();
     expect(released.data).toMatchObject({ released: true });
 
+    const staleResult = await other.rpc("send_operator_message", {
+      _conversation_id: ids.releasedConversation,
+      _content: "v4_3_e1_post_release_stale_token",
+      _expected_cycle_id: releasedCycleId,
+    });
+    assertSafeBusinessError(staleResult.error, "handling_cycle_token_invalid");
+
     const result = await other.rpc("send_operator_message", {
       _conversation_id: ids.releasedConversation,
       _content: "v4_3_e1_post_release_allowed",
+      _expected_cycle_id: null,
     });
     expect(result.error).toBeNull();
     const messageId = String((result.data as { message: { id: string } }).message.id);
@@ -527,9 +637,10 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       handling_sequence: number | null;
     };
     expect(shadow).toMatchObject({
-      handling_cycle_id: null,
-      handling_effect: "unclassified",
+      handling_effect: "staff_response",
     });
+    expect(shadow.handling_cycle_id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(await activeCycleId(ids.releasedConversation)).toBe(shadow.handling_cycle_id);
     expect(shadow.handling_sequence).toBeGreaterThan(0);
   });
 });

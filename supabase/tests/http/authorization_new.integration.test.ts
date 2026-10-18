@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  assertNoFixtureEvents,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
   deleteByEq,
+  deleteFixtureEventsForOwnership,
   insertRow,
   localHttpReady,
   seedCharacter,
@@ -124,7 +126,14 @@ suite("V4-3-C HTTP NEW authorization", () => {
 
   afterAll(async () => {
     if (!admin) return;
+    const ownedEventTokens = [...Object.values(ids), ...users.map((user) => user.id)];
     const steps: Array<{ label: string; run: () => Promise<void> }> = [
+      {
+        label: "fixture events before parent cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
       {
         label: "notifications",
         run: async () => {
@@ -195,6 +204,16 @@ suite("V4-3-C HTTP NEW authorization", () => {
           run: async () => deleteAuthUser(admin, user.id),
         },
       ]),
+      {
+        label: "fixture events created during cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
+      {
+        label: "fixture event residue verification",
+        run: async () => assertNoFixtureEvents(admin, ownedEventTokens),
+      },
     ];
     await runCleanupSteps(steps);
   });

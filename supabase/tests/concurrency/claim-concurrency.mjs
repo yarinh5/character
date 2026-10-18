@@ -359,13 +359,13 @@ try {
   await observer.initialize();
   await observer.ok("\\set ON_ERROR_STOP on\nSELECT 1;");
   baseline = await observer.json(baselineSql);
-  assert.equal(baseline.migrations.length, 116);
-  assert.equal(baseline.migrations.at(-1), "20261006211102");
+  assert.equal(baseline.migrations.length, 117);
+  assert.equal(baseline.migrations.at(-1), "20261013113744");
   console.log(
     `Baseline counts: ${JSON.stringify(Object.fromEntries(Object.entries(baseline).filter(([key]) => !["migrations", "settings"].includes(key))))}`,
   );
   console.log(
-    `Local stack verified: API ${localTarget.apiPort}, DB ${localTarget.dbPort}, migrations 116/latest 20261006211102.`,
+    `Local stack verified: API ${localTarget.apiPort}, DB ${localTarget.dbPort}, migrations 117/latest 20261013113744.`,
   );
   await scenario(observer, "forward", false);
   await verifyBaseline();

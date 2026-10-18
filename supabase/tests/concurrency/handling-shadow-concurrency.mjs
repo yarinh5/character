@@ -227,7 +227,7 @@ async function messageRace(observer, label, firstActor, secondActor) {
   const rpc = (actor, suffix) =>
     actor === "client"
       ? `SELECT public.send_client_message(${quote(ids.conversation)},${quote(`${run}_${label}_client_${suffix}`)});`
-      : `SELECT public.send_operator_message(${quote(ids.conversation)},${quote(`${run}_${label}_operator_${suffix}`)});`;
+      : `SELECT public.send_operator_message(${quote(ids.conversation)},${quote(`${run}_${label}_operator_${suffix}`)},${quote(ids.cycle)}::uuid);`;
   const actorUser = (actor) => (actor === "client" ? ids.client : ids.operatorUser);
 
   await first.beginAs(actorUser(firstActor));
@@ -376,35 +376,68 @@ async function backfillRace(observer) {
 
 async function cleanup(observer) {
   for (const ids of fixtures.reverse()) {
-    await observer.ok(`BEGIN;
-      DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.operator_score_events WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});
-      DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)};
-      DELETE FROM public.conversations WHERE id=${quote(ids.conversation)};
-      DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)};
-      DELETE FROM public.notifications
-      WHERE metadata->>'operator_id'=${quote(ids.operator)}
-         OR metadata->>'character_id'=${quote(ids.character)}
-         OR user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});
-      DELETE FROM public.analytics_events
-      WHERE metadata->>'profile_id' IN (
-        SELECT profile.id::text
-        FROM public.profiles profile
-        WHERE profile.user_id IN (${quote(ids.client)},${quote(ids.operatorUser)})
-      )
-         OR operator_id=${quote(ids.operator)}
-         OR character_id=${quote(ids.character)};
-      DELETE FROM public.operators WHERE id=${quote(ids.operator)};
-      DELETE FROM public.characters WHERE id=${quote(ids.character)};
-      DELETE FROM public.user_roles WHERE user_id=${quote(ids.operatorUser)};
-      DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});
-      DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});
-      DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.operatorUser)});
-      COMMIT;`);
+    await observer.ok("BEGIN;");
+    try {
+      await observer.ok(
+        `DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.operator_score_events WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});`,
+      );
+      await observer.ok(
+        `DELETE FROM private.handling_send_authority_evidence WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM private.handling_reconciliation_issues WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(
+        `DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)};`,
+      );
+      await observer.ok(`DELETE FROM public.conversations WHERE id=${quote(ids.conversation)};`);
+      await observer.ok(
+        `DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)};`,
+      );
+      await observer.ok(`DELETE FROM public.notifications
+        WHERE metadata->>'operator_id'=${quote(ids.operator)}
+           OR metadata->>'character_id'=${quote(ids.character)}
+           OR user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});`);
+      await observer.ok(`DELETE FROM public.analytics_events
+        WHERE metadata->>'profile_id' IN (
+          SELECT profile.id::text
+          FROM public.profiles profile
+          WHERE profile.user_id IN (${quote(ids.client)},${quote(ids.operatorUser)})
+        )
+           OR operator_id=${quote(ids.operator)}
+           OR character_id=${quote(ids.character)};`);
+      await observer.ok(`DELETE FROM public.operators WHERE id=${quote(ids.operator)};`);
+      await observer.ok(`DELETE FROM public.characters WHERE id=${quote(ids.character)};`);
+      await observer.ok(`DELETE FROM public.user_roles WHERE user_id=${quote(ids.operatorUser)};`);
+      await observer.ok(
+        `DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});`,
+      );
+      await observer.ok(
+        `DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});`,
+      );
+      await observer.ok(
+        `DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.operatorUser)});`,
+      );
+      await observer.ok("COMMIT;");
+    } catch (error) {
+      await observer.ok("ROLLBACK;").catch(() => {});
+      throw error;
+    }
   }
   if (backfillRunId) {
     await observer.ok(`DELETE FROM private.handling_backfill_runs

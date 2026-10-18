@@ -217,6 +217,86 @@ export async function deleteByEq(client: HttpClient, table: string, column: stri
     throw new Error(`local fixture cleanup failed for ${table}: ${error.code ?? "unknown"}`);
 }
 
+type FixtureEventTable = "notifications" | "analytics_events" | "audit_logs";
+
+type FixtureEventIds = Record<FixtureEventTable, string[]>;
+
+function valueContainsOwnedToken(value: unknown, ownedTokens: string[]): boolean {
+  if (typeof value === "string") {
+    return ownedTokens.some(
+      (token) => value === token || (token.length >= 16 && value.includes(token)),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => valueContainsOwnedToken(item, ownedTokens));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((item) => valueContainsOwnedToken(item, ownedTokens));
+  }
+  return false;
+}
+
+export function fixtureEventRowBelongsToOwnership(
+  row: Record<string, unknown>,
+  ownedTokens: string[],
+) {
+  const usableTokens = [...new Set(ownedTokens.filter((token) => token.length > 0))];
+  return usableTokens.length > 0 && valueContainsOwnedToken(row, usableTokens);
+}
+
+export async function readFixtureEventIds(
+  client: HttpClient,
+  ownedTokens: string[],
+): Promise<FixtureEventIds> {
+  const [notifications, analytics, audits] = await Promise.all([
+    client.from("notifications").select("id,user_id,conversation_id,link,metadata"),
+    client
+      .from("analytics_events")
+      .select("id,actor_user_id,conversation_id,character_id,operator_id,metadata"),
+    client.from("audit_logs").select("id,actor_user_id,entity_id,metadata"),
+  ]);
+  for (const result of [notifications, analytics, audits]) {
+    if (result.error) {
+      throw new Error(`local fixture event inspection failed: ${result.error.code ?? "unknown"}`);
+    }
+  }
+  const ownedIds = (rows: Array<Record<string, unknown>> | null) =>
+    (rows ?? [])
+      .filter((row) => fixtureEventRowBelongsToOwnership(row, ownedTokens))
+      .map((row) => String(row.id));
+  return {
+    notifications: ownedIds(notifications.data),
+    analytics_events: ownedIds(analytics.data),
+    audit_logs: ownedIds(audits.data),
+  };
+}
+
+export async function deleteFixtureEventsForOwnership(client: HttpClient, ownedTokens: string[]) {
+  const ids = await readFixtureEventIds(client, ownedTokens);
+  for (const table of ["notifications", "analytics_events", "audit_logs"] as const) {
+    if (ids[table].length === 0) continue;
+    const { error } = await client.from(table).delete().in("id", ids[table]);
+    if (error) {
+      throw new Error(
+        `local fixture event cleanup failed for ${table}: ${error.code ?? "unknown"}`,
+      );
+    }
+  }
+  return ids;
+}
+
+export async function assertNoFixtureEvents(client: HttpClient, ownedTokens: string[]) {
+  const ids = await readFixtureEventIds(client, ownedTokens);
+  const residue = Object.entries(ids).filter(([, values]) => values.length > 0);
+  if (residue.length > 0) {
+    throw new Error(
+      `local fixture event residue remains: ${residue
+        .map(([table, values]) => `${table}=${values.length}`)
+        .join(", ")}`,
+    );
+  }
+}
+
 export async function cleanupPrivateStickerAttempts(keys: string[]) {
   if (keys.length === 0) return;
   const db = execFileSync(

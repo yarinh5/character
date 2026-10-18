@@ -85,15 +85,20 @@ complete metadata and state. The exclusive session rolls back without changing
 Run `npm run test:upgrade:wp01` only against the isolated local stack. It
 discovers the active local ports through the same config/status/Docker agreement
 and uses the CLI's local versioned reset to build migration 113, loads the deterministic
-`wp01-shadow-113-fixture.sql`, applies migrations 114-116 normally, executes the
-backfill, and verifies classified Client, Operator, closed, active-cycle and
+`wp01-shadow-113-fixture.sql`, applies migrations 114-116 through a hash-verified
+unique temporary workdir containing every migration through M116 and no later
+migration, then proves the exact added-version set before executing the backfill
+and verifying classified Client, Operator, closed, active-cycle and
 ambiguous Admin histories. The ambiguous Admin row remains an explicit
 unresolved issue, `shadow_consistent` remains false for that fixture, and
 `cutover_authorized` remains false. Target validation completes before any
 reset, migration, fixture, or cleanup call. Once the first reset has begun, a
-best-effort `finally` reset restores an empty local 116-migration baseline even
+best-effort `finally` reset restores an empty current local 117-migration baseline even
 when the rehearsal fails. The harness never edits migration history and never
-accepts a linked or remote target. Every reset is bound to the validated
+accepts a linked or remote target. Before fixture loading it proves the M113
+history is a subset of the temporary manifest. A nonzero local reset is accepted
+only for the documented Storage readiness timeout after a healthy target and the
+exact expected migration/data state have both been revalidated. Every reset is bound to the validated
 project ID, config hash, API/DB ports, and exact running Docker container IDs.
 A successful database reset may rebind only the DB container ID after the same
 project/config/ports/API identity is revalidated; other identity drift rejects
@@ -122,3 +127,26 @@ hypothesis rather than an independently proven root cause here. The Admin
 snapshot suite therefore verifies anonymous EXECUTE ACLs, rather than directly
 invoking a function that has no anonymous EXECUTE grant. Direct anonymous RPC
 invocation remains unverified locally until that runtime issue is resolved.
+
+## WP01.4 strict-send 116-to-117 upgrade rehearsal
+
+Run `npm run test:upgrade:wp01-strict-send` only against the isolated local
+stack. The runner validates the same loopback project/config/status/Docker
+identity before it resets to the exact M116 baseline, confirms M117 is absent,
+loads its deterministic fixture, and runs the full-worktree local migration
+runner. It accepts only a transition that adds M117 and no other version, then
+uses real concurrent PostgreSQL sessions to prove that M117 waits for an active
+M116 writer at the exclusive handling cutover barrier. A temporary table lock
+holds the migration after it acquires the barrier so the rehearsal can also
+prove that a new writer is blocked until the migration transaction completes.
+The late writer is cancelled without retry, the table lock is released, and the
+runner then verifies strict cycle-token authorization, atomic claim-and-send,
+authority evidence, an open first-response cycle, pre-strict message timing,
+and `legacy_shadow` mode.
+
+A nonzero local reset is never treated as success by text matching alone. The
+only recoverable local Storage readiness timeout still requires a revalidated
+healthy target and an exact expected migration/data baseline. Cleanup always
+resets through the full worktree and requires an empty M117 baseline. This is
+local rehearsal coverage only; it does not activate cutover or contact QA or
+Production.
