@@ -146,23 +146,24 @@ SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090103';
 SELECT is(current_user::text, 'authenticated'::text, 'Other assigned operator runs as authenticated');
 SELECT is(auth.uid(), '00000000-0000-4000-8000-000000090103'::uuid, 'Other assigned operator JWT resolves');
 SELECT throws_like(
-  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093101'::uuid, 'blocked other operator')$$,
-  'conversation_not_responsible_operator',
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093101'::uuid, 'blocked other operator', NULL)$$,
+  'handling_cycle_token_invalid',
   'Other assigned operator cannot send while another active cycle owns the conversation'
 );
 SELECT throws_like(
-  $$SELECT public.send_operator_sticker_message('00000000-0000-4000-8000-000000093101'::uuid, '00000000-0000-4000-8000-000000095101'::uuid, '00000000-0000-4000-8000-000000095102'::uuid)$$,
-  'conversation_not_responsible_operator',
+  $$SELECT public.send_operator_sticker_message('00000000-0000-4000-8000-000000093101'::uuid, '00000000-0000-4000-8000-000000095101'::uuid, '00000000-0000-4000-8000-000000095102'::uuid, NULL)$$,
+  'handling_cycle_token_invalid',
   'Other assigned operator cannot send a Sticker while another active cycle owns the conversation'
 );
 RESET ROLE;
 SELECT is(pg_temp.v4_3_e1_counts(), current_setting('v4_3_e1.before_other')::jsonb, 'Rejected other-operator send has no message, attachment, sticker, score, ledger, notification, or analytics side effect');
 
+SELECT set_config('v4_3_e1.owner_cycle', (SELECT id::text FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-000000093102'::uuid AND ended_at IS NULL), true);
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090102';
 SELECT lives_ok(
-  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093102'::uuid, 'owner response')$$,
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093102'::uuid, 'owner response', current_setting('v4_3_e1.owner_cycle')::uuid)$$,
   'Cycle owner can send an operator message'
 );
 RESET ROLE;
@@ -173,18 +174,20 @@ SELECT is(
 );
 
 SELECT set_config('v4_3_e1.before_admin', pg_temp.v4_3_e1_counts()::text, true);
+SELECT set_config('v4_3_e1.admin_cycle', (SELECT id::text FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-000000093103'::uuid AND ended_at IS NULL), true);
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090104';
 SELECT is(auth.uid(), '00000000-0000-4000-8000-000000090104'::uuid, 'Admin worker JWT resolves');
 SELECT throws_like(
-  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093103'::uuid, 'blocked admin worker')$$,
-  'conversation_not_responsible_operator',
-  'Admin worker cannot silently bypass another operator active cycle'
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093103'::uuid, 'blocked admin worker', current_setting('v4_3_e1.admin_cycle')::uuid)$$,
+  'admin_takeover_required',
+  'Admin worker must use an explicit takeover path before sending'
 );
 RESET ROLE;
 SELECT is(pg_temp.v4_3_e1_counts(), current_setting('v4_3_e1.before_admin')::jsonb, 'Rejected Admin worker send has no side effect');
 
+SELECT set_config('v4_3_e1.owner_cycle', (SELECT id::text FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-000000093102'::uuid AND ended_at IS NULL), true);
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090102';
@@ -203,7 +206,7 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090103';
 SELECT lives_ok(
-  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093101'::uuid, 'post release response')$$,
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093101'::uuid, 'post release response', NULL)$$,
   'Assigned Operator can send after an explicit release leaves no active cycle'
 );
 RESET ROLE;

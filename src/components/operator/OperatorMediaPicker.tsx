@@ -18,16 +18,30 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMediaViewUrl } from "@/hooks/useMediaViewUrl";
+import {
+  buildOperatorMediaSendArgs,
+  createOperatorSendTicket,
+  isOperatorSendTicketCurrent,
+  type OperatorSendTicket,
+} from "@/hooks/useStickerSend";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
-type OperatorCatalogAsset = Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number];
-type AdminCatalogAsset = Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
+type OperatorCatalogAsset =
+  Database["public"]["Functions"]["get_operator_media_catalog"]["Returns"][number];
+type AdminCatalogAsset =
+  Database["public"]["Functions"]["get_admin_media_catalog"]["Returns"][number];
 type CatalogAsset = OperatorCatalogAsset | AdminCatalogAsset;
 type DeliveryMode = "standard" | "locked";
 type ViewMode = "permanent" | "view_once" | "paid_open";
 type MediaPickerActor = "operator" | "admin";
+
+type ReservationRequest = {
+  requestId: number;
+  assetId: string;
+  scope: { conversationId: string; generation: number; actor: MediaPickerActor };
+};
 
 type SelectedReservation = {
   assetId: string;
@@ -46,6 +60,7 @@ type ReservationResponse = {
 
 type SendResponse = {
   already_sent?: unknown;
+  cycle_id?: unknown;
 };
 
 type CatalogTag = {
@@ -55,7 +70,8 @@ type CatalogTag = {
 
 function getCatalogTag(asset: CatalogAsset): CatalogTag | null {
   if (!("media_tag_id" in asset) || !("media_tag_name" in asset)) return null;
-  if (typeof asset.media_tag_id !== "string" || typeof asset.media_tag_name !== "string") return null;
+  if (typeof asset.media_tag_id !== "string" || typeof asset.media_tag_name !== "string")
+    return null;
   return { id: asset.media_tag_id, name: asset.media_tag_name };
 }
 
@@ -143,13 +159,25 @@ function formatRemaining(milliseconds: number) {
 export function OperatorMediaPicker({
   actor = "operator",
   conversationId,
+  expectedCycleId,
+  operatorSendGeneration = 0,
+  readOnly = false,
   open,
   onOpenChange,
+  onSent,
 }: {
   actor?: MediaPickerActor;
   conversationId: string;
+  expectedCycleId?: string | null;
+  operatorSendGeneration?: number;
+  readOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSent?: (
+    result: SendResponse,
+    conversationId: string,
+    ticket?: OperatorSendTicket,
+  ) => boolean | void;
 }) {
   const isMobile = useIsMobile();
   const [catalog, setCatalog] = useState<CatalogAsset[]>([]);
@@ -158,27 +186,53 @@ export function OperatorMediaPicker({
   const [reservation, setReservation] = useState<SelectedReservation | null>(null);
   const [caption, setCaption] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("permanent");
-  const [reservingAssetId, setReservingAssetId] = useState<string | null>(null);
+  const [pendingReservation, setPendingReservation] = useState<ReservationRequest | null>(null);
   const [sending, setSending] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const operatorReadOnly = actor === "operator" && readOnly;
   const reservationRef = useRef<SelectedReservation | null>(null);
-  const releaseInFlightRef = useRef<string | null>(null);
+  const releaseInFlightRef = useRef(new Set<string>());
+  const reserveRequestSequenceRef = useRef(0);
+  const activeReserveRequestRef = useRef<ReservationRequest | null>(null);
   const catalogRequestRef = useRef(0);
+  const sendRequestSequenceRef = useRef(0);
+  const activeSendRequestRef = useRef<number | null>(null);
+  const requestScopeRef = useRef({ conversationId, generation: operatorSendGeneration, actor });
   const preview = useMediaViewUrl("reserved_preview", reservation?.reservationId);
 
-  const clearReservation = useCallback(() => {
+  if (
+    requestScopeRef.current.conversationId !== conversationId ||
+    requestScopeRef.current.generation !== operatorSendGeneration ||
+    requestScopeRef.current.actor !== actor
+  ) {
+    requestScopeRef.current = { conversationId, generation: operatorSendGeneration, actor };
+    activeSendRequestRef.current = null;
+    activeReserveRequestRef.current = null;
+  }
+  const reservingAssetId =
+    pendingReservation?.scope === requestScopeRef.current ? pendingReservation.assetId : null;
+  const requestScope = requestScopeRef.current;
+
+  const clearReservation = useCallback((expectedReservationId?: string) => {
+    if (expectedReservationId && reservationRef.current?.reservationId !== expectedReservationId) {
+      return false;
+    }
     reservationRef.current = null;
     setReservation(null);
     setCaption("");
     setViewMode("permanent");
+    return true;
   }, []);
 
   const loadCatalog = useCallback(async () => {
     const requestVersion = ++catalogRequestRef.current;
     setCatalogState("loading");
-    const { data, error } = actor === "admin"
-      ? await supabase.rpc("get_admin_media_catalog", { _conversation_id: conversationId })
-      : await supabase.rpc("get_operator_media_catalog", { _conversation_id: conversationId });
+    const { data, error } =
+      actor === "admin"
+        ? await supabase.rpc("get_admin_media_catalog", { _conversation_id: conversationId })
+        : await supabase.rpc("get_operator_media_catalog", { _conversation_id: conversationId });
     if (requestVersion !== catalogRequestRef.current) return;
 
     if (error) {
@@ -190,6 +244,7 @@ export function OperatorMediaPicker({
     const nextCatalog = data ?? [];
     setCatalog(nextCatalog);
     setCatalogState("ready");
+    if (actor === "operator" && readOnlyRef.current) return;
 
     const ownReservation = nextCatalog.find(
       (asset) =>
@@ -211,24 +266,37 @@ export function OperatorMediaPicker({
   }, [actor, clearReservation, conversationId]);
 
   const releaseReservation = useCallback(
-    async (reservationId: string, notify: boolean) => {
-      if (releaseInFlightRef.current === reservationId) return;
-      releaseInFlightRef.current = reservationId;
-      if (reservationRef.current?.reservationId === reservationId) clearReservation();
-
-      const { error } = actor === "admin"
-        ? await supabase.rpc("release_admin_character_media_reservation", { _reservation_id: reservationId })
-        : await supabase.rpc("release_character_media_reservation", { _reservation_id: reservationId });
-      releaseInFlightRef.current = null;
-
-      if (error) {
-        if (notify) toast.error("שחרור בחירת המדיה נכשל");
-        return;
+    async (reservationId: string, notify: boolean, detached = false) => {
+      const releaseScope = requestScope;
+      if (releaseInFlightRef.current.has(reservationId)) return;
+      releaseInFlightRef.current.add(reservationId);
+      if (!detached && reservationRef.current?.reservationId === reservationId) {
+        clearReservation(reservationId);
       }
-      void loadCatalog();
-      if (notify) toast.success("בחירת המדיה שוחררה");
+
+      try {
+        const { error } =
+          actor === "admin"
+            ? await supabase.rpc("release_admin_character_media_reservation", {
+                _reservation_id: reservationId,
+              })
+            : await supabase.rpc("release_character_media_reservation", {
+                _reservation_id: reservationId,
+              });
+        if (error) throw error;
+        if (detached || requestScopeRef.current !== releaseScope) return;
+        void loadCatalog();
+        if (notify) toast.success("בחירת המדיה שוחררה");
+      } catch (error) {
+        console.error("Media reservation release failed", error);
+        if (!detached && requestScopeRef.current === releaseScope && notify) {
+          toast.error("שחרור בחירת המדיה נכשל");
+        }
+      } finally {
+        releaseInFlightRef.current.delete(reservationId);
+      }
     },
-    [actor, clearReservation, loadCatalog],
+    [actor, clearReservation, loadCatalog, requestScope],
   );
 
   const closePicker = useCallback(() => {
@@ -239,16 +307,21 @@ export function OperatorMediaPicker({
   }, [onOpenChange, releaseReservation, sending]);
 
   useEffect(() => {
+    setSending(false);
+  }, [actor, conversationId, operatorSendGeneration]);
+
+  useEffect(() => {
     if (!open) return;
     void loadCatalog();
   }, [loadCatalog, open]);
 
   useEffect(() => {
     return () => {
+      if (requestScopeRef.current === requestScope) activeReserveRequestRef.current = null;
       const activeReservation = reservationRef.current;
       if (activeReservation) void releaseReservation(activeReservation.reservationId, false);
     };
-  }, [releaseReservation]);
+  }, [releaseReservation, requestScope]);
 
   useEffect(() => {
     if (!reservation) return;
@@ -273,9 +346,10 @@ export function OperatorMediaPicker({
   }, [actor, catalog]);
 
   const visibleCatalog = useMemo(
-    () => selectedTagId === "all"
-      ? catalog
-      : catalog.filter((asset) => getCatalogTag(asset)?.id === selectedTagId),
+    () =>
+      selectedTagId === "all"
+        ? catalog
+        : catalog.filter((asset) => getCatalogTag(asset)?.id === selectedTagId),
     [catalog, selectedTagId],
   );
 
@@ -293,7 +367,8 @@ export function OperatorMediaPicker({
   }, [clearReservation, loadCatalog, remainingMilliseconds, reservation]);
 
   const selectAsset = async (asset: CatalogAsset, accessMode: DeliveryMode) => {
-    if (reservation || reservingAssetId) return;
+    if (actor === "operator" && readOnlyRef.current) return;
+    if (reservation || activeReserveRequestRef.current) return;
 
     if (asset.is_reserved_by_me && asset.my_reservation_id && asset.my_reservation_expires_at) {
       const nextReservation = {
@@ -310,69 +385,105 @@ export function OperatorMediaPicker({
     }
 
     if (accessMode === "locked" ? !asset.is_locked_reservable : !asset.is_reservable) return;
-    setReservingAssetId(asset.id);
-    const { data, error } = actor === "admin"
-      ? await supabase.rpc("reserve_admin_character_media_asset", {
-          _asset_id: asset.id,
-          _conversation_id: conversationId,
-        })
-      : await supabase.rpc("reserve_character_media_for_delivery", {
-          _asset_id: asset.id,
-          _conversation_id: conversationId,
-          _intended_access_mode: accessMode,
-        });
-    setReservingAssetId(null);
-
-    if (error) {
-      showReservationError(getErrorMessage(error));
-      void loadCatalog();
-      return;
-    }
-
-    const payload = (data ?? {}) as ReservationResponse;
-    if (
-      typeof payload.reservation_id !== "string" ||
-      typeof payload.expires_at !== "string" ||
-      (actor !== "admin" && payload.intended_access_mode !== "standard" && payload.intended_access_mode !== "locked")
-    ) {
-      toast.error("לא התקבל אישור תקין לבחירת המדיה");
-      void loadCatalog();
-      return;
-    }
-    const reservationId = payload.reservation_id;
-    const expiresAt = payload.expires_at;
-    const reservationAccessMode = actor === "admin" ? "standard" : toDeliveryMode(payload.intended_access_mode);
-
-    const nextReservation = {
+    const request: ReservationRequest = {
+      requestId: ++reserveRequestSequenceRef.current,
       assetId: asset.id,
-      displayName: asset.display_name,
-      expiresAt,
-      reservationId,
-      accessMode: reservationAccessMode,
-      paidOpenPriceCredits: getPaidOpenPrice(asset),
+      scope: requestScopeRef.current,
     };
-    reservationRef.current = nextReservation;
-    setReservation(nextReservation);
-    if (reservationAccessMode === "locked") setViewMode("permanent");
-    setCatalog((current) =>
-      current.map((currentAsset) =>
-        currentAsset.id === asset.id
-          ? {
-              ...currentAsset,
-              is_reservable: false,
-              is_locked_reservable: false,
-              is_reserved_by_me: true,
-              my_reservation_id: reservationId,
-              my_reservation_expires_at: expiresAt,
-              my_reservation_access_mode: reservationAccessMode,
-              status: "reserved",
-            }
-          : currentAsset,
-      ),
-    );
+    activeReserveRequestRef.current = request;
+    setPendingReservation(request);
+    const isCurrentRequest = () =>
+      activeReserveRequestRef.current?.requestId === request.requestId &&
+      requestScopeRef.current === request.scope;
+    try {
+      const { data, error } =
+        actor === "admin"
+          ? await supabase.rpc("reserve_admin_character_media_asset", {
+              _asset_id: asset.id,
+              _conversation_id: conversationId,
+            })
+          : await supabase.rpc("reserve_character_media_for_delivery", {
+              _asset_id: asset.id,
+              _conversation_id: conversationId,
+              _intended_access_mode: accessMode,
+            });
+      const payload = (data ?? {}) as ReservationResponse;
+      if (actor === "operator" && readOnlyRef.current) {
+        if (!error && typeof payload.reservation_id === "string") {
+          await releaseReservation(payload.reservation_id, false, true);
+        }
+        return;
+      }
+      if (!isCurrentRequest()) {
+        if (!error && typeof payload.reservation_id === "string") {
+          await releaseReservation(payload.reservation_id, false, true);
+        }
+        return;
+      }
+
+      if (error) {
+        showReservationError(getErrorMessage(error));
+        void loadCatalog();
+        return;
+      }
+
+      if (
+        typeof payload.reservation_id !== "string" ||
+        typeof payload.expires_at !== "string" ||
+        (actor !== "admin" &&
+          payload.intended_access_mode !== "standard" &&
+          payload.intended_access_mode !== "locked")
+      ) {
+        toast.error("לא התקבל אישור תקין לבחירת המדיה");
+        void loadCatalog();
+        return;
+      }
+      const reservationId = payload.reservation_id;
+      const expiresAt = payload.expires_at;
+      const reservationAccessMode =
+        actor === "admin" ? "standard" : toDeliveryMode(payload.intended_access_mode);
+
+      const nextReservation = {
+        assetId: asset.id,
+        displayName: asset.display_name,
+        expiresAt,
+        reservationId,
+        accessMode: reservationAccessMode,
+        paidOpenPriceCredits: getPaidOpenPrice(asset),
+      };
+      reservationRef.current = nextReservation;
+      setReservation(nextReservation);
+      if (reservationAccessMode === "locked") setViewMode("permanent");
+      setCatalog((current) =>
+        current.map((currentAsset) =>
+          currentAsset.id === asset.id
+            ? {
+                ...currentAsset,
+                is_reservable: false,
+                is_locked_reservable: false,
+                is_reserved_by_me: true,
+                my_reservation_id: reservationId,
+                my_reservation_expires_at: expiresAt,
+                my_reservation_access_mode: reservationAccessMode,
+                status: "reserved",
+              }
+            : currentAsset,
+        ),
+      );
+    } catch (error) {
+      if (isCurrentRequest()) {
+        showReservationError(error instanceof Error ? error.message : "");
+      }
+    } finally {
+      if (isCurrentRequest()) {
+        activeReserveRequestRef.current = null;
+        setPendingReservation(null);
+      }
+    }
   };
 
   const sendMedia = async () => {
+    if (actor === "operator" && readOnlyRef.current) return;
     if (!reservation || sending) return;
     if (remainingMilliseconds <= 0) {
       clearReservation();
@@ -385,20 +496,57 @@ export function OperatorMediaPicker({
       return;
     }
 
+    const ticket = createOperatorSendTicket(
+      requestScopeRef.current,
+      ++sendRequestSequenceRef.current,
+      actor === "operator" ? (expectedCycleId ?? null) : null,
+    );
+    activeSendRequestRef.current = ticket.requestId;
     setSending(true);
-    const { data, error } = actor === "admin"
-      ? await supabase.rpc("send_admin_media_message", {
-          _reservation_id: reservation.reservationId,
-          _caption: caption.trim() || undefined,
-        })
-      : await supabase.rpc(
-          reservation.accessMode === "locked" ? "send_operator_locked_media_message" : "send_operator_media_message",
-          {
+    const { data, error } =
+      actor === "admin"
+        ? await supabase.rpc("send_admin_media_message", {
             _reservation_id: reservation.reservationId,
             _caption: caption.trim() || undefined,
-            _view_mode: viewMode,
-          },
-        );
+          })
+        : reservation.accessMode === "locked"
+          ? await supabase.rpc(
+              "send_operator_locked_media_message",
+              buildOperatorMediaSendArgs({
+                accessMode: reservation.accessMode,
+                caption,
+                expectedCycleId,
+                reservationId: reservation.reservationId,
+                viewMode,
+              }),
+            )
+          : await supabase.rpc(
+              "send_operator_media_message",
+              buildOperatorMediaSendArgs({
+                accessMode: reservation.accessMode,
+                caption,
+                expectedCycleId,
+                reservationId: reservation.reservationId,
+                viewMode,
+              }),
+            );
+    if (actor === "operator" && readOnlyRef.current) {
+      if (
+        activeSendRequestRef.current === ticket.requestId &&
+        isOperatorSendTicketCurrent(requestScopeRef.current, ticket)
+      ) {
+        activeSendRequestRef.current = null;
+        setSending(false);
+      }
+      return;
+    }
+    if (
+      activeSendRequestRef.current !== ticket.requestId ||
+      !isOperatorSendTicketCurrent(requestScopeRef.current, ticket)
+    ) {
+      return;
+    }
+    activeSendRequestRef.current = null;
     setSending(false);
 
     if (error) {
@@ -409,14 +557,15 @@ export function OperatorMediaPicker({
         message.includes("media_reservation_released") ||
         message.includes("media_reservation_not_owned")
       ) {
-        clearReservation();
+        clearReservation(reservation.reservationId);
         void loadCatalog();
       }
       return;
     }
 
     const result = (data ?? {}) as SendResponse;
-    clearReservation();
+    if (actor === "operator" && onSent?.(result, conversationId, ticket) !== true) return;
+    clearReservation(reservation.reservationId);
     onOpenChange(false);
     toast.success(result.already_sent === true ? "המדיה כבר נשלחה" : "המדיה נשלחה");
   };
@@ -446,7 +595,7 @@ export function OperatorMediaPicker({
               variant="ghost"
               size="icon"
               onClick={() => void releaseReservation(reservation.reservationId, true)}
-              disabled={sending}
+              disabled={sending || operatorReadOnly}
               aria-label="ביטול בחירת המדיה"
             >
               <X className="h-4 w-4" />
@@ -469,7 +618,11 @@ export function OperatorMediaPicker({
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">אופן צפייה</p>
               <div
-                className={reservation.paidOpenPriceCredits === null ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}
+                className={
+                  reservation.paidOpenPriceCredits === null
+                    ? "grid grid-cols-2 gap-2"
+                    : "grid grid-cols-3 gap-2"
+                }
                 role="group"
                 aria-label="אופן צפייה במדיה"
               >
@@ -478,7 +631,7 @@ export function OperatorMediaPicker({
                   variant={viewMode === "permanent" ? "default" : "outline"}
                   className="shrink-0"
                   onClick={() => setViewMode("permanent")}
-                  disabled={sending}
+                  disabled={sending || operatorReadOnly}
                 >
                   קבוע
                 </Button>
@@ -487,7 +640,7 @@ export function OperatorMediaPicker({
                   variant={viewMode === "view_once" ? "default" : "outline"}
                   className="shrink-0"
                   onClick={() => setViewMode("view_once")}
-                  disabled={sending}
+                  disabled={sending || operatorReadOnly}
                 >
                   <Eye className="h-4 w-4" />
                   צפייה חד-פעמית
@@ -498,7 +651,7 @@ export function OperatorMediaPicker({
                     variant={viewMode === "paid_open" ? "default" : "outline"}
                     className="shrink-0"
                     onClick={() => setViewMode("paid_open")}
-                    disabled={sending}
+                    disabled={sending || operatorReadOnly}
                   >
                     <LockKeyhole className="h-4 w-4" />
                     בתשלום
@@ -531,7 +684,7 @@ export function OperatorMediaPicker({
             placeholder="כיתוב אופציונלי"
             maxLength={1000}
             rows={2}
-            disabled={sending}
+            disabled={sending || operatorReadOnly}
           />
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">{caption.length}/1000</span>
@@ -539,6 +692,7 @@ export function OperatorMediaPicker({
               type="button"
               onClick={() => void sendMedia()}
               disabled={
+                operatorReadOnly ||
                 sending ||
                 remainingMilliseconds <= 0 ||
                 preview.status !== "ready" ||
@@ -606,55 +760,62 @@ export function OperatorMediaPicker({
                   אין מדיה זמינה בתגית שנבחרה.
                 </div>
               ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {visibleCatalog.map((asset) => {
-                const reserving = reservingAssetId === asset.id;
-                const accessMode: DeliveryMode =
-                  actor === "admin" ? "standard" : asset.is_locked_reservable ? "locked" : "standard";
-                const available =
-                  asset.is_reserved_by_me ||
-                  (accessMode === "locked" ? asset.is_locked_reservable : asset.is_reservable);
-                return (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    onClick={() => void selectAsset(asset, accessMode)}
-                    disabled={!available || Boolean(reservingAssetId)}
-                    aria-pressed={asset.is_reserved_by_me}
-                    className="flex min-h-24 items-center gap-3 rounded-md border border-border bg-card p-3 text-right transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                      {reserving ? (
-                        <LoaderCircle className="h-5 w-5 animate-spin" />
-                      ) : (
-                        <Image className="h-5 w-5" />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1 truncate text-sm font-medium">
-                        {asset.locked_price_credits !== null && <LockKeyhole className="h-3.5 w-3.5 shrink-0" />}
-                        {asset.display_name}
-                      </span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {asset.content_type.replace("image/", "").toUpperCase()} ·{" "}
-                        {formatBytes(asset.byte_size)}
-                      </span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {asset.is_reserved_by_me
-                          ? "נבחרה עבורך"
-                          : asset.is_locked_reservable
-                            ? `מדיה נעולה · ${asset.locked_price_credits} קרדיטים`
-                            : asset.is_reservable
-                            ? "זמינה"
-                            : asset.locked_price_credits !== null && !asset.locked_images_enabled
-                              ? "מדיה נעולה אינה פעילה"
-                            : "לא זמינה"}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-              </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {visibleCatalog.map((asset) => {
+                    const reserving = reservingAssetId === asset.id;
+                    const accessMode: DeliveryMode =
+                      actor === "admin"
+                        ? "standard"
+                        : asset.is_locked_reservable
+                          ? "locked"
+                          : "standard";
+                    const available =
+                      asset.is_reserved_by_me ||
+                      (accessMode === "locked" ? asset.is_locked_reservable : asset.is_reservable);
+                    return (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        onClick={() => void selectAsset(asset, accessMode)}
+                        disabled={operatorReadOnly || !available || Boolean(reservingAssetId)}
+                        aria-pressed={asset.is_reserved_by_me}
+                        className="flex min-h-24 items-center gap-3 rounded-md border border-border bg-card p-3 text-right transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                          {reserving ? (
+                            <LoaderCircle className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <Image className="h-5 w-5" />
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1 truncate text-sm font-medium">
+                            {asset.locked_price_credits !== null && (
+                              <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                            {asset.display_name}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {asset.content_type.replace("image/", "").toUpperCase()} ·{" "}
+                            {formatBytes(asset.byte_size)}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {asset.is_reserved_by_me
+                              ? "נבחרה עבורך"
+                              : asset.is_locked_reservable
+                                ? `מדיה נעולה · ${asset.locked_price_credits} קרדיטים`
+                                : asset.is_reservable
+                                  ? "זמינה"
+                                  : asset.locked_price_credits !== null &&
+                                      !asset.locked_images_enabled
+                                    ? "מדיה נעולה אינה פעילה"
+                                    : "לא זמינה"}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}

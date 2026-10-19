@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  assertNoFixtureEvents,
   cleanupPrivateMediaOpenState,
   createAnonymousClient,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
   deleteByEq,
+  deleteFixtureEventsForOwnership,
   insertRow,
   localHttpReady,
   readLocalPrivateStickerAttemptCount,
@@ -139,6 +141,17 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
 
   const trackUser = (email: string) => (user: { id: string }) => users.push({ id: user.id, email });
   const userId = (email: string) => users.find((user) => user.email === email)?.id;
+
+  async function activeCycleId() {
+    const { data, error } = await service
+      .from("conversation_handling_cycles")
+      .select("id")
+      .eq("conversation_id", ids.conversation)
+      .is("ended_at", null)
+      .single();
+    if (error || !data?.id) throw new Error("local media fixture active cycle is unavailable");
+    return data.id;
+  }
 
   async function mediaSideEffectCounts() {
     const { data: messages, error: messageError } = await service
@@ -433,6 +446,13 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     if (!service) return;
     const ownerId = userId(emails.owner);
     const fixtureUserIds = users.map((user) => user.id);
+    const ownedEventTokens = [
+      ...Object.values(ids),
+      ...fixtureUserIds,
+      ...tracked.attachments,
+      ...tracked.messages,
+      ...tracked.reservations,
+    ];
     const assertCleanup = async () => {
       const [assets, reservations, messages, attachments, transactions, profiles, objects] =
         await Promise.all([
@@ -478,6 +498,12 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
 
     await runCleanupSteps([
       {
+        label: "fixture events before parent cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(service, ownedEventTokens);
+        },
+      },
+      {
         label: "Storage object",
         run: async () => {
           if (tracked.storageObjects.length === 0) return;
@@ -520,16 +546,6 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         run: async () => deleteByEq(service, "notifications", "conversation_id", ids.conversation),
       },
       {
-        label: "handling cycle",
-        run: async () =>
-          deleteByEq(service, "conversation_handling_cycles", "conversation_id", ids.conversation),
-      },
-      {
-        label: "work item",
-        run: async () =>
-          deleteByEq(service, "conversation_work_items", "conversation_id", ids.conversation),
-      },
-      {
         label: "attachments",
         run: async () =>
           deleteByEq(service, "message_attachments", "message_id", ids.permanentMessage),
@@ -543,6 +559,16 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       {
         label: "messages",
         run: async () => deleteByEq(service, "messages", "conversation_id", ids.conversation),
+      },
+      {
+        label: "handling cycle",
+        run: async () =>
+          deleteByEq(service, "conversation_handling_cycles", "conversation_id", ids.conversation),
+      },
+      {
+        label: "work item",
+        run: async () =>
+          deleteByEq(service, "conversation_work_items", "conversation_id", ids.conversation),
       },
       {
         label: "reservations",
@@ -589,6 +615,16 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         },
         { label: `Auth user ${user.id}`, run: async () => deleteAuthUser(service, user.id) },
       ]),
+      {
+        label: "fixture events created during cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(service, ownedEventTokens);
+        },
+      },
+      {
+        label: "fixture event residue verification",
+        run: async () => assertNoFixtureEvents(service, ownedEventTokens),
+      },
       { label: "fixture cleanup verification", run: assertCleanup },
     ]);
   });
@@ -659,17 +695,20 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     );
     tracked.reservations.push(otherReservationId);
 
+    const expectedCycleId = await activeCycleId();
     const sideEffectsBeforeDeniedSends = await mediaSideEffectCounts();
     const [otherOperatorSend, unassignedSend] = await Promise.all([
       otherAssigned.rpc("send_operator_media_message", {
         _reservation_id: otherReservationId,
         _caption: "v4_3_media_other_operator_attempt",
         _view_mode: "permanent",
+        _expected_cycle_id: expectedCycleId,
       }),
       unassigned.rpc("send_operator_media_message", {
         _reservation_id: permanentReservationId,
         _caption: "v4_3_media_unassigned_attempt",
         _view_mode: "permanent",
+        _expected_cycle_id: expectedCycleId,
       }),
     ]);
     assertSafeBusinessError(otherOperatorSend.error, "conversation_not_responsible_operator");
@@ -687,8 +726,9 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     tracked.reservations.push(ownerReservationId);
     const ownerSend = await assigned.rpc("send_operator_media_message", {
       _reservation_id: ownerReservationId,
-      _caption: "v4_3_media_cycle_owner_allowed",
+      _caption: "",
       _view_mode: "permanent",
+      _expected_cycle_id: expectedCycleId,
     });
     expect(ownerSend.error).toBeNull();
     const ownerSendResult = ownerSend.data as {
@@ -698,6 +738,13 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     };
     expect(ownerSendResult).toMatchObject({ already_sent: false });
     expect(ownerSendResult.attachment.message_id).toBe(ownerSendResult.message.id);
+    const sentWithoutCaption = await service
+      .from("message_attachments")
+      .select("caption")
+      .eq("id", ownerSendResult.attachment.id)
+      .single();
+    expect(sentWithoutCaption.error).toBeNull();
+    expect(sentWithoutCaption.data?.caption).toBeNull();
     tracked.messages.push(ownerSendResult.message.id);
     tracked.attachments.push(ownerSendResult.attachment.id);
 

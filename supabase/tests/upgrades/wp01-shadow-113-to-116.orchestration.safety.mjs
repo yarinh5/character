@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
+  acquireStableLocalTarget,
+  assertCopiedConfigMatches,
+  assertMigrationAbsenceResult,
+  assertExactUpgradeDifference,
+  assertBeforeVersionsInManifest,
+  buildThroughVersionManifest,
+  assertIsolatedMigrationManifest,
+  createIsolatedUpgradeWorkdir,
+  runResetWithVerifiedState,
   assertImmutableTargetSnapshot,
   inspectReadyTargetSnapshot,
   assertValidatedTargetIdentity,
@@ -180,6 +201,154 @@ test("requires a healthy DB container before accepting a target", () => {
   assert.throws(() => validateLocalTarget(fixture), /must be healthy/);
 });
 
+test("requires three stable initial samples before any mutation callback", () => {
+  const target = validateLocalTarget(targetFixture());
+  const events = [];
+  let clock = 0;
+  let samples = 0;
+
+  const acquired = acquireStableLocalTarget({
+    discoverTarget: () => {
+      samples += 1;
+      events.push(`sample-${samples}`);
+      return target;
+    },
+    now: () => clock,
+    sleep: (milliseconds) => {
+      events.push("sleep");
+      clock += milliseconds;
+    },
+  });
+
+  runValidatedUpgrade({
+    validateTarget: () => acquired,
+    verifyTarget: (actualTarget) => assertValidatedTargetIdentity(actualTarget, target),
+    resetTo113: () => {
+      events.push("reset");
+    },
+    upgrade: () => {
+      events.push("upgrade");
+    },
+    cleanup: () => {
+      events.push("cleanup");
+    },
+  });
+
+  assert.equal(samples, 3);
+  assert.deepEqual(events, [
+    "sample-1",
+    "sleep",
+    "sample-2",
+    "sleep",
+    "sample-3",
+    "reset",
+    "upgrade",
+    "cleanup",
+  ]);
+});
+
+test("resets the initial stability streak only when the DB container is recreated", () => {
+  const original = validateLocalTarget(targetFixture());
+  const recreated = {
+    ...original,
+    dbContainer: { ...original.dbContainer, id: "c".repeat(64) },
+  };
+  const sequence = [original, original, recreated, recreated, recreated];
+  const sleeps = [];
+  let clock = 0;
+
+  const acquired = acquireStableLocalTarget({
+    discoverTarget: () => sequence.shift(),
+    now: () => clock,
+    sleep: (milliseconds) => {
+      sleeps.push(milliseconds);
+      clock += milliseconds;
+    },
+  });
+
+  assert.deepEqual(acquired, recreated);
+  assert.deepEqual(sleeps, [1_000, 1_000, 1_000, 1_000]);
+});
+
+test("retries only transient initial absence and status failures", () => {
+  const target = validateLocalTarget(targetFixture());
+  const sequence = [
+    new ResetReadinessError("db_unavailable", "DB container is absent"),
+    new ResetReadinessError("status_unavailable", "local status is unavailable"),
+    target,
+    target,
+    target,
+  ];
+  let clock = 0;
+  let sleeps = 0;
+
+  assert.deepEqual(
+    acquireStableLocalTarget({
+      discoverTarget: () => {
+        const next = sequence.shift();
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      now: () => clock,
+      sleep: (milliseconds) => {
+        sleeps += 1;
+        clock += milliseconds;
+      },
+    }),
+    target,
+  );
+  assert.equal(sleeps, 4);
+});
+
+test("fails closed on immutable initial drift without allowing another retry", () => {
+  const target = validateLocalTarget(targetFixture());
+  const drifted = { ...target, configHash: "0".repeat(64) };
+  let samples = 0;
+  let sleeps = 0;
+
+  assert.throws(
+    () =>
+      acquireStableLocalTarget({
+        discoverTarget: () => {
+          samples += 1;
+          return samples === 1 ? target : drifted;
+        },
+        sleep: () => {
+          sleeps += 1;
+        },
+      }),
+    /config identity changed/,
+  );
+  assert.equal(samples, 2);
+  assert.equal(sleeps, 1);
+});
+test("times out initial acquisition without permitting reset, fixture, upgrade, or cleanup", () => {
+  const calls = [];
+  let clock = 0;
+
+  assert.throws(
+    () =>
+      runValidatedUpgrade({
+        validateTarget: () =>
+          acquireStableLocalTarget({
+            deadlineMilliseconds: 2_000,
+            discoverTarget: () => {
+              throw new ResetReadinessError("db_not_ready", "DB starting");
+            },
+            now: () => clock,
+            sleep: (milliseconds) => {
+              clock += milliseconds;
+            },
+          }),
+        resetTo113: () => calls.push("reset"),
+        upgrade: () => calls.push("upgrade"),
+        cleanup: () => calls.push("cleanup"),
+      }),
+    /did not remain stable/,
+  );
+
+  assert.deepEqual(calls, []);
+});
 test("waits for a recreated DB to transition from starting to healthy", () => {
   const target = validateLocalTarget(targetFixture());
   const rebound = { ...target, dbContainer: { ...target.dbContainer, id: "c".repeat(64) } };
@@ -420,4 +589,122 @@ test("rejects wrong DB mapping before an unavailable status can retry", () => {
   assert.match(error.cause.message, /5432\/tcp must match config\.toml/);
   assert.equal(statusCalls, 0);
   assert.equal(sleeps, 0);
+});
+
+test("builds the full manifest through M116 and rejects malformed, duplicate, or missing required migrations", () => {
+  const names = [
+    "20260512194305_initial.sql",
+    "20261006211051_wp01_authority_barrier_expand.sql",
+    "20261006211056_wp01_handling_shadow_metadata.sql",
+    "20261006211102_wp01_handling_reconciliation_readiness.sql",
+    "20261013113744_wp01_cycle_bound_operator_send.sql",
+  ];
+  const manifest = buildThroughVersionManifest(names);
+  assert.deepEqual(
+    manifest.map((entry) => entry.version),
+    ["20260512194305", "20261006211051", "20261006211056", "20261006211102"],
+  );
+  assert.throws(() => buildThroughVersionManifest(names.slice(0, 3)));
+  assert.throws(() => buildThroughVersionManifest([...names, "20261006211051_duplicate.sql"]));
+  assert.throws(() => buildThroughVersionManifest([...names, "invalid.sql"]));
+});
+
+test("rejects copied manifest hash/config drift and M117 in the temporary manifest", () => {
+  const expected = buildThroughVersionManifest([
+    "20260512194305_initial.sql",
+    "20261006211051_wp01_authority_barrier_expand.sql",
+    "20261006211056_wp01_handling_shadow_metadata.sql",
+    "20261006211102_wp01_handling_reconciliation_readiness.sql",
+    "20261013113744_wp01_cycle_bound_operator_send.sql",
+  ]);
+  const hashes = new Map(expected.map((entry) => [entry.name, `${entry.version}-hash`]));
+  const copied = expected.map((entry) => ({ ...entry, hash: hashes.get(entry.name) }));
+  assert.doesNotThrow(() =>
+    assertIsolatedMigrationManifest(copied, { expectedManifest: expected, expectedHashes: hashes }),
+  );
+  assert.throws(() =>
+    assertIsolatedMigrationManifest(
+      [
+        ...copied,
+        {
+          name: "20261013113744_wp01_cycle_bound_operator_send.sql",
+          version: "20261013113744",
+          hash: "extra",
+        },
+      ],
+      { expectedManifest: expected, expectedHashes: hashes },
+    ),
+  );
+  assert.throws(() =>
+    assertIsolatedMigrationManifest([{ ...copied[0], hash: "wrong" }, ...copied.slice(1)], {
+      expectedManifest: expected,
+      expectedHashes: hashes,
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertCopiedConfigMatches(Buffer.from("active"), Buffer.from("active")),
+  );
+  assert.throws(() => assertCopiedConfigMatches(Buffer.from("active"), Buffer.from("drift")));
+});
+
+test("requires applied history to be present and accepts only the exact M114-M116 difference", () => {
+  const manifest = buildThroughVersionManifest([
+    "20260512194305_initial.sql",
+    "20261006211051_wp01_authority_barrier_expand.sql",
+    "20261006211056_wp01_handling_shadow_metadata.sql",
+    "20261006211102_wp01_handling_reconciliation_readiness.sql",
+  ]);
+  assert.doesNotThrow(() => assertBeforeVersionsInManifest(["20260512194305"], manifest));
+  assert.throws(() => assertBeforeVersionsInManifest(["20260512194305", "missing"], manifest));
+  assert.doesNotThrow(() =>
+    assertExactUpgradeDifference(
+      ["20260512194305"],
+      ["20260512194305", "20261006211051", "20261006211056", "20261006211102"],
+    ),
+  );
+  assert.throws(() =>
+    assertExactUpgradeDifference(
+      ["20260512194305"],
+      ["20260512194305", "20261006211051", "20261006211102"],
+    ),
+  );
+  assert.throws(() =>
+    assertExactUpgradeDifference(
+      ["20260512194305"],
+      ["20260512194305", "20261006211051", "20261006211056", "20261006211102", "20261013113744"],
+    ),
+  );
+});
+
+test("copies every source migration through M116 and removes the workdir on success and failure", () => {
+  const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "wp01-shadow-temp-"));
+  const sourceConfig = readFileSync(join(sourceRoot, "supabase", "config.toml"));
+  try {
+    const isolated = createIsolatedUpgradeWorkdir({ sourceRoot, temporaryRoot });
+    try {
+      assert.equal(isolated.manifest.length, 116);
+      assert.equal(isolated.manifest.at(-1).version, "20261006211102");
+      assert.equal(
+        isolated.manifest.some((entry) => entry.version === "20261013113744"),
+        false,
+      );
+      assert.equal(readdirSync(join(isolated.workdir, "supabase", "migrations")).length, 116);
+      assert.deepEqual(readFileSync(join(sourceRoot, "supabase", "config.toml")), sourceConfig);
+    } finally {
+      isolated.destroy();
+    }
+    assert.equal(existsSync(isolated.workdir), false);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+test("requires an explicit boolean M117-absence result encoded as JSON", () => {
+  assert.doesNotThrow(() => assertMigrationAbsenceResult({ m117_present: false }));
+  assert.throws(() => assertMigrationAbsenceResult({ m117_present: true }));
+  assert.throws(() => assertMigrationAbsenceResult({}));
+  assert.throws(() => assertMigrationAbsenceResult({ m117_present: "false" }));
+  assert.throws(() => assertMigrationAbsenceResult(JSON.parse("f")));
+  assert.throws(() => JSON.parse(""));
+  assert.throws(() => JSON.parse("not-json"));
 });

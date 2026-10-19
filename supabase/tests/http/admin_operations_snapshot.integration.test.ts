@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertSafeBusinessError,
+  assertNoFixtureEvents,
   createAnonymousClient,
   createServiceClient,
   createSyntheticUser,
   deleteAuthUser,
+  deleteFixtureEventsForOwnership,
   localHttpReady,
   runCleanupSteps,
   setRole,
@@ -37,8 +39,15 @@ suite("V4-3-C HTTP Admin snapshot authorization", () => {
 
   afterAll(async () => {
     if (!admin) return;
-    await runCleanupSteps(
-      users.flatMap((userId) => [
+    const ownedEventTokens = [...users];
+    await runCleanupSteps([
+      {
+        label: "fixture events before parent cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
+      ...users.flatMap((userId) => [
         {
           label: `user role ${userId}`,
           run: async () => {
@@ -58,7 +67,17 @@ suite("V4-3-C HTTP Admin snapshot authorization", () => {
           run: async () => deleteAuthUser(admin, userId),
         },
       ]),
-    );
+      {
+        label: "fixture events created during cleanup",
+        run: async () => {
+          await deleteFixtureEventsForOwnership(admin, ownedEventTokens);
+        },
+      },
+      {
+        label: "fixture event residue verification",
+        run: async () => assertNoFixtureEvents(admin, ownedEventTokens),
+      },
+    ]);
   });
 
   it("does not expose sensitive wallet rows to an anonymous HTTP client", async () => {

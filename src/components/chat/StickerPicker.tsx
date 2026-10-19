@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Smile } from "lucide-react";
 import {
   AlertDialog,
@@ -27,7 +27,13 @@ import {
 } from "@/components/ui/sheet";
 import { useConversationStickers, type ConversationSticker } from "@/hooks/useConversationStickers";
 import { useConversationStickerViewUrl } from "@/hooks/useStickerViewUrl";
-import { useStickerSend, type StickerSendResult } from "@/hooks/useStickerSend";
+import {
+  createOperatorSendTicket,
+  isOperatorSendTicketCurrent,
+  useStickerSend,
+  type OperatorSendTicket,
+  type StickerSendResult,
+} from "@/hooks/useStickerSend";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 
@@ -37,7 +43,8 @@ function describeSendError(errorCode: string) {
   if (errorCode.includes("stickers_disabled")) return "סטיקרים אינם זמינים כרגע.";
   if (errorCode.includes("sticker_rate_limited")) return "יש להמתין מעט לפני שליחת סטיקר נוסף.";
   if (errorCode.includes("conversation_closed")) return "לא ניתן לשלוח סטיקר בשיחה סגורה.";
-  if (errorCode.includes("conversation_locked_by_other_operator")) return "השיחה נעולה כרגע לעובד אחר.";
+  if (errorCode.includes("conversation_locked_by_other_operator"))
+    return "השיחה נעולה כרגע לעובד אחר.";
   if (errorCode.includes("sticker_not_available")) return "הסטיקר אינו זמין יותר.";
   if (errorCode.includes("insufficient_credits")) return "אין לך מספיק קרדיטים לסטיקר הזה.";
   if (errorCode.includes("paid_sticker_requires_operator_context")) {
@@ -130,6 +137,9 @@ export function StickerPicker({
   open,
   onOpenChange,
   role,
+  readOnly = false,
+  expectedCycleId,
+  operatorSendGeneration = 0,
   onSent,
   creditBalance,
 }: {
@@ -137,22 +147,70 @@ export function StickerPicker({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   role: StickerPickerRole;
-  onSent: (result: StickerSendResult) => void;
+  readOnly?: boolean;
+  expectedCycleId?: string | null;
+  operatorSendGeneration?: number;
+  onSent: (
+    result: StickerSendResult,
+    conversationId: string,
+    ticket?: OperatorSendTicket,
+  ) => boolean | void;
   creditBalance?: number | null;
 }) {
   const isMobile = useIsMobile();
   const catalog = useConversationStickers(conversationId, open);
-  const sender = useStickerSend(conversationId, role);
+  const sender = useStickerSend(conversationId, role, expectedCycleId, operatorSendGeneration);
   const [pendingSticker, setPendingSticker] = useState<ConversationSticker | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const operatorReadOnly = role === "operator" && readOnly;
+  const requestSequenceRef = useRef(0);
+  const activeRequestRef = useRef<number | null>(null);
+  const requestScopeRef = useRef({
+    conversationId,
+    generation: operatorSendGeneration,
+  });
+
+  const nextRequestScope = { conversationId, generation: operatorSendGeneration };
+  if (
+    !isOperatorSendTicketCurrent(nextRequestScope, {
+      ...requestScopeRef.current,
+      requestId: 0,
+      expectedCycleId: null,
+    })
+  ) {
+    requestScopeRef.current = nextRequestScope;
+    activeRequestRef.current = null;
+  }
+
+  useEffect(() => {
+    setPendingSticker(null);
+  }, [conversationId, operatorSendGeneration, role]);
 
   const sendSticker = async (sticker: ConversationSticker) => {
+    if (role === "operator" && readOnlyRef.current) return;
+    const ticket = createOperatorSendTicket(
+      requestScopeRef.current,
+      ++requestSequenceRef.current,
+      role === "operator" ? (expectedCycleId ?? null) : null,
+    );
+    activeRequestRef.current = ticket.requestId;
     const { result, errorCode } = await sender.send(sticker.sticker_id);
+    if (role === "operator" && readOnlyRef.current) return;
+    if (
+      activeRequestRef.current !== ticket.requestId ||
+      !isOperatorSendTicketCurrent(requestScopeRef.current, ticket)
+    ) {
+      return;
+    }
+    activeRequestRef.current = null;
     if (errorCode) {
       toast.error(describeSendError(errorCode));
       if (errorCode.includes("sticker_not_available")) void catalog.refresh();
       return;
     }
-    if (result) onSent(result);
+    const accepted = result ? onSent(result, conversationId, ticket) : false;
+    if (role === "operator" && accepted !== true) return;
     onOpenChange(false);
   };
 
@@ -167,7 +225,10 @@ export function StickerPicker({
   const content = (
     <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
       {catalog.status === "loading" && (
-        <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
+        <div
+          className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground"
+          role="status"
+        >
           <LoaderCircle className="h-4 w-4 animate-spin" />
           טוען סטיקרים...
         </div>
@@ -194,7 +255,9 @@ export function StickerPicker({
       {catalog.status === "ready" && catalog.stickers.length > 0 && (
         <>
           {role === "client" && creditBalance !== undefined && creditBalance !== null && (
-            <p className="mb-3 text-sm text-muted-foreground">יתרת קרדיטים: {creditBalance} קרדיטים</p>
+            <p className="mb-3 text-sm text-muted-foreground">
+              יתרת קרדיטים: {creditBalance} קרדיטים
+            </p>
           )}
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {catalog.stickers.map((sticker) => (
@@ -202,7 +265,9 @@ export function StickerPicker({
                 key={sticker.sticker_id}
                 conversationId={conversationId}
                 sticker={sticker}
-                disabled={sender.sendingStickerId !== null || sender.isCoolingDown}
+                disabled={
+                  operatorReadOnly || sender.sendingStickerId !== null || sender.isCoolingDown
+                }
                 showPrice={role === "client"}
                 onSelect={selectSticker}
               />

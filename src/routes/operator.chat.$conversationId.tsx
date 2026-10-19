@@ -16,21 +16,28 @@ import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import { OperatorNewQueuePanel } from "@/components/operator/OperatorNewQueueList";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
-import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import {
+  MessageSticker,
+  StickerHydrationPlaceholder,
+  type ChatMessageSticker,
+} from "@/components/chat/MessageSticker";
 import { StickerPicker } from "@/components/chat/StickerPicker";
-import type { StickerSendResult } from "@/hooks/useStickerSend";
+import {
+  useOperatorSendOwnership,
+  type ConversationResponsibility,
+  type OperatorSendTicket,
+  type StickerSendResult,
+} from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
-import { operatorNewQueueClaimError, useOperatorNewQueue, type OperatorNewQueueItem } from "@/hooks/useOperatorNewQueue";
+import {
+  operatorNewQueueClaimError,
+  useOperatorNewQueue,
+  type OperatorNewQueueItem,
+} from "@/hooks/useOperatorNewQueue";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +46,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, User, FileText, Lock, Unlock, Info, ImagePlus, Smile, RotateCcw, Inbox } from "lucide-react";
+import {
+  ArrowRight,
+  Send,
+  User,
+  FileText,
+  Lock,
+  Unlock,
+  Info,
+  ImagePlus,
+  Smile,
+  RotateCcw,
+  Inbox,
+} from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/operator/chat/$conversationId")({
@@ -69,7 +88,12 @@ type Conv = {
   character_id: string;
   status: string;
   assigned_operator_id: string | null;
-  characters: { id: string; name: string; avatar_url: string | null; availability_status: string } | null;
+  characters: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    availability_status: string;
+  } | null;
 };
 
 type ClientInfo = {
@@ -101,7 +125,6 @@ type CustomerInfoEntry = {
 };
 
 type ConcurrencyMode = "open" | "warning" | "lock";
-type ConversationResponsibility = "mine" | "available" | "other" | "closed";
 
 type ConversationLock = {
   conversation_id: string;
@@ -119,7 +142,7 @@ function isActiveLock(lock: ConversationLock | null) {
   return !!lock && !lock.released_at && new Date(lock.expires_at).getTime() > Date.now();
 }
 
-function OperatorChatPage() {
+export function OperatorChatPage() {
   const { conversationId } = Route.useParams();
   const { user } = useAuth();
   const { operator, isAdmin } = useOperator();
@@ -143,7 +166,17 @@ function OperatorChatPage() {
   const [concurrencyMode, setConcurrencyMode] = useState<ConcurrencyMode>("open");
   const [lockTimeoutMinutes, setLockTimeoutMinutes] = useState(10);
   const [conversationLock, setConversationLock] = useState<ConversationLock | null>(null);
-  const [responsibility, setResponsibility] = useState<ConversationResponsibility | null>(null);
+  const {
+    sendScope,
+    responsibility,
+    responsibilityCycleId,
+    refreshResponsibility,
+    applySuccessfulSendCycle,
+    releaseOwnership,
+  } = useOperatorSendOwnership(conversationId, isAdmin, operator?.id);
+  const responsibilityRef = useRef(responsibility);
+  responsibilityRef.current = responsibility;
+  const hasOtherResponsibility = () => responsibilityRef.current === "other";
   const [lockBusy, setLockBusy] = useState(false);
   const [releasingConversation, setReleasingConversation] = useState(false);
   const [clientBlocked, setClientBlocked] = useState(false);
@@ -161,9 +194,17 @@ function OperatorChatPage() {
   const initialScrollDoneRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
+  const activeTextRequestRef = useRef<number | null>(null);
   const attachmentIds = useMemo(
     () =>
-      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+      [
+        ...new Set(
+          messages
+            .flatMap((message) => message.message_attachments ?? [])
+            .filter((attachment) => attachment.kind === "image")
+            .map((attachment) => attachment.id),
+        ),
+      ].sort(),
     [messages],
   );
   const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
@@ -175,20 +216,10 @@ function OperatorChatPage() {
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
   });
 
-  const refreshResponsibility = useCallback(async () => {
-    if (isAdmin || !operator?.id) {
-      setResponsibility(null);
-      return;
-    }
-
-    const { data, error } = await supabase.rpc("get_operator_conversation_responsibility", {
-      _conversation_id: conversationId,
-    });
-    const state = data?.[0]?.state;
-    if (!error && (state === "mine" || state === "available" || state === "other" || state === "closed")) {
-      setResponsibility(state);
-    }
-  }, [conversationId, isAdmin, operator?.id]);
+  useEffect(() => {
+    activeTextRequestRef.current = null;
+    setSending(false);
+  }, [sendScope.generation]);
 
   const refreshClientBlockStatus = useCallback(
     async (clientId: string) => {
@@ -214,7 +245,9 @@ function OperatorChatPage() {
         .order("position", { ascending: true }),
       supabase
         .from("message_stickers")
-        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .select(
+          "id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at",
+        )
         .eq("message_id", message.id),
     ]);
 
@@ -237,9 +270,13 @@ function OperatorChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
+      .select(
+        "*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+      )
       .eq("conversation_id", conversationId)
-      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .or(
+        `created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`,
+      )
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(MESSAGE_PAGE_SIZE);
@@ -271,7 +308,9 @@ function OperatorChatPage() {
       setLoading(true);
       const { data: c, error: ce } = await supabase
         .from("conversations")
-        .select("id, client_id, character_id, status, assigned_operator_id, characters(id, name, avatar_url, availability_status)")
+        .select(
+          "id, client_id, character_id, status, assigned_operator_id, characters(id, name, avatar_url, availability_status)",
+        )
         .eq("id", conversationId)
         .maybeSingle();
       if (cancelled) return;
@@ -302,7 +341,7 @@ function OperatorChatPage() {
       await refreshResponsibility();
       await refreshClientBlockStatus(c.client_id);
 
-      await (supabase as any).rpc("cleanup_expired_conversation_locks");
+      await supabase.rpc("cleanup_expired_conversation_locks");
 
       const [
         { data: m },
@@ -316,7 +355,9 @@ function OperatorChatPage() {
       ] = await Promise.all([
         supabase
           .from("messages")
-          .select("*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
+          .select(
+            "*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+          )
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -349,7 +390,9 @@ function OperatorChatPage() {
           .in("key", ["concurrency_mode", "lock_timeout_minutes"]),
         supabase
           .from("conversation_locks")
-          .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
+          .select(
+            "conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)",
+          )
           .eq("conversation_id", conversationId)
           .maybeSingle(),
       ]);
@@ -359,7 +402,11 @@ function OperatorChatPage() {
         ...new Set(loadedMessages.map((message) => message.operators?.user_id).filter(Boolean)),
       ] as string[];
       const { data: adminRoles } = operatorUserIds.length
-        ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
+        ? await supabase
+            .from("user_roles")
+            .select("user_id")
+            .in("user_id", operatorUserIds)
+            .eq("role", "admin")
         : { data: [] as { user_id: string }[] };
       if (cancelled) return;
       setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
@@ -393,7 +440,7 @@ function OperatorChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, operator, isAdmin, refreshResponsibility]);
+  }, [conversationId, operator, isAdmin, refreshClientBlockStatus, refreshResponsibility]);
 
   // Realtime
   useEffect(() => {
@@ -429,10 +476,15 @@ function OperatorChatPage() {
                     .eq("role", "admin")
                     .maybeSingle();
                   if (adminRole) {
-                    setAdminOperatorUserIds((prev) => (prev.includes(adminRole.user_id) ? prev : [...prev, adminRole.user_id]));
+                    setAdminOperatorUserIds((prev) =>
+                      prev.includes(adminRole.user_id) ? prev : [...prev, adminRole.user_id],
+                    );
                   }
                 }
-                const hydrated = { ...newMsg, operators: data ? { full_name: data.full_name, user_id: data.user_id } : null };
+                const hydrated = {
+                  ...newMsg,
+                  operators: data ? { full_name: data.full_name, user_id: data.user_id } : null,
+                };
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
                 void hydrateMessageDecorations(hydrated).then((attachmentHydrated) => {
                   setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
@@ -481,7 +533,9 @@ function OperatorChatPage() {
           if (!conv?.client_id) return;
           const { data } = await supabase
             .from("customer_info_entries")
-            .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
+            .select(
+              "id, content, created_at, operator_id, created_by_user_id, operators(full_name)",
+            )
             .eq("client_id", conv.client_id)
             .order("created_at", { ascending: false });
           setCustomerInfoEntries((data ?? []) as unknown as CustomerInfoEntry[]);
@@ -498,7 +552,9 @@ function OperatorChatPage() {
         async () => {
           const { data } = await supabase
             .from("conversation_locks")
-            .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
+            .select(
+              "conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)",
+            )
             .eq("conversation_id", conversationId)
             .maybeSingle();
           setConversationLock((data ?? null) as unknown as ConversationLock | null);
@@ -538,7 +594,7 @@ function OperatorChatPage() {
     if (concurrencyMode === "open") return;
     const timer = window.setInterval(() => {
       setLockClock((tick) => tick + 1);
-      void (supabase as any).rpc("cleanup_expired_conversation_locks");
+      void supabase.rpc("cleanup_expired_conversation_locks");
     }, 30000);
     return () => window.clearInterval(timer);
   }, [concurrencyMode]);
@@ -547,10 +603,15 @@ function OperatorChatPage() {
     if (concurrencyMode === "open" || !operator || lockBusy) return false;
     const active = isActiveLock(conversationLock);
     if (active && conversationLock?.locked_by_operator_id === operator.id) return true;
-    if (active && conversationLock?.locked_by_operator_id !== operator.id && concurrencyMode === "lock") return false;
+    if (
+      active &&
+      conversationLock?.locked_by_operator_id !== operator.id &&
+      concurrencyMode === "lock"
+    )
+      return false;
 
     setLockBusy(true);
-    const { data, error } = await (supabase as any).rpc("acquire_conversation_lock", {
+    const { data, error } = await supabase.rpc("acquire_conversation_lock", {
       _conversation_id: conversationId,
     });
     setLockBusy(false);
@@ -560,11 +621,17 @@ function OperatorChatPage() {
       return false;
     }
 
-    const payload = data as { acquired?: boolean; lock?: ConversationLock; holder_name?: string } | null;
+    const payload = data as {
+      acquired?: boolean;
+      lock?: ConversationLock;
+      holder_name?: string;
+    } | null;
     if (payload?.lock) {
       setConversationLock({
         ...payload.lock,
-        operators: payload.holder_name ? { full_name: payload.holder_name } : payload.lock.operators,
+        operators: payload.holder_name
+          ? { full_name: payload.holder_name }
+          : payload.lock.operators,
       });
     }
     return payload?.acquired === true;
@@ -573,7 +640,7 @@ function OperatorChatPage() {
   const releaseLock = async () => {
     if (lockBusy) return;
     setLockBusy(true);
-    const { data, error } = await (supabase as any).rpc("release_conversation_lock", {
+    const { data, error } = await supabase.rpc("release_conversation_lock", {
       _conversation_id: conversationId,
     });
     setLockBusy(false);
@@ -610,7 +677,9 @@ function OperatorChatPage() {
       }
 
       toast.success("השיחה הוחזרה לפניות החדשות.");
-      setResponsibility("available");
+      releaseOwnership();
+      activeTextRequestRef.current = null;
+      setSending(false);
       await newQueue.refetch();
       navigate({ to: "/operator/new" });
     } finally {
@@ -664,7 +733,9 @@ function OperatorChatPage() {
   const unblockClient = async () => {
     if (!conv) return;
     setClientActionBusy(true);
-    const { error } = await supabase.rpc("unblock_client_for_operator", { _client_id: conv.client_id });
+    const { error } = await supabase.rpc("unblock_client_for_operator", {
+      _client_id: conv.client_id,
+    });
     setClientActionBusy(false);
     if (error) {
       toast.error("שחרור החסימה נכשל");
@@ -676,6 +747,7 @@ function OperatorChatPage() {
   };
 
   const handleComposerActivity = () => {
+    if (hasOtherResponsibility()) return;
     if (concurrencyMode !== "open") {
       void acquireLock();
     }
@@ -684,6 +756,7 @@ function OperatorChatPage() {
   const send = async () => {
     const content = input.trim();
     if (!content || !user || sending) return;
+    if (hasOtherResponsibility()) return;
     if (conv?.status === "closed") {
       toast.error("השיחה סגורה. פתח אותה מחדש כדי לשלוח הודעה.");
       return;
@@ -692,6 +765,8 @@ function OperatorChatPage() {
       toast.error("הודעה ארוכה מדי");
       return;
     }
+    const ticket = sendScope.beginRequest(responsibilityCycleId);
+    activeTextRequestRef.current = ticket.requestId;
     if (concurrencyMode === "lock") {
       const active = isActiveLock(conversationLock);
       if (active && operator && conversationLock?.locked_by_operator_id !== operator.id) {
@@ -701,55 +776,87 @@ function OperatorChatPage() {
       if (!active) {
         const acquired = await acquireLock();
         if (!acquired) {
+          if (!sendScope.isCurrent(ticket)) return;
+          if (activeTextRequestRef.current === ticket.requestId) {
+            activeTextRequestRef.current = null;
+          }
           toast.error("לא ניתן לשלוח כי השיחה נעולה לעובד אחר");
           return;
         }
+        if (hasOtherResponsibility()) return;
       }
     } else if (concurrencyMode === "warning") {
       void acquireLock();
     }
+    if (!sendScope.isCurrent(ticket) || hasOtherResponsibility()) return;
     stopTyping();
     setSending(true);
     const { data, error } = await supabase.rpc("send_operator_message", {
-      _conversation_id: conversationId,
+      _conversation_id: ticket.conversationId,
       _content: content,
+      _expected_cycle_id: ticket.expectedCycleId,
     });
-    setSending(false);
     if (error) {
-      if (error.message.includes("operator_record_required")) {
-        toast.error("כדי לענות מהפאנל צריך רשומת עובד פעילה לאדמין/משתמש הזה.");
-        return;
-      }
-      if (error.message.includes("conversation_locked_by_other_operator")) {
-        toast.error("השיחה נעולה לעובד אחר");
-        return;
-      }
-      toast.error("שליחה נכשלה");
+      sendScope.completeRequest(ticket, () => {
+        if (activeTextRequestRef.current === ticket.requestId) {
+          activeTextRequestRef.current = null;
+          setSending(false);
+        }
+        if (error.message.includes("operator_record_required")) {
+          toast.error("כדי לענות מהפאנל צריך רשומת עובד פעילה לאדמין/משתמש הזה.");
+          return;
+        }
+        if (error.message.includes("conversation_locked_by_other_operator")) {
+          toast.error("השיחה נעולה לעובד אחר");
+          return;
+        }
+        toast.error("שליחה נכשלה");
+      });
       return;
     }
-    const result = data as { message?: Msg } | null;
-    if (result?.message) {
-      const message = {
-        ...result.message,
-        operators: operator ? { full_name: operator.full_name } : null,
-      };
-      shouldStickToBottomRef.current = true;
-      setMessages((prev) => mergeMessagesById(prev, [message]));
+    const result = data as { message?: Msg; cycle_id?: unknown } | null;
+    const accepted =
+      result !== null &&
+      applySuccessfulSendCycle(ticket, result, () => {
+        if (activeTextRequestRef.current === ticket.requestId) {
+          activeTextRequestRef.current = null;
+          setSending(false);
+        }
+        if (result.message) {
+          const message = {
+            ...result.message,
+            operators: operator ? { full_name: operator.full_name } : null,
+          };
+          shouldStickToBottomRef.current = true;
+          setMessages((prev) => mergeMessagesById(prev, [message]));
+        }
+        setInput("");
+      });
+    if (!accepted && sendScope.isCurrent(ticket)) {
+      if (activeTextRequestRef.current === ticket.requestId) {
+        activeTextRequestRef.current = null;
+        setSending(false);
+      }
     }
-    void refreshResponsibility();
-    setInput("");
   };
 
-  const handleStickerSent = (result: StickerSendResult) => {
-    if (!result.message) return;
-    shouldStickToBottomRef.current = true;
-    const message: Msg = {
-      ...result.message,
-      operator_id: operator?.id ?? null,
-      operators: operator ? { full_name: operator.full_name, user_id: user?.id ?? null } : null,
-      message_stickers: result.message_sticker ?? null,
-    };
-    setMessages((prev) => mergeMessagesById(prev, [message]));
+  const handleStickerSent = (
+    result: StickerSendResult,
+    _sentConversationId: string,
+    ticket?: OperatorSendTicket,
+  ) => {
+    if (!ticket) return false;
+    return applySuccessfulSendCycle(ticket, result, () => {
+      if (!result.message) return;
+      shouldStickToBottomRef.current = true;
+      const message: Msg = {
+        ...result.message,
+        operator_id: operator?.id ?? null,
+        operators: operator ? { full_name: operator.full_name, user_id: user?.id ?? null } : null,
+        message_stickers: result.message_sticker ?? null,
+      };
+      setMessages((prev) => mergeMessagesById(prev, [message]));
+    });
   };
 
   const saveNote = async () => {
@@ -792,7 +899,10 @@ function OperatorChatPage() {
 
   const updateStatus = async (status: "open" | "waiting" | "answered" | "closed") => {
     if (!conv) return;
-    const { error } = await supabase.from("conversations").update({ status }).eq("id", conversationId);
+    const { error } = await supabase
+      .from("conversations")
+      .update({ status })
+      .eq("id", conversationId);
     if (error) {
       toast.error("עדכון סטטוס נכשל");
       return;
@@ -839,19 +949,31 @@ function OperatorChatPage() {
   const character = conv?.characters;
   const closed = conv?.status === "closed";
   const activeLock = isActiveLock(conversationLock) ? conversationLock : null;
-  const lockHeldByMe = !!activeLock && !!operator && activeLock.locked_by_operator_id === operator.id;
-  const lockHeldByOther = !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
+  const lockHeldByMe =
+    !!activeLock && !!operator && activeLock.locked_by_operator_id === operator.id;
+  const lockHeldByOther =
+    !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
   const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
+  const composerReadOnly = responsibility === "other";
+  const sendBlocked = sendBlockedByLock || composerReadOnly;
   const canReleaseConversation = responsibility === "mine";
   const clientTyping = typingUsers.some((presence) => presence.role === "client");
-  const coworkerTyping = typingUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
-  const otherActiveOperators = activeUsers.filter((presence) => presence.role === "operator" || presence.role === "admin");
+  const coworkerTyping = typingUsers.filter(
+    (presence) => presence.role === "operator" || presence.role === "admin",
+  );
+  const otherActiveOperators = activeUsers.filter(
+    (presence) => presence.role === "operator" || presence.role === "admin",
+  );
 
   return (
     <div className="flex flex-col h-[100dvh] bg-background" dir="rtl">
       {/* Header */}
       <header className="h-16 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
-        <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/operator/conversations" })}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate({ to: "/operator/conversations" })}
+        >
           <ArrowRight className="h-5 w-5" />
         </Button>
         <div className="h-10 w-10 rounded-full bg-muted overflow-hidden shrink-0">
@@ -886,7 +1008,12 @@ function OperatorChatPage() {
                 {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
               </Button>
               {!clientBlocked && (
-                <Button variant="outline" size="sm" onClick={() => setClientAction("report")} className="shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setClientAction("report")}
+                  className="shrink-0"
+                >
                   דווח
                 </Button>
               )}
@@ -957,13 +1084,17 @@ function OperatorChatPage() {
                     <Button
                       variant={clientBlocked ? "secondary" : "outline"}
                       className="flex-1"
-                      onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                      onClick={() =>
+                        clientBlocked ? void unblockClient() : setClientAction("block")
+                      }
                       disabled={clientActionBusy}
                     >
                       {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
                     </Button>
                     {!clientBlocked && (
-                      <Button variant="outline" onClick={() => setClientAction("report")}>דווח</Button>
+                      <Button variant="outline" onClick={() => setClientAction("report")}>
+                        דווח
+                      </Button>
                     )}
                   </div>
                 )}
@@ -1055,15 +1186,21 @@ function OperatorChatPage() {
               }
               const isOps = m.sender_type === "operator" || m.sender_type === "admin";
               const avatarUrl = isOps ? conv?.characters?.avatar_url : client?.avatar_url;
-              const avatarName = isOps ? conv?.characters?.name : client?.display_name ?? client?.email;
+              const avatarName = isOps
+                ? conv?.characters?.name
+                : (client?.display_name ?? client?.email);
               const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
               const hasStickers = !!m.message_stickers;
-              const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+              const stickerHydrationPending =
+                m.content === "[sticker]" && m.message_stickers === undefined;
               const showContent =
                 (m.content !== "[image]" || !hasAttachments) &&
                 (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
               return (
-                <div key={m.id} className={`flex items-end gap-2 ${isOps ? "justify-start" : "justify-end"}`}>
+                <div
+                  key={m.id}
+                  className={`flex items-end gap-2 ${isOps ? "justify-start" : "justify-end"}`}
+                >
                   <ChatAvatar src={avatarUrl} name={avatarName} />
                   <div
                     className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
@@ -1081,7 +1218,9 @@ function OperatorChatPage() {
                             : "עובד"}
                       </p>
                     )}
-                    {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
+                    {showContent && (
+                      <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                    )}
                     {m.message_attachments?.map((attachment) => (
                       <MessageAttachment
                         key={attachment.id}
@@ -1093,16 +1232,14 @@ function OperatorChatPage() {
                     ))}
                     {stickerHydrationPending && <StickerHydrationPlaceholder />}
                     {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
-                    <p className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    <p
+                      className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                    >
                       {new Date(m.created_at).toLocaleTimeString("he-IL", {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                      {isOps && (
-                        <span className="ms-2">
-                          {m.is_read ? "נראה" : "נשלח"}
-                        </span>
-                      )}
+                      {isOps && <span className="ms-2">{m.is_read ? "נראה" : "נשלח"}</span>}
                     </p>
                   </div>
                 </div>
@@ -1112,7 +1249,9 @@ function OperatorChatPage() {
               <div className="space-y-1 text-xs text-muted-foreground">
                 {clientTyping && (
                   <div className="flex justify-end">
-                    <span className="rounded-full border border-border bg-card px-3 py-1">הלקוח מקליד...</span>
+                    <span className="rounded-full border border-border bg-card px-3 py-1">
+                      הלקוח מקליד...
+                    </span>
                   </div>
                 )}
                 {coworkerTyping.length > 0 && (
@@ -1158,11 +1297,17 @@ function OperatorChatPage() {
                         send();
                       }
                     }}
-                    placeholder={sendBlockedByLock ? "השיחה נעולה כרגע לעובד אחר" : `כתוב כ${character?.name ?? "דמות"}...`}
+                    placeholder={
+                      sendBlocked
+                        ? composerReadOnly
+                          ? "השיחה בטיפול עובד אחר"
+                          : "השיחה נעולה כרגע לעובד אחר"
+                        : `כתוב כ${character?.name ?? "דמות"}...`
+                    }
                     rows={1}
                     maxLength={2000}
                     className="min-w-0 flex-1 resize-none min-h-[40px] max-h-32"
-                    disabled={sendBlockedByLock}
+                    disabled={sendBlocked}
                   />
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1172,8 +1317,10 @@ function OperatorChatPage() {
                           variant="outline"
                           size="icon"
                           className="h-10 w-10 shrink-0"
-                          onClick={() => setMediaPickerOpen(true)}
-                          disabled={sendBlockedByLock}
+                          onClick={() => {
+                            if (responsibilityRef.current !== "other") setMediaPickerOpen(true);
+                          }}
+                          disabled={sendBlocked}
                           aria-label="בחירת מדיה לשליחה"
                         >
                           <ImagePlus className="h-4 w-4" />
@@ -1181,7 +1328,7 @@ function OperatorChatPage() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "בחירת מדיה"}
+                      {sendBlocked ? "השיחה אינה זמינה לשליחה" : "בחירת מדיה"}
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip>
@@ -1192,8 +1339,10 @@ function OperatorChatPage() {
                           variant="outline"
                           size="icon"
                           className="h-10 w-10 shrink-0"
-                          onClick={() => setStickerPickerOpen(true)}
-                          disabled={sendBlockedByLock}
+                          onClick={() => {
+                            if (responsibilityRef.current !== "other") setStickerPickerOpen(true);
+                          }}
+                          disabled={sendBlocked}
                           aria-label="בחירת סטיקר לשליחה"
                         >
                           <Smile className="h-4 w-4" />
@@ -1201,7 +1350,7 @@ function OperatorChatPage() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "בחירת סטיקר"}
+                      {sendBlocked ? "השיחה אינה זמינה לשליחה" : "בחירת סטיקר"}
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip>
@@ -1210,7 +1359,7 @@ function OperatorChatPage() {
                         <Button
                           className="h-10 w-10"
                           onClick={send}
-                          disabled={sending || !input.trim() || sendBlockedByLock}
+                          disabled={sending || !input.trim() || sendBlocked}
                           size="icon"
                           aria-label="שליחת הודעה"
                           aria-busy={sending}
@@ -1220,11 +1369,13 @@ function OperatorChatPage() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {sendBlockedByLock ? "השיחה נעולה לעובד אחר" : "שליחת הודעה"}
+                      {sendBlocked ? "השיחה אינה זמינה לשליחה" : "שליחת הודעה"}
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1 text-end">{input.length}/2000</p>
+                <p className="text-[10px] text-muted-foreground mt-1 text-end">
+                  {input.length}/2000
+                </p>
               </>
             )}
           </div>
@@ -1248,18 +1399,24 @@ function OperatorChatPage() {
           <div className="p-4 space-y-4">
             {operator && !isAdmin && conv && (
               <div className="space-y-2">
-                {clientBlocked && <p className="text-xs font-medium text-destructive">הלקוח חסום עבורך בלבד</p>}
+                {clientBlocked && (
+                  <p className="text-xs font-medium text-destructive">הלקוח חסום עבורך בלבד</p>
+                )}
                 <div className="flex gap-2">
                   <Button
                     variant={clientBlocked ? "secondary" : "outline"}
                     size="sm"
-                    onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                    onClick={() =>
+                      clientBlocked ? void unblockClient() : setClientAction("block")
+                    }
                     disabled={clientActionBusy}
                   >
                     {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
                   </Button>
                   {!clientBlocked && (
-                    <Button variant="outline" size="sm" onClick={() => setClientAction("report")}>דווח</Button>
+                    <Button variant="outline" size="sm" onClick={() => setClientAction("report")}>
+                      דווח
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1287,14 +1444,23 @@ function OperatorChatPage() {
       </div>
       <OperatorMediaPicker
         conversationId={conversationId}
+        expectedCycleId={responsibilityCycleId}
+        operatorSendGeneration={sendScope.generation}
+        readOnly={composerReadOnly}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+        onSent={(result, _sentConversationId, ticket) => {
+          return ticket ? applySuccessfulSendCycle(ticket, result) : false;
+        }}
       />
       <StickerPicker
         conversationId={conversationId}
         open={stickerPickerOpen}
         onOpenChange={setStickerPickerOpen}
         role="operator"
+        expectedCycleId={responsibilityCycleId}
+        operatorSendGeneration={sendScope.generation}
+        readOnly={composerReadOnly}
         onSent={handleStickerSent}
       />
       <Dialog open={clientAction !== null} onOpenChange={(open) => !open && closeClientAction()}>
@@ -1319,8 +1485,14 @@ function OperatorChatPage() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeClientAction} disabled={clientActionBusy}>ביטול</Button>
-            <Button variant={clientAction === "block" ? "destructive" : "default"} onClick={() => void submitClientAction()} disabled={clientActionBusy}>
+            <Button variant="outline" onClick={closeClientAction} disabled={clientActionBusy}>
+              ביטול
+            </Button>
+            <Button
+              variant={clientAction === "block" ? "destructive" : "default"}
+              onClick={() => void submitClientAction()}
+              disabled={clientActionBusy}
+            >
               {clientAction === "block" ? "חסום לקוח" : "שלח דיווח"}
             </Button>
           </DialogFooter>
@@ -1361,10 +1533,10 @@ function LockModeBanner({
     return (
       <div className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm" dir="rtl">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>
-            {holderName} פעיל בשיחה הזו. אפשר לשלוח הודעה, אבל כדאי לתאם לפני מענה.
-          </span>
-          {expiresAt && <span className="text-xs text-muted-foreground">פעילות עד {expiresAt}</span>}
+          <span>{holderName} פעיל בשיחה הזו. אפשר לשלוח הודעה, אבל כדאי לתאם לפני מענה.</span>
+          {expiresAt && (
+            <span className="text-xs text-muted-foreground">פעילות עד {expiresAt}</span>
+          )}
         </div>
       </div>
     );
@@ -1384,7 +1556,10 @@ function LockModeBanner({
   }
 
   return (
-    <div className={`border-b px-4 py-2 text-sm ${isMine ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10"}`} dir="rtl">
+    <div
+      className={`border-b px-4 py-2 text-sm ${isMine ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10"}`}
+      dir="rtl"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <span className="font-medium">
@@ -1392,7 +1567,8 @@ function LockModeBanner({
           </span>
           <span className="text-muted-foreground">
             {" "}
-            · שחרור אוטומטי אחרי {lockTimeoutMinutes} דקות ללא פעילות{expiresAt ? ` · צפוי ב-${expiresAt}` : ""}
+            · שחרור אוטומטי אחרי {lockTimeoutMinutes} דקות ללא פעילות
+            {expiresAt ? ` · צפוי ב-${expiresAt}` : ""}
           </span>
         </div>
         {(isMine || isAdmin) && (
@@ -1405,7 +1581,11 @@ function LockModeBanner({
   );
 }
 
-function HandlingResponsibilityBanner({ responsibility }: { responsibility: ConversationResponsibility | null }) {
+function HandlingResponsibilityBanner({
+  responsibility,
+}: {
+  responsibility: ConversationResponsibility | null;
+}) {
   if (!responsibility) return null;
 
   const copy = {
@@ -1509,19 +1689,29 @@ function InternalNotesPanel({
             maxLength={2000}
             className="resize-none text-sm"
           />
-          <Button onClick={saveNote} disabled={savingNote || !noteInput.trim()} size="sm" className="w-full">
+          <Button
+            onClick={saveNote}
+            disabled={savingNote || !noteInput.trim()}
+            size="sm"
+            className="w-full"
+          >
             {savingNote ? "שומר..." : "שמור הערה"}
           </Button>
         </div>
       )}
       <div className="space-y-2 max-h-64 overflow-y-auto">
-        {notes.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">אין הערות</p>}
+        {notes.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">אין הערות</p>
+        )}
         {notes.map((n) => (
           <div key={n.id} className="text-xs p-2 rounded bg-muted">
             <p className="whitespace-pre-wrap break-words">{n.note}</p>
             <p className="text-muted-foreground mt-1 text-[10px]">
               {n.operators?.full_name ?? "עובד"} ·{" "}
-              {new Date(n.created_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
+              {new Date(n.created_at).toLocaleString("he-IL", {
+                dateStyle: "short",
+                timeStyle: "short",
+              })}
             </p>
           </div>
         ))}
@@ -1574,7 +1764,10 @@ function CustomerInfoPanel({
             <p className="whitespace-pre-wrap break-words">{entry.content}</p>
             <p className="text-muted-foreground mt-1 text-[10px]">
               {entry.operators?.full_name ?? "עובד"} ·{" "}
-              {new Date(entry.created_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
+              {new Date(entry.created_at).toLocaleString("he-IL", {
+                dateStyle: "short",
+                timeStyle: "short",
+              })}
             </p>
           </div>
         ))}
@@ -1605,7 +1798,9 @@ function StatusActions({
             key={o.value}
             onClick={() => updateStatus(o.value)}
             className={`px-2 py-1.5 rounded text-xs border ${
-              status === o.value ? "bg-primary text-primary-foreground border-primary" : "border-input hover:bg-accent"
+              status === o.value
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-input hover:bg-accent"
             }`}
           >
             {o.label}

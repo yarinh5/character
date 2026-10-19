@@ -223,6 +223,15 @@ VALUES
   ('private.assert_operator_can_send_base(uuid)', 'relevant_guard', 'locks a conversation before send authorization'),
   ('private.assert_operator_can_send_conversation_message(uuid)', 'relevant_guard', 'locks active handling authority before send'),
   ('private.assert_operator_can_send_for_cycle(uuid, uuid)', 'relevant_guard', 'locks and validates the cycle authority token'),
+  ('private.acquire_operator_send_authority(uuid, uuid)', 'relevant_guard', 'validates token authority or claims atomically before a send'),
+  ('private.send_operator_message(uuid, text)', 'relevant_writer', 'private body for strict public text sends'),
+  ('private.send_operator_media_message(uuid, text, text)', 'relevant_writer', 'private body for strict public media sends'),
+  ('private.send_operator_locked_media_message(uuid, text)', 'relevant_writer', 'private body for strict public locked-media sends'),
+  ('private.send_operator_sticker_message(uuid, uuid, uuid)', 'relevant_writer', 'private body for strict public Sticker sends'),
+  ('public.send_operator_message(uuid, text, uuid)', 'relevant_writer', 'strict token public text wrapper'),
+  ('public.send_operator_media_message(uuid, text, text, uuid)', 'relevant_writer', 'strict token public media wrapper'),
+  ('public.send_operator_locked_media_message(uuid, text, uuid)', 'relevant_writer', 'strict token public locked-media wrapper'),
+  ('public.send_operator_sticker_message(uuid, uuid, uuid, uuid)', 'relevant_writer', 'strict token public Sticker wrapper'),
   ('private.assert_operator_can_claim_conversation(uuid)', 'relevant_guard', 'guards claim before ownership writes'),
   ('public.set_updated_at()', 'cutover_safe_non_handling', 'touches updated_at only'),
   ('public.notify_on_new_message()', 'cutover_safe_non_handling', 'emits notifications without changing handling authority'),
@@ -394,8 +403,8 @@ SELECT is(
 );
 SELECT is(
   (SELECT tgenabled::text FROM pg_trigger WHERE tgrelid = 'public.messages'::regclass AND tgname = 'close_handling_cycle_on_staff_message'),
-  'O',
-  'Legacy first-response trigger remains enabled during shadow'
+  NULL::text,
+  'WP01.4 removes automatic first-response cycle closure'
 );
 SELECT is(
   has_function_privilege('authenticated', 'private.assert_operator_can_claim_conversation(uuid)'::regprocedure, 'EXECUTE'),
@@ -826,7 +835,8 @@ SET LOCAL ROLE authenticated;
 SELECT throws_like(
   $$SELECT public.send_operator_message(
     '00000000-0000-4000-8000-0000000a3101'::uuid,
-    'other operator must not send'
+    'other operator must not send',
+    '00000000-0000-4000-8000-0000000a6101'::uuid
   )$$,
   'conversation_not_responsible_operator',
   'Another assigned Operator cannot send while the active cycle belongs to the owner'
@@ -846,7 +856,8 @@ SET LOCAL ROLE authenticated;
 SELECT lives_ok(
   $$SELECT public.send_operator_message(
     '00000000-0000-4000-8000-0000000a3101'::uuid,
-    'owner response'
+    'owner response',
+    '00000000-0000-4000-8000-0000000a6101'::uuid
   )$$,
   'Cycle owner can send through the existing RPC'
 );
@@ -879,9 +890,18 @@ SELECT is(
 );
 SELECT is(
   (SELECT count(*) FROM public.conversation_handling_cycles WHERE id = '00000000-0000-4000-8000-0000000a6101' AND ended_at IS NULL),
-  0::bigint,
-  'Legacy trigger still closes the cycle after the first response'
+  1::bigint,
+  'Cycle remains active after a strict response until explicit release'
 );
+SET LOCAL role authenticated;
+SELECT lives_ok(
+  $$SELECT public.release_operator_conversation(
+    '00000000-0000-4000-8000-0000000a3101'::uuid,
+    'released'
+  )$$,
+  'The cycle owner releases responsibility through the established RPC'
+);
+RESET ROLE;
 SELECT is(
   (SELECT to_jsonb(legacy_lock)
    FROM public.conversation_locks legacy_lock
@@ -902,7 +922,8 @@ SET LOCAL ROLE authenticated;
 SELECT throws_like(
   $$SELECT public.send_operator_message(
     '00000000-0000-4000-8000-0000000a3101'::uuid,
-    'legacy lock must still block'
+    'legacy lock must still block',
+    NULL::uuid
   )$$,
   'conversation_locked_by_other_operator',
   'Without an active cycle the contradictory legacy lock remains authoritative'
@@ -927,41 +948,105 @@ SET LOCAL ROLE authenticated;
 SELECT lives_ok(
   $$SELECT public.send_operator_message(
     '00000000-0000-4000-8000-0000000a3101'::uuid,
-    'legacy no-cycle response'
+    'atomic claim response',
+    NULL::uuid
   )$$,
-  'Legacy-shadow compatibility still records an assigned no-cycle response'
+  'No active cycle atomically claims authority and sends'
 );
 RESET ROLE;
-
+SELECT is(
+  (SELECT handling_effect FROM public.messages WHERE content = 'atomic claim response'),
+  'staff_response',
+  'Atomic claim send is classified as staff_response'
+);
+SELECT ok(
+  EXISTS (SELECT 1 FROM private.handling_send_authority_evidence evidence JOIN public.messages message ON message.id = evidence.message_id WHERE message.content = 'atomic claim response'),
+  'Atomic claim send records strict authority evidence'
+);
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+  $$SELECT public.release_operator_conversation(
+    '00000000-0000-4000-8000-0000000a3101'::uuid,
+    'released'
+  )$$,
+  'The atomic claim cycle is released through the established RPC'
+);
+RESET ROLE;
+INSERT INTO public.characters (id, name, is_active, is_visible, availability_status)
+VALUES ('00000000-0000-4000-8000-0000000a2199'::uuid, 'WP01 reconciliation character', TRUE, TRUE, 'available');
+INSERT INTO public.character_operator_assignments (character_id, operator_id)
+VALUES
+  ('00000000-0000-4000-8000-0000000a2199'::uuid, '00000000-0000-4000-8000-0000000a1102'::uuid),
+  ('00000000-0000-4000-8000-0000000a2199'::uuid, '00000000-0000-4000-8000-0000000a1104'::uuid);
+INSERT INTO public.conversations (id, client_id, character_id, status)
+SELECT
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  conversation.client_id,
+  '00000000-0000-4000-8000-0000000a2199'::uuid,
+  conversation.status
+FROM public.conversations conversation
+WHERE conversation.id = '00000000-0000-4000-8000-0000000a3101'::uuid;
+ALTER TABLE public.messages DISABLE TRIGGER prepare_message_handling_shadow;
+ALTER TABLE public.messages DISABLE TRIGGER record_message_handling_issue;
+INSERT INTO public.messages (
+  id, conversation_id, sender_type, sender_id, operator_id, content, created_at,
+  handling_effect, handling_classification_reason, handling_metadata_version, handling_classified_at
+)
+VALUES (
+  '00000000-0000-4000-8000-0000000a4199'::uuid,
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  'operator',
+  '00000000-0000-4000-8000-0000000a0102'::uuid,
+  '00000000-0000-4000-8000-0000000a1102'::uuid,
+  'legacy no-cycle response',
+  (SELECT strict_send_deployed_at - interval '1 second' FROM private.handling_contract_runtime WHERE singleton),
+  'unclassified',
+  'fallback_no_active_cycle',
+  1,
+  (SELECT strict_send_deployed_at - interval '1 second' FROM private.handling_contract_runtime WHERE singleton)
+);
+ALTER TABLE public.messages ENABLE TRIGGER prepare_message_handling_shadow;
+ALTER TABLE public.messages ENABLE TRIGGER record_message_handling_issue;
+INSERT INTO private.handling_reconciliation_issues (
+  conversation_id, message_id, issue_kind, status, can_change_canonical_state, evidence
+)
+VALUES (
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  '00000000-0000-4000-8000-0000000a4199'::uuid,
+  'fallback_no_active_cycle',
+  'unresolved',
+  TRUE,
+  '{"classification_source":"historical_fixture"}'::jsonb
+);
 SELECT is(
   (SELECT handling_effect FROM public.messages WHERE content = 'legacy no-cycle response'),
   'unclassified',
-  'Post-deployment no-cycle response is not silently treated as canonical'
+  'Historical no-cycle fixture remains unclassified for reconciliation coverage'
 );
 SELECT is(
   (SELECT status FROM private.handling_reconciliation_issues issue JOIN public.messages message ON message.id = issue.message_id WHERE message.content = 'legacy no-cycle response'),
   'unresolved',
-  'No-cycle response creates an unresolved reconciliation issue'
+  'Historical no-cycle fixture creates an unresolved reconciliation issue'
 );
 SELECT is(
   (SELECT unresolved_fallback_no_cycle_writes FROM private.get_handling_cutover_readiness()),
   1::bigint,
-  'Readiness reports the unresolved fallback write'
+  'Readiness reports the unresolved historical fallback write'
 );
 SELECT is(
   (SELECT unresolved_state_changing_effects FROM private.get_handling_cutover_readiness()),
   1::bigint,
-  'Readiness reports its unresolved state effect'
+  'Readiness reports its unresolved historical state effect'
 );
 SELECT is(
   (SELECT post_deploy_business_writes_missing_metadata FROM private.get_handling_cutover_readiness()),
   0::bigint,
-  'Every compatibility-period business write has required metadata'
+  'Every business write has required metadata'
 );
 SELECT is(
   (SELECT shadow_consistent FROM private.get_handling_cutover_readiness()),
   false,
-  'Unresolved no-cycle write makes the shadow inconsistent'
+  'Unresolved historical no-cycle write makes the shadow inconsistent'
 );
 SELECT is(
   (SELECT cutover_authorized FROM private.get_handling_cutover_readiness()),
@@ -1124,7 +1209,7 @@ SELECT is(
   'Wrong issue conversation rejection preserves message and issue rows'
 );
 UPDATE private.handling_reconciliation_issues
-SET conversation_id = '00000000-0000-4000-8000-0000000a3101'
+SET conversation_id = '00000000-0000-4000-8000-0000000a3199'
 WHERE message_id = current_setting('wp01.no_cycle_message_id')::UUID;
 DELETE FROM public.conversations
 WHERE id = '00000000-0000-4000-8000-0000000a3105';
@@ -1220,6 +1305,12 @@ SELECT is(
   'Explicitly reviewed: no valid cycle evidence',
   'Conservative resolution retains the explicit reviewer evidence'
 );
+DELETE FROM private.handling_reconciliation_issues
+WHERE message_id = current_setting('wp01.no_cycle_message_id')::uuid;
+DELETE FROM public.messages
+WHERE id = current_setting('wp01.no_cycle_message_id')::uuid;
+DELETE FROM public.conversations
+WHERE id = '00000000-0000-4000-8000-0000000a3199'::uuid;
 SELECT is(
   (SELECT shadow_consistent FROM private.get_handling_cutover_readiness()),
   true,
@@ -1231,15 +1322,46 @@ SELECT is(
   'A consistent shadow still does not authorize cutover in WP01'
 );
 
-SET LOCAL ROLE authenticated;
-SELECT lives_ok(
-  $$SELECT public.send_operator_message(
-    '00000000-0000-4000-8000-0000000a3101'::UUID,
-    'fallback staff repair'
-  )$$,
-  'A second no-cycle Operator response creates a repairable fallback'
+INSERT INTO public.conversations (id, client_id, character_id, status)
+SELECT
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  conversation.client_id,
+  '00000000-0000-4000-8000-0000000a2199'::uuid,
+  conversation.status
+FROM public.conversations conversation
+WHERE conversation.id = '00000000-0000-4000-8000-0000000a3101'::uuid;
+ALTER TABLE public.messages DISABLE TRIGGER prepare_message_handling_shadow;
+ALTER TABLE public.messages DISABLE TRIGGER record_message_handling_issue;
+INSERT INTO public.messages (
+  id, conversation_id, sender_type, sender_id, operator_id, content, created_at,
+  handling_effect, handling_classification_reason, handling_metadata_version, handling_classified_at
+)
+VALUES (
+  '00000000-0000-4000-8000-0000000a4198'::uuid,
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  'operator',
+  '00000000-0000-4000-8000-0000000a0102'::uuid,
+  '00000000-0000-4000-8000-0000000a1102'::uuid,
+  'fallback staff repair',
+  (SELECT strict_send_deployed_at - interval '2 seconds' FROM private.handling_contract_runtime WHERE singleton),
+  'unclassified',
+  'fallback_no_active_cycle',
+  1,
+  (SELECT strict_send_deployed_at - interval '2 seconds' FROM private.handling_contract_runtime WHERE singleton)
 );
-RESET ROLE;
+ALTER TABLE public.messages ENABLE TRIGGER prepare_message_handling_shadow;
+ALTER TABLE public.messages ENABLE TRIGGER record_message_handling_issue;
+INSERT INTO private.handling_reconciliation_issues (
+  conversation_id, message_id, issue_kind, status, can_change_canonical_state, evidence
+)
+VALUES (
+  '00000000-0000-4000-8000-0000000a3199'::uuid,
+  '00000000-0000-4000-8000-0000000a4198'::uuid,
+  'fallback_no_active_cycle',
+  'unresolved',
+  TRUE,
+  '{"classification_source":"historical_staff_repair_fixture"}'::jsonb
+);
 SELECT set_config(
   'wp01.staff_repair_message_id',
   (SELECT id::TEXT FROM public.messages WHERE content = 'fallback staff repair'),
@@ -1320,11 +1442,19 @@ SELECT is(
   (
     SELECT semantic_consistent
     FROM private.get_handling_shadow_reconciliation()
-    WHERE conversation_id = '00000000-0000-4000-8000-0000000a3101'
+    WHERE conversation_id = '00000000-0000-4000-8000-0000000a3199'
   ),
   TRUE,
   'Cycle-backed staff repair is semantically consistent'
 );
+DELETE FROM private.handling_reconciliation_issues
+WHERE message_id = current_setting('wp01.staff_repair_message_id')::uuid;
+DELETE FROM public.messages
+WHERE id = current_setting('wp01.staff_repair_message_id')::uuid;
+DELETE FROM public.conversation_handling_cycles
+WHERE id = '00000000-0000-4000-8000-0000000a6190'::uuid;
+DELETE FROM public.conversations
+WHERE id = '00000000-0000-4000-8000-0000000a3199'::uuid;
 SELECT is(
   (SELECT shadow_consistent FROM private.get_handling_cutover_readiness()),
   TRUE,

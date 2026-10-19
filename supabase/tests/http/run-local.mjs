@@ -54,6 +54,41 @@ function assertDockerPort(name, internalPort, expectedPort) {
   }
 }
 
+function readEventBaseline(label) {
+  let output;
+  try {
+    output = execFileSync(
+      "docker",
+      [
+        "exec",
+        dbContainer,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-qAt",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "SELECT json_build_object('notifications', (SELECT count(*) FROM public.notifications), 'analytics_events', (SELECT count(*) FROM public.analytics_events), 'audit_logs', (SELECT count(*) FROM public.audit_logs))::text;",
+      ],
+      { encoding: "utf8", windowsHide: true, stdio: "pipe" },
+    ).trim();
+  } catch {
+    fail(`HTTP event baseline ${label} could not be read from the verified local database.`);
+  }
+  try {
+    const baseline = JSON.parse(output);
+    console.log(
+      `HTTP event baseline ${label}: notifications=${baseline.notifications}, analytics_events=${baseline.analytics_events}, audit_logs=${baseline.audit_logs}`,
+    );
+    return baseline;
+  } catch {
+    fail(`HTTP event baseline ${label} was not valid JSON.`);
+  }
+}
+
 const status = spawnSync("supabase", ["status", "--output", "json"], {
   encoding: "utf8",
   windowsHide: true,
@@ -83,6 +118,7 @@ assertLoopbackUrl(dbUrl, dbPort, "local DB URL");
 assertDockerPort(dbContainer, "5432/tcp", dbPort);
 assertDockerPort(apiContainer, "8000/tcp", apiPort);
 console.log(`Verified isolated local stack: API ${apiPort}, DB ${dbPort}`);
+const eventBaselineBefore = readEventBaseline("before");
 
 let stickersEnabled = "unknown";
 try {
@@ -117,5 +153,10 @@ const result = spawnSync(process.execPath, [vitestBin, "run", ...args], {
   stdio: "inherit",
   windowsHide: true,
 });
+
+const eventBaselineAfter = readEventBaseline("after");
+if (JSON.stringify(eventBaselineAfter) !== JSON.stringify(eventBaselineBefore)) {
+  fail("HTTP fixture event residue changed the verified pre-suite baseline.");
+}
 
 process.exit(result.status ?? 1);
