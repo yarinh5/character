@@ -7,9 +7,10 @@ import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
 import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
 import { useOperator, ConversationStatusBadge } from "@/components/operator/OperatorLayout";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Coins, Search, MessageCircle } from "lucide-react";
+import { Coins, Search, MessageCircle, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/operator/conversations")({
   component: OperatorConversationsPage,
@@ -54,7 +55,7 @@ function OperatorConversationsPage() {
   const [characterFilter, setCharacterFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["operator-conversations", operator?.id ?? "admin"],
     queryFn: async () => {
       let characterIds: string[] | null = null;
@@ -86,14 +87,22 @@ function OperatorConversationsPage() {
       }
 
       const clientIds = Array.from(new Set((data ?? []).map((c) => c.client_id)));
-      let profileMap = new Map<string, { display_name: string | null; avatar_url: string | null }>();
+      let profileMap = new Map<
+        string,
+        { display_name: string | null; avatar_url: string | null }
+      >();
       if (clientIds.length > 0) {
         const { data: profs, error: profilesError } = await supabase
           .from("profiles")
           .select("user_id, display_name, avatar_url")
           .in("user_id", clientIds);
         if (profilesError) logSupabaseError("operator.conversations profiles", profilesError);
-        profileMap = new Map((profs ?? []).map((p) => [p.user_id, { display_name: p.display_name, avatar_url: p.avatar_url }]));
+        profileMap = new Map(
+          (profs ?? []).map((p) => [
+            p.user_id,
+            { display_name: p.display_name, avatar_url: p.avatar_url },
+          ]),
+        );
       }
 
       const [unread, slaRisks] = await Promise.all([
@@ -123,7 +132,12 @@ function OperatorConversationsPage() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversation_read_states", filter: user?.id ? `user_id=eq.${user.id}` : undefined },
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_read_states",
+          filter: user?.id ? `user_id=eq.${user.id}` : undefined,
+        },
         () => qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
       )
       .subscribe();
@@ -159,10 +173,18 @@ function OperatorConversationsPage() {
     });
   }, [data, filter, characterFilter, search]);
 
+  const resetFilters = () => {
+    setFilter("all");
+    setCharacterFilter("all");
+    setSearch("");
+  };
+
+  const hasConversations = (data?.length ?? 0) > 0;
+
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
+    <div className="max-w-4xl mx-auto p-4 md:p-8" dir="rtl">
       <header className="mb-6 flex items-center justify-between gap-3">
-        <h1 className="text-2xl md:text-3xl font-bold">שיחות</h1>
+        <h1 className="text-2xl md:text-3xl font-bold">ONLINE</h1>
         {operator && (
           <div className="inline-flex shrink-0 items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm font-medium shadow-sm">
             <Coins className="h-4 w-4 text-primary" />
@@ -222,80 +244,117 @@ function OperatorConversationsPage() {
       </div>
 
       {isLoading && (
-        <div className="space-y-2">
+        <div className="space-y-2" role="status" aria-label="טוען שיחות">
+          <span className="sr-only">טוען שיחות</span>
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-20" />
           ))}
         </div>
       )}
 
-      {error && (
-        <div className="text-center py-12 text-destructive">
-          שגיאה בטעינה
-          <div className="mt-2 text-xs text-muted-foreground">
-            {(error as { message?: string }).message}
-          </div>
+      {!isLoading && error && (
+        <div className="py-12 text-center" role="alert">
+          <p className="font-medium text-destructive">לא ניתן לטעון את השיחות כרגע</p>
+          <p className="mt-2 text-sm text-muted-foreground">אפשר לנסות שוב בעוד רגע.</p>
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            <RefreshCw className={`ml-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            {isFetching ? "מנסה שוב" : "נסה שוב"}
+          </Button>
         </div>
       )}
 
-      {!isLoading && filtered.length === 0 && (
+      {!isLoading && !error && !hasConversations && (
         <div className="text-center py-16">
           <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">אין שיחות תואמות</p>
+          <p className="text-muted-foreground">אין שיחות</p>
+        </div>
+      )}
+
+      {!isLoading && !error && hasConversations && filtered.length === 0 && (
+        <div className="text-center py-16">
+          <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+          <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
+          <Button variant="outline" className="mt-4" onClick={resetFilters}>
+            איפוס מסננים
+          </Button>
         </div>
       )}
 
       <div className="space-y-2">
-        {filtered.map((c) => (
-          <Link key={c.id} to="/operator/chat/$conversationId" params={{ conversationId: c.id }}>
-            <Card className={`p-4 flex items-center gap-3 hover:bg-accent transition-colors ${c.is_sla_risk ? "border-warning/60" : ""}`}>
-              <div className="flex -space-x-2 -space-x-reverse shrink-0">
-                <div className="h-11 w-11 rounded-full bg-muted overflow-hidden border-2 border-card">
-                  {c.characters?.avatar_url ? (
-                    <img src={c.characters.avatar_url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center font-semibold">
-                      {c.characters?.name?.[0] ?? "?"}
-                    </div>
-                  )}
+        {!isLoading &&
+          !error &&
+          filtered.map((c) => (
+            <Link key={c.id} to="/operator/chat/$conversationId" params={{ conversationId: c.id }}>
+              <Card
+                className={`p-4 flex items-center gap-3 hover:bg-accent transition-colors ${c.is_sla_risk ? "border-warning/60" : ""}`}
+              >
+                <div className="flex -space-x-2 -space-x-reverse shrink-0">
+                  <div className="h-11 w-11 rounded-full bg-muted overflow-hidden border-2 border-card">
+                    {c.characters?.avatar_url ? (
+                      <img
+                        src={c.characters.avatar_url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center font-semibold">
+                        {c.characters?.name?.[0] ?? "?"}
+                      </div>
+                    )}
+                  </div>
+                  <div className="h-11 w-11 rounded-full bg-muted overflow-hidden border-2 border-card">
+                    {c.profiles?.avatar_url ? (
+                      <img
+                        src={c.profiles.avatar_url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center text-sm font-medium">
+                        {c.profiles?.display_name?.[0] ?? "?"}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="h-11 w-11 rounded-full bg-muted overflow-hidden border-2 border-card">
-                  {c.profiles?.avatar_url ? (
-                    <img src={c.profiles.avatar_url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center text-sm font-medium">
-                      {c.profiles?.display_name?.[0] ?? "?"}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold truncate">{c.characters?.name ?? "—"}</span>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground truncate">
-                    {c.profiles?.display_name ?? "לקוח"}
-                  </span>
-                  <ConversationStatusBadge status={c.status} />
-                  {c.is_sla_risk && (
-                    <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
-                      בסיכון {c.sla_minutes_waiting} דק׳
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold truncate">{c.characters?.name ?? "—"}</span>
+                    <span className="text-xs text-muted-foreground">·</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      {c.profiles?.display_name ?? "לקוח"}
                     </span>
-                  )}
+                    <ConversationStatusBadge status={c.status} />
+                    {c.is_sla_risk && (
+                      <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
+                        בסיכון {c.sla_minutes_waiting} דק׳
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <p className="text-sm text-muted-foreground truncate">
+                      {c.last_message_preview ?? "—"}
+                    </p>
+                    <span
+                      className="text-xs text-muted-foreground shrink-0"
+                      aria-label={`הודעה אחרונה: ${formatTime(c.last_message_at)}`}
+                    >
+                      הודעה אחרונה · {formatTime(c.last_message_at)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between gap-2 mt-1">
-                  <p className="text-sm text-muted-foreground truncate">{c.last_message_preview ?? "—"}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{formatTime(c.last_message_at)}</span>
-                </div>
-              </div>
-              {c.operator_unread_count > 0 && (
-                <span className="bg-primary text-primary-foreground text-xs rounded-full h-6 min-w-6 px-2 flex items-center justify-center shrink-0">
-                  {c.operator_unread_count}
-                </span>
-              )}
-            </Card>
-          </Link>
-        ))}
+                {c.operator_unread_count > 0 && (
+                  <span className="bg-primary text-primary-foreground text-xs rounded-full h-6 min-w-6 px-2 flex items-center justify-center shrink-0">
+                    {c.operator_unread_count}
+                  </span>
+                )}
+              </Card>
+            </Link>
+          ))}
       </div>
     </div>
   );
