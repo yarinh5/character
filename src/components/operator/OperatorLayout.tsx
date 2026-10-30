@@ -1,6 +1,6 @@
 ﻿import { ReactNode, useEffect, useState, createContext, useContext } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { BarChart3, Coins, Inbox, LayoutDashboard, MessageCircle, Settings, LogOut, Radio } from "lucide-react";
+import { BarChart3, Coins, Inbox, LayoutDashboard, Settings, LogOut, Radio } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,12 @@ export type OperatorRecord = {
   availability_status: "available" | "busy" | "offline";
 };
 
-type Ctx = { operator: OperatorRecord | null; isAdmin: boolean; walletBalance: number | null; refresh: () => Promise<void> };
+type Ctx = {
+  operator: OperatorRecord | null;
+  isAdmin: boolean;
+  walletBalance: number | null;
+  refresh: () => Promise<void>;
+};
 const OperatorCtx = createContext<Ctx | null>(null);
 export const useOperator = () => {
   const ctx = useContext(OperatorCtx);
@@ -26,7 +31,12 @@ export const useOperator = () => {
 };
 
 type NavItem = {
-  to: "/operator" | "/operator/new" | "/operator/online" | "/operator/conversations" | "/operator/analytics" | "/operator/settings";
+  to:
+    | "/operator"
+    | "/operator/new"
+    | "/operator/conversations"
+    | "/operator/analytics"
+    | "/operator/settings";
   label: string;
   icon: typeof LayoutDashboard;
   exact?: boolean;
@@ -34,8 +44,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/operator", label: "דשבורד", icon: LayoutDashboard, exact: true },
   { to: "/operator/new", label: "NEW", icon: Inbox },
-  { to: "/operator/online", label: "ONLINE", icon: Radio },
-  { to: "/operator/conversations", label: "שיחות", icon: MessageCircle },
+  { to: "/operator/conversations", label: "ONLINE", icon: Radio },
   { to: "/operator/analytics", label: "ביצועים", icon: BarChart3 },
   { to: "/operator/settings", label: "הגדרות", icon: Settings },
 ];
@@ -78,7 +87,11 @@ export function RequireOperator({ children }: { children: ReactNode }) {
         .select("id, user_id, full_name, is_active, availability_status")
         .eq("user_id", session.user.id)
         .maybeSingle(),
-      supabase.from("credit_wallets").select("balance").eq("user_id", session.user.id).maybeSingle(),
+      supabase
+        .from("credit_wallets")
+        .select("balance")
+        .eq("user_id", session.user.id)
+        .maybeSingle(),
     ]);
     setOperator((operatorData as OperatorRecord | null) ?? null);
     setWalletBalance(walletData?.balance ?? 0);
@@ -107,14 +120,24 @@ export function RequireOperator({ children }: { children: ReactNode }) {
       .channel(`operator-wallet-${session.user.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "credit_wallets", filter: `user_id=eq.${session.user.id}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "credit_wallets",
+          filter: `user_id=eq.${session.user.id}`,
+        },
         () => {
           void refresh();
         },
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "credit_transactions", filter: `user_id=eq.${session.user.id}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "credit_transactions",
+          filter: `user_id=eq.${session.user.id}`,
+        },
         () => {
           void refresh();
         },
@@ -163,13 +186,20 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   );
 }
 
-function OperatorShell({ children, signOut }: { children: ReactNode; signOut: () => Promise<void> }) {
+function OperatorShell({
+  children,
+  signOut,
+}: {
+  children: ReactNode;
+  signOut: () => Promise<void>;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { operator, isAdmin, walletBalance } = useOperator();
   const newSla = useOperatorNewSlaSummary(operator?.id);
 
-  const isActive = (to: string, exact?: boolean) => (exact ? pathname === to : pathname.startsWith(to));
+  const isActive = (to: string, exact?: boolean) =>
+    exact ? pathname === to : pathname.startsWith(to);
 
   const handleLogout = async () => {
     await signOut();
@@ -180,113 +210,113 @@ function OperatorShell({ children, signOut }: { children: ReactNode; signOut: ()
     operator?.availability_status === "available"
       ? "bg-success"
       : operator?.availability_status === "busy"
-      ? "bg-warning"
-      : "bg-muted-foreground";
+        ? "bg-warning"
+        : "bg-muted-foreground";
 
   return (
     <div className="min-h-screen bg-background flex flex-col" dir="rtl">
       <ImpersonationBanner />
       <div className="flex flex-1 min-h-0">
-      <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
-        <div className="h-16 px-6 flex items-center border-b border-border">
-          <Link to="/operator" className="font-bold text-lg">
-            פאנל עובד
-          </Link>
-        </div>
-        <div className="px-4 py-4 border-b border-border">
-          <div className="text-sm font-medium truncate">
-            {operator?.full_name ?? (isAdmin ? "מנהל מערכת" : "-")}
+        <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
+          <div className="h-16 px-6 flex items-center border-b border-border">
+            <Link to="/operator" className="font-bold text-lg">
+              פאנל עובד
+            </Link>
           </div>
-          {operator && (
-            <div className="mt-1 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className={cn("h-2 w-2 rounded-full", statusColor)} />
-                <span className="text-xs text-muted-foreground">
-                  {operator.availability_status === "available"
-                    ? "זמין"
-                    : operator.availability_status === "busy"
-                    ? "עסוק"
-                    : "לא מחובר"}
-                </span>
+          <div className="px-4 py-4 border-b border-border">
+            <div className="text-sm font-medium truncate">
+              {operator?.full_name ?? (isAdmin ? "מנהל מערכת" : "-")}
+            </div>
+            {operator && (
+              <div className="mt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={cn("h-2 w-2 rounded-full", statusColor)} />
+                  <span className="text-xs text-muted-foreground">
+                    {operator.availability_status === "available"
+                      ? "זמין"
+                      : operator.availability_status === "busy"
+                        ? "עסוק"
+                        : "לא מחובר"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Coins className="h-3.5 w-3.5" />
+                  <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            )}
+          </div>
+          <nav className="flex-1 p-4 space-y-1">
+            {NAV.map(({ to, label, icon: Icon, exact }) => (
+              <Link
+                key={to}
+                to={to}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  isActive(to, exact)
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </span>
+                {to === "/operator/new" && newSla.summary.critical_count > 0 && (
+                  <span className="min-w-5 rounded-full bg-destructive px-1.5 py-0.5 text-center text-[10px] font-semibold text-destructive-foreground">
+                    {newSla.summary.critical_count}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </nav>
+          <div className="p-4 border-t border-border">
+            <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleLogout}>
+              <LogOut className="h-4 w-4" />
+              התנתקות
+            </Button>
+          </div>
+        </aside>
+
+        <main className="flex-1 min-w-0 pb-20 md:pb-0 flex flex-col">
+          <header className="h-14 border-b border-border bg-card flex items-center justify-between md:justify-end px-4 gap-2 shrink-0">
+            <Button variant="ghost" size="sm" className="md:hidden gap-2" onClick={handleLogout}>
+              <LogOut className="h-4 w-4" />
+              יציאה
+            </Button>
+            {operator && (
+              <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground">
                 <Coins className="h-3.5 w-3.5" />
                 <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
               </div>
-            </div>
-          )}
-        </div>
-        <nav className="flex-1 p-4 space-y-1">
-          {NAV.map(({ to, label, icon: Icon, exact }) => (
-            <Link
-              key={to}
-              to={to}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                isActive(to, exact)
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <Icon className="h-4 w-4" />
+            )}
+            <NotificationBell />
+          </header>
+          <div className="flex-1 min-h-0">{children}</div>
+        </main>
+
+        <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
+          <div className="grid grid-cols-5">
+            {NAV.map(({ to, label, icon: Icon, exact }) => (
+              <Link
+                key={to}
+                to={to}
+                className={cn(
+                  "relative flex flex-col items-center justify-center gap-1 py-3 text-xs",
+                  isActive(to, exact) ? "text-primary" : "text-muted-foreground",
+                )}
+              >
+                <Icon className="h-5 w-5" />
                 {label}
-              </span>
-              {to === "/operator/new" && newSla.summary.critical_count > 0 && (
-                <span className="min-w-5 rounded-full bg-destructive px-1.5 py-0.5 text-center text-[10px] font-semibold text-destructive-foreground">
-                  {newSla.summary.critical_count}
-                </span>
-              )}
-            </Link>
-          ))}
+                {to === "/operator/new" && newSla.summary.critical_count > 0 && (
+                  <span className="absolute top-1 rounded-full bg-destructive px-1 text-[9px] font-semibold text-destructive-foreground">
+                    {newSla.summary.critical_count}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
         </nav>
-        <div className="p-4 border-t border-border">
-          <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleLogout}>
-            <LogOut className="h-4 w-4" />
-            התנתקות
-          </Button>
-        </div>
-      </aside>
-
-      <main className="flex-1 min-w-0 pb-20 md:pb-0 flex flex-col">
-        <header className="h-14 border-b border-border bg-card flex items-center justify-between md:justify-end px-4 gap-2 shrink-0">
-          <Button variant="ghost" size="sm" className="md:hidden gap-2" onClick={handleLogout}>
-            <LogOut className="h-4 w-4" />
-            יציאה
-          </Button>
-          {operator && (
-            <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground">
-              <Coins className="h-3.5 w-3.5" />
-              <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
-            </div>
-          )}
-          <NotificationBell />
-        </header>
-        <div className="flex-1 min-h-0">{children}</div>
-      </main>
-
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-6">
-          {NAV.map(({ to, label, icon: Icon, exact }) => (
-            <Link
-              key={to}
-              to={to}
-              className={cn(
-                "relative flex flex-col items-center justify-center gap-1 py-3 text-xs",
-                isActive(to, exact) ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              <Icon className="h-5 w-5" />
-              {label}
-              {to === "/operator/new" && newSla.summary.critical_count > 0 && (
-                <span className="absolute top-1 rounded-full bg-destructive px-1 text-[9px] font-semibold text-destructive-foreground">
-                  {newSla.summary.critical_count}
-                </span>
-              )}
-            </Link>
-          ))}
-        </div>
-      </nav>
       </div>
     </div>
   );
@@ -301,5 +331,7 @@ export function ConversationStatusBadge({ status }: { status: string }) {
     reported: { label: "דווחה", cls: "bg-destructive/15 text-destructive" },
   };
   const s = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
-  return <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", s.cls)}>{s.label}</span>;
+  return (
+    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", s.cls)}>{s.label}</span>
+  );
 }

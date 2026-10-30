@@ -9,7 +9,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Award, BarChart3, Bell, Clock, MessageCircle, Send, Sparkles, Timer, Users } from "lucide-react";
+import {
+  Award,
+  BarChart3,
+  Bell,
+  Clock,
+  MessageCircle,
+  Send,
+  Sparkles,
+  Timer,
+  Users,
+} from "lucide-react";
 
 export const Route = createFileRoute("/operator/")({
   component: OperatorDashboard,
@@ -32,7 +42,11 @@ function OperatorDashboard() {
   const { operator, isAdmin, walletBalance, refresh } = useOperator();
   const qc = useQueryClient();
 
-  const { data: stats, isLoading, error } = useQuery({
+  const {
+    data: stats,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["operator-stats", operator?.id ?? "admin", isAdmin, walletBalance ?? 0],
     queryFn: async () => {
       const today = new Date();
@@ -60,7 +74,9 @@ function OperatorDashboard() {
 
       let convQuery = supabase
         .from("conversations")
-        .select("id, status, operator_unread_count, last_message_at, last_message_preview, characters(id, name, avatar_url), client_id, updated_at")
+        .select(
+          "id, status, operator_unread_count, last_message_at, last_message_preview, characters(id, name, avatar_url), client_id, updated_at",
+        )
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(200);
       if (characterIds) {
@@ -70,53 +86,67 @@ function OperatorDashboard() {
             : convQuery.in("character_id", characterIds);
       }
 
-      const [{ data: convs, error }, { data: assigned }, monthlyPointTransactions, previousPointTransactions, sentMessagesResult] =
-        await Promise.all([
-          convQuery,
-          operator
-            ? supabase
-                .from("character_operator_assignments")
-                .select("character_id, characters(id, name, avatar_url, availability_status)")
-                .eq("operator_id", operator.id)
-            : Promise.resolve({ data: [] as unknown[] }),
-          operator
-            ? (supabase
-                .from("credit_transactions")
-                .select("amount")
-                .eq("user_id", operator.user_id)
-                .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
-                .gte("created_at", monthStartIso) as any)
-            : Promise.resolve({ data: [] }),
-          operator
-            ? (supabase
-                .from("credit_transactions")
-                .select("amount")
-                .eq("user_id", operator.user_id)
-                .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
-                .gte("created_at", previousMonthStartIso)
-                .lt("created_at", monthStartIso) as any)
-            : Promise.resolve({ data: [] }),
-          operator
-            ? supabase
-                .from("messages")
-                .select("id", { count: "exact", head: true })
-                .eq("operator_id", operator.id)
-                .eq("sender_type", "operator")
-                .gte("created_at", monthStartIso)
-            : Promise.resolve({ count: 0 }),
-        ]);
+      const [
+        { data: convs, error },
+        { data: assigned },
+        monthlyPointTransactions,
+        previousPointTransactions,
+        sentMessagesResult,
+      ] = await Promise.all([
+        convQuery,
+        operator
+          ? supabase
+              .from("character_operator_assignments")
+              .select("character_id, characters(id, name, avatar_url, availability_status)")
+              .eq("operator_id", operator.id)
+          : Promise.resolve({ data: [] as unknown[] }),
+        operator
+          ? supabase
+              .from("credit_transactions")
+              .select("amount")
+              .eq("user_id", operator.user_id)
+              .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
+              .gte("created_at", monthStartIso)
+          : Promise.resolve({ data: [] }),
+        operator
+          ? supabase
+              .from("credit_transactions")
+              .select("amount")
+              .eq("user_id", operator.user_id)
+              .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
+              .gte("created_at", previousMonthStartIso)
+              .lt("created_at", monthStartIso)
+          : Promise.resolve({ data: [] }),
+        operator
+          ? supabase
+              .from("messages")
+              .select("id", { count: "exact", head: true })
+              .eq("operator_id", operator.id)
+              .eq("sender_type", "operator")
+              .gte("created_at", monthStartIso)
+          : Promise.resolve({ count: 0 }),
+      ]);
       if (error) {
         logSupabaseError("operator.dashboard conversations", error);
         throw error;
       }
       if ((monthlyPointTransactions as { error?: unknown }).error) {
-        logSupabaseError("operator.dashboard monthly points", (monthlyPointTransactions as { error: unknown }).error);
+        logSupabaseError(
+          "operator.dashboard monthly points",
+          (monthlyPointTransactions as { error: unknown }).error,
+        );
       }
       if ((previousPointTransactions as { error?: unknown }).error) {
-        logSupabaseError("operator.dashboard previous points", (previousPointTransactions as { error: unknown }).error);
+        logSupabaseError(
+          "operator.dashboard previous points",
+          (previousPointTransactions as { error: unknown }).error,
+        );
       }
       if ((sentMessagesResult as { error?: unknown }).error) {
-        logSupabaseError("operator.dashboard sent messages", (sentMessagesResult as { error: unknown }).error);
+        logSupabaseError(
+          "operator.dashboard sent messages",
+          (sentMessagesResult as { error: unknown }).error,
+        );
       }
 
       const [unreadCounts, slaRisks] = await Promise.all([
@@ -140,7 +170,9 @@ function OperatorDashboard() {
           : { data: [] as DashboardMessage[] };
 
       const active = list.filter((c) => c.status !== "closed").length;
-      const waitingConversations = list.filter((c) => c.status === "waiting" || (c.operator_unread_count ?? 0) > 0);
+      const waitingConversations = list.filter(
+        (c) => c.status === "waiting" || (c.operator_unread_count ?? 0) > 0,
+      );
       const waiting = waitingConversations.length;
       const unread = list.reduce((s, c) => s + (c.operator_unread_count ?? 0), 0);
       const closedToday = list.filter(
@@ -158,13 +190,21 @@ function OperatorDashboard() {
         monthlyPointChange: monthlyPoints - previousPoints,
         scoredMessages: (monthlyPointTransactions.data ?? []).length,
         sentThisMonth: sentMessagesResult.count ?? 0,
-        avgResponseSec: calculateAverageResponseSeconds((monthMessages ?? []) as DashboardMessage[], operator?.id),
+        avgResponseSec: calculateAverageResponseSeconds(
+          (monthMessages ?? []) as DashboardMessage[],
+          operator?.id,
+        ),
         waitingConversations: waitingConversations.slice(0, 5),
         slaRisks,
         recent: list.slice(0, 5),
         assignedCharacters: (assigned ?? []) as Array<{
           character_id: string;
-          characters: { id: string; name: string; avatar_url: string | null; availability_status: string } | null;
+          characters: {
+            id: string;
+            name: string;
+            avatar_url: string | null;
+            availability_status: string;
+          } | null;
         }>,
       };
     },
@@ -256,11 +296,22 @@ function OperatorDashboard() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="text-sm font-medium">קרדיטים עובד</div>
-                <p className="text-xs text-muted-foreground mt-1">יתרה זמינה והשוואת תשלומי קרדיטים חודשיים בפועל.</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  יתרה זמינה והשוואת תשלומי קרדיטים חודשיים בפועל.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3 md:min-w-[250px]">
-                <QuickStat label="קרדיטים זמינים" value={stats?.walletBalance} loading={isLoading} />
-                <QuickStat label="קרדיטים מול חודש קודם" value={stats?.monthlyPointChange} signed loading={isLoading} />
+                <QuickStat
+                  label="קרדיטים זמינים"
+                  value={stats?.walletBalance}
+                  loading={isLoading}
+                />
+                <QuickStat
+                  label="קרדיטים מול חודש קודם"
+                  value={stats?.monthlyPointChange}
+                  signed
+                  loading={isLoading}
+                />
               </div>
               <Button variant="outline" asChild>
                 <Link to="/operator/analytics">
@@ -274,12 +325,44 @@ function OperatorDashboard() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="קרדיטים זמינים" value={stats?.walletBalance} icon={Award} loading={isLoading} />
-        <StatCard label="שיחות פעילות" value={stats?.active} icon={MessageCircle} loading={isLoading} />
-        <StatCard label="ממתינות למענה" value={stats?.waiting} icon={Clock} loading={isLoading} highlight />
-        <StatCard label="הודעות החודש" value={stats?.sentThisMonth} icon={Send} loading={isLoading} />
-        <StatCard label="זמן תגובה ממוצע" value={stats?.avgResponseSec} suffix="ש׳" icon={Timer} loading={isLoading} />
-        <StatCard label="פעולות מזכות" value={stats?.scoredMessages} icon={Sparkles} loading={isLoading} />
+        <StatCard
+          label="קרדיטים זמינים"
+          value={stats?.walletBalance}
+          icon={Award}
+          loading={isLoading}
+        />
+        <StatCard
+          label="שיחות פעילות"
+          value={stats?.active}
+          icon={MessageCircle}
+          loading={isLoading}
+        />
+        <StatCard
+          label="ממתינות למענה"
+          value={stats?.waiting}
+          icon={Clock}
+          loading={isLoading}
+          highlight
+        />
+        <StatCard
+          label="הודעות החודש"
+          value={stats?.sentThisMonth}
+          icon={Send}
+          loading={isLoading}
+        />
+        <StatCard
+          label="זמן תגובה ממוצע"
+          value={stats?.avgResponseSec}
+          suffix="ש׳"
+          icon={Timer}
+          loading={isLoading}
+        />
+        <StatCard
+          label="פעולות מזכות"
+          value={stats?.scoredMessages}
+          icon={Sparkles}
+          loading={isLoading}
+        />
         <StatCard label="הודעות שלא נקראו" value={stats?.unread} icon={Bell} loading={isLoading} />
         <StatCard label="נסגרו היום" value={stats?.closedToday} icon={Users} loading={isLoading} />
       </div>
@@ -317,7 +400,11 @@ function OperatorDashboard() {
                 >
                   <div className="h-10 w-10 rounded-full bg-muted overflow-hidden shrink-0">
                     {c.characters?.avatar_url ? (
-                      <img src={c.characters.avatar_url} alt="" className="h-full w-full object-cover" />
+                      <img
+                        src={c.characters.avatar_url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center text-sm font-semibold">
                         {c.characters?.name?.[0] ?? "?"}
@@ -329,7 +416,9 @@ function OperatorDashboard() {
                       <span className="font-medium truncate">{c.characters?.name ?? "-"}</span>
                       <ConversationStatusBadge status={c.status} />
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "-"}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {c.last_message_preview ?? "-"}
+                    </p>
                   </div>
                   {c.operator_unread_count > 0 && (
                     <span className="bg-primary text-primary-foreground text-xs rounded-full h-5 min-w-5 px-1.5 flex items-center justify-center">
@@ -340,7 +429,7 @@ function OperatorDashboard() {
               ))}
               <div className="pt-2">
                 <Button variant="ghost" className="w-full" asChild>
-                  <Link to="/operator/conversations">לכל השיחות</Link>
+                  <Link to="/operator/conversations">לכל שיחות ONLINE</Link>
                 </Button>
               </div>
             </div>
@@ -355,7 +444,9 @@ function OperatorDashboard() {
         <CardContent>
           {isLoading && <Skeleton className="h-24" />}
           {!isLoading && stats && stats.slaRisks.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">אין כרגע שיחות שחורגות מה־SLA</p>
+            <p className="text-sm text-muted-foreground text-center py-4">
+              אין כרגע שיחות שחורגות מה־SLA
+            </p>
           )}
           {!isLoading && stats && stats.slaRisks.length > 0 && (
             <div className="space-y-2">
@@ -368,7 +459,9 @@ function OperatorDashboard() {
                 >
                   <div className="min-w-0">
                     <div className="font-medium truncate">{conversation.character_name ?? "-"}</div>
-                    <p className="text-xs text-muted-foreground truncate">{conversation.last_message_preview ?? "-"}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {conversation.last_message_preview ?? "-"}
+                    </p>
                   </div>
                   <span className="text-xs font-medium text-warning whitespace-nowrap">
                     {conversation.minutes_waiting} דק׳
@@ -387,7 +480,9 @@ function OperatorDashboard() {
         <CardContent>
           {isLoading && <Skeleton className="h-24" />}
           {!isLoading && stats && stats.waitingConversations.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">אין כרגע שיחות שממתינות למענה</p>
+            <p className="text-sm text-muted-foreground text-center py-4">
+              אין כרגע שיחות שממתינות למענה
+            </p>
           )}
           {!isLoading && stats && stats.waitingConversations.length > 0 && (
             <div className="space-y-2">
@@ -400,7 +495,9 @@ function OperatorDashboard() {
                 >
                   <div className="min-w-0">
                     <div className="font-medium truncate">{c.characters?.name ?? "-"}</div>
-                    <p className="text-xs text-muted-foreground truncate">{c.last_message_preview ?? "-"}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {c.last_message_preview ?? "-"}
+                    </p>
                   </div>
                   <div className="text-xs text-muted-foreground whitespace-nowrap">
                     {c.last_message_at ? formatShortDate(c.last_message_at) : "-"}
@@ -427,10 +524,17 @@ function OperatorDashboard() {
             {!isLoading && stats && stats.assignedCharacters.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {stats.assignedCharacters.map((a) => (
-                  <div key={a.character_id} className="flex items-center gap-2 p-2 rounded-lg border border-border">
+                  <div
+                    key={a.character_id}
+                    className="flex items-center gap-2 p-2 rounded-lg border border-border"
+                  >
                     <div className="h-9 w-9 rounded-full bg-muted overflow-hidden shrink-0">
                       {a.characters?.avatar_url ? (
-                        <img src={a.characters.avatar_url} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={a.characters.avatar_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center text-sm">
                           {a.characters?.name?.[0] ?? "?"}
@@ -476,7 +580,9 @@ function StatCard({
         ) : (
           <div className="text-2xl font-bold">
             {value ?? 0}
-            {suffix && <span className="text-sm font-medium text-muted-foreground mr-1">{suffix}</span>}
+            {suffix && (
+              <span className="text-sm font-medium text-muted-foreground mr-1">{suffix}</span>
+            )}
           </div>
         )}
       </CardContent>
@@ -500,13 +606,20 @@ function QuickStat({
   return (
     <div className="rounded-lg border border-border p-3 min-w-0">
       <div className="text-xs text-muted-foreground truncate">{label}</div>
-      {loading ? <Skeleton className="h-7 w-12 mt-1" /> : <div className="text-xl font-bold mt-1">{displayValue}</div>}
+      {loading ? (
+        <Skeleton className="h-7 w-12 mt-1" />
+      ) : (
+        <div className="text-xl font-bold mt-1">{displayValue}</div>
+      )}
     </div>
   );
 }
 
 function sumPointTransactions(rows: unknown) {
-  return ((rows ?? []) as Array<{ amount: number | null }>).reduce((sum, row) => sum + Math.max(Number(row.amount ?? 0), 0), 0);
+  return ((rows ?? []) as Array<{ amount: number | null }>).reduce(
+    (sum, row) => sum + Math.max(Number(row.amount ?? 0), 0),
+    0,
+  );
 }
 
 function calculateAverageResponseSeconds(messages: DashboardMessage[], operatorId?: string) {
