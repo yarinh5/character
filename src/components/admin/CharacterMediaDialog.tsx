@@ -1,6 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ImagePlus, LoaderCircle, LockKeyhole, Plus, RefreshCw, RotateCcw, ShieldOff, Trash2 } from "lucide-react";
+import {
+  Check,
+  ImagePlus,
+  LoaderCircle,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  ShieldOff,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -25,9 +36,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-type MediaAsset = Database["public"]["Functions"]["get_admin_character_media_assets"]["Returns"][number];
+type MediaAsset =
+  Database["public"]["Functions"]["get_admin_character_media_assets"]["Returns"][number];
 type MediaTag = Database["public"]["Functions"]["get_admin_media_tags"]["Returns"][number];
 
 type UploadIntentResponse = {
@@ -38,12 +56,17 @@ type UploadIntentResponse = {
 
 const ACCEPTED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+const EMPTY_ASSETS: MediaAsset[] = [];
+const EMPTY_TAGS: MediaTag[] = [];
 
 async function functionErrorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("context" in error)) return null;
   const context = (error as { context?: unknown }).context;
   if (!(context instanceof Response)) return null;
-  const body = await context.clone().json().catch(() => null);
+  const body = await context
+    .clone()
+    .json()
+    .catch(() => null);
   return body && typeof body.code === "string" ? body.code : null;
 }
 
@@ -53,10 +76,17 @@ function formatBytes(value: number | null) {
 }
 
 function AssetPreview({ asset }: { asset: MediaAsset }) {
-  const preview = useMediaViewUrl("admin_asset_preview", asset.preview_available ? asset.id : undefined);
+  const preview = useMediaViewUrl(
+    "admin_asset_preview",
+    asset.preview_available ? asset.id : undefined,
+  );
 
   if (!asset.preview_available) {
-    return <div className="aspect-square bg-muted text-xs text-muted-foreground flex items-center justify-center">ממתין לעיבוד</div>;
+    return (
+      <div className="aspect-square bg-muted text-xs text-muted-foreground flex items-center justify-center">
+        ממתין לעיבוד
+      </div>
+    );
   }
   if (preview.status === "ready" && preview.url) {
     return (
@@ -69,7 +99,11 @@ function AssetPreview({ asset }: { asset: MediaAsset }) {
     );
   }
   if (preview.status === "error") {
-    return <div className="aspect-square bg-muted text-xs text-muted-foreground flex items-center justify-center">תצוגה מקדימה אינה זמינה</div>;
+    return (
+      <div className="aspect-square bg-muted text-xs text-muted-foreground flex items-center justify-center">
+        תצוגה מקדימה אינה זמינה
+      </div>
+    );
   }
   return <Skeleton className="aspect-square w-full" />;
 }
@@ -89,6 +123,27 @@ function LockedAssetPreview({ asset }: { asset: MediaAsset }) {
         className="aspect-square w-full object-cover bg-muted"
         onError={preview.retryAfterImageError}
       />
+    );
+  }
+  if (preview.status === "error") {
+    return (
+      <div
+        role="alert"
+        aria-label="שגיאת תצוגה נעולה"
+        className="flex aspect-square flex-col items-center justify-center gap-2 bg-muted p-3 text-center text-xs text-muted-foreground"
+      >
+        <span>התצוגה הנעולה אינה זמינה</span>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-label="נסה לטעון תצוגה נעולה שוב"
+          onClick={() => void preview.refresh()}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          נסה שוב
+        </Button>
+      </div>
     );
   }
   return <Skeleton className="aspect-square w-full" />;
@@ -120,8 +175,14 @@ function AssetCard({
   onAssignTag: (tagId: string) => void;
 }) {
   const [price, setPrice] = useState(asset.locked_price_credits?.toString() ?? "");
-  const [paidOpenPrice, setPaidOpenPrice] = useState(asset.paid_open_price_credits?.toString() ?? "");
-  const details = [asset.content_type.replace("image/", ""), formatBytes(asset.byte_size), asset.width && asset.height ? `${asset.width} x ${asset.height}` : null]
+  const [paidOpenPrice, setPaidOpenPrice] = useState(
+    asset.paid_open_price_credits?.toString() ?? "",
+  );
+  const details = [
+    asset.content_type.replace("image/", ""),
+    formatBytes(asset.byte_size),
+    asset.width && asset.height ? `${asset.width} x ${asset.height}` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   const disabled = asset.status === "disabled";
@@ -146,19 +207,27 @@ function AssetCard({
         </div>
         <div className="space-y-1 border-t border-border pt-2">
           <span className="text-xs text-muted-foreground">תגית מדיה</span>
-          <Select value={asset.media_tag_id} onValueChange={onAssignTag} disabled={busy || tags.length === 0}>
+          <Select
+            value={asset.media_tag_id}
+            onValueChange={onAssignTag}
+            disabled={busy || tags.length === 0}
+          >
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {tags.map((tag) => (
-                <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
+                <SelectItem key={tag.id} value={tag.id}>
+                  {tag.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
         {asset.processing_error_code && <div className="text-xs text-destructive">העיבוד נכשל</div>}
-        {asset.locked_derivative_error_code && <div className="text-xs text-destructive">יצירת נגזרות נעולות נכשלה</div>}
+        {asset.locked_derivative_error_code && (
+          <div className="text-xs text-destructive">יצירת נגזרות נעולות נכשלה</div>
+        )}
         {asset.locked_preview_available && (
           <div className="overflow-hidden rounded-md border border-border">
             <LockedAssetPreview asset={asset} />
@@ -166,20 +235,44 @@ function AssetCard({
         )}
         <div className="flex gap-1 pt-1">
           {disabled ? (
-            <Button size="sm" variant="outline" className="flex-1" onClick={onRestore} disabled={busy}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={onRestore}
+              disabled={busy}
+            >
               <RotateCcw className="h-3.5 w-3.5 ml-1" /> שחזור
             </Button>
           ) : (
-            <Button size="sm" variant="outline" className="flex-1" onClick={onDisable} disabled={busy}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={onDisable}
+              disabled={busy}
+            >
               <ShieldOff className="h-3.5 w-3.5 ml-1" /> השבתה
             </Button>
           )}
           {asset.ingest_status === "failed" && !disabled && (
-            <Button size="sm" variant="ghost" onClick={onRetry} disabled={busy} title="נסה לעבד מחדש">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRetry}
+              disabled={busy}
+              title="נסה לעבד מחדש"
+            >
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={onHardDelete} disabled={busy} title="מחיקה מוחלטת">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onHardDelete}
+            disabled={busy}
+            title="מחיקה מוחלטת"
+          >
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </Button>
         </div>
@@ -192,7 +285,9 @@ function AssetCard({
               onClick={onPrepareLocked}
               disabled={busy || asset.locked_derivative_status === "processing"}
             >
-              {asset.locked_derivative_status === "ready" ? "נגזרות נעולות מוכנות" : "הכן נגזרות נעולות"}
+              {asset.locked_derivative_status === "ready"
+                ? "נגזרות נעולות מוכנות"
+                : "הכן נגזרות נעולות"}
             </Button>
             <div className="flex gap-1">
               <Input
@@ -249,7 +344,9 @@ function AssetCard({
                 שמור
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">השאר ריק כדי לבטל פתיחה בתשלום עבור נכס זה.</p>
+            <p className="text-xs text-muted-foreground">
+              השאר ריק כדי לבטל פתיחה בתשלום עבור נכס זה.
+            </p>
           </div>
         )}
       </div>
@@ -270,35 +367,66 @@ export function CharacterMediaDialog({
   const [busyAssetId, setBusyAssetId] = useState<string | null>(null);
   const [busyTagId, setBusyTagId] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState("");
-  const [tagDrafts, setTagDrafts] = useState<Record<string, { name: string; sortOrder: string }>>({});
+  const [tagDrafts, setTagDrafts] = useState<Record<string, { name: string; sortOrder: string }>>(
+    {},
+  );
   const [selectedTagId, setSelectedTagId] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [tagToDelete, setTagToDelete] = useState<MediaTag | null>(null);
   const [assetToHardDelete, setAssetToHardDelete] = useState<MediaAsset | null>(null);
   const queryKey = ["admin-character-media", character.id] as const;
   const tagQueryKey = ["admin-character-media-tags", character.id] as const;
-  const { data: assets = [], isLoading, isError } = useQuery({
+  const assetsQuery = useQuery({
     queryKey,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_admin_character_media_assets", { _character_id: character.id });
+      const { data, error } = await supabase.rpc("get_admin_character_media_assets", {
+        _character_id: character.id,
+      });
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
-  const { data: tags = [], isLoading: tagsLoading, isError: tagsError } = useQuery({
+  const tagsQuery = useQuery({
     queryKey: tagQueryKey,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_admin_media_tags", { _character_id: character.id });
+      const { data, error } = await supabase.rpc("get_admin_media_tags", {
+        _character_id: character.id,
+      });
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
+  const assets = assetsQuery.data ?? EMPTY_ASSETS;
+  const tags = tagsQuery.data ?? EMPTY_TAGS;
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
 
   const filteredAssets = useMemo(
-    () => assets.filter((asset) => selectedTagId === "all" || asset.media_tag_id === selectedTagId),
-    [assets, selectedTagId],
+    () =>
+      assets.filter(
+        (asset) =>
+          (selectedTagId === "all" || asset.media_tag_id === selectedTagId) &&
+          (!normalizedSearch ||
+            (asset.display_name ?? "").toLocaleLowerCase().includes(normalizedSearch)),
+      ),
+    [assets, normalizedSearch, selectedTagId],
   );
+  const hasActiveFilters = selectedTagId !== "all" || normalizedSearch.length > 0;
+  const assetsInitialLoading = assetsQuery.isLoading && assetsQuery.data === undefined;
+  const tagsInitialLoading = tagsQuery.isLoading && tagsQuery.data === undefined;
+  const assetsRefreshing = assetsQuery.isFetching && assetsQuery.data !== undefined;
+  const tagsRefreshing = tagsQuery.isFetching && tagsQuery.data !== undefined;
 
   useEffect(() => {
+    setSearchQuery("");
+    setSelectedTagId("all");
+    setNewTagName("");
+    setTagDrafts({});
+    setTagToDelete(null);
+    setAssetToHardDelete(null);
+  }, [character.id]);
+
+  useEffect(() => {
+    if (!tagsQuery.isSuccess) return;
     const tagIds = new Set(tags.map((tag) => tag.id));
     setTagDrafts((drafts) => {
       const retainedEntries = Object.entries(drafts).filter(([tagId]) => tagIds.has(tagId));
@@ -308,7 +436,7 @@ export function CharacterMediaDialog({
     });
     if (selectedTagId !== "all" && !tagIds.has(selectedTagId)) setSelectedTagId("all");
     if (tagToDelete && !tagIds.has(tagToDelete.id)) setTagToDelete(null);
-  }, [selectedTagId, tagToDelete, tags]);
+  }, [selectedTagId, tagToDelete, tags, tagsQuery.isSuccess]);
 
   const refresh = async () => {
     await Promise.all([
@@ -318,12 +446,21 @@ export function CharacterMediaDialog({
   };
 
   const getTagErrorMessage = (error: unknown) => {
-    const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
-    if (message.includes("media_tag_in_use")) return "אי אפשר למחוק תגית שיש לה מדיה. העבר את המדיה לתגית אחרת קודם.";
-    if (message.includes("default_media_tag_cannot_be_deleted")) return "לא ניתן למחוק תגית ברירת מחדל.";
-    if (message.includes("media_tag_name_invalid") || message.includes("media_tags_name_check")) return "יש להזין שם תגית תקין.";
-    if (message.includes("media_tag_name_conflict") || message.includes("media_tags_character_name_idx")) return "כבר קיימת תגית בשם זה לדמות.";
-    if (message.includes("media_tag_character_mismatch")) return "אפשר לשייך נכס רק לתגית של אותה דמות.";
+    const message =
+      typeof error === "object" && error && "message" in error ? String(error.message) : "";
+    if (message.includes("media_tag_in_use"))
+      return "אי אפשר למחוק תגית שיש לה מדיה. העבר את המדיה לתגית אחרת קודם.";
+    if (message.includes("default_media_tag_cannot_be_deleted"))
+      return "לא ניתן למחוק תגית ברירת מחדל.";
+    if (message.includes("media_tag_name_invalid") || message.includes("media_tags_name_check"))
+      return "יש להזין שם תגית תקין.";
+    if (
+      message.includes("media_tag_name_conflict") ||
+      message.includes("media_tags_character_name_idx")
+    )
+      return "כבר קיימת תגית בשם זה לדמות.";
+    if (message.includes("media_tag_character_mismatch"))
+      return "אפשר לשייך נכס רק לתגית של אותה דמות.";
     return "לא ניתן לשמור את תגית המדיה כרגע.";
   };
 
@@ -417,7 +554,9 @@ export function CharacterMediaDialog({
   };
 
   const processAsset = async (assetId: string, mode: "standard" | "locked" = "standard") => {
-    const { error } = await supabase.functions.invoke("process-character-media", { body: { asset_id: assetId, mode } });
+    const { error } = await supabase.functions.invoke("process-character-media", {
+      body: { asset_id: assetId, mode },
+    });
     if (error) throw error;
   };
 
@@ -528,9 +667,21 @@ export function CharacterMediaDialog({
         if (error) throw error;
       }
       await refresh();
-      toast.success(action === "disable" ? "המדיה הושבתה" : action === "restore" ? "המדיה שוחזרה" : "העיבוד הופעל מחדש");
+      toast.success(
+        action === "disable"
+          ? "המדיה הושבתה"
+          : action === "restore"
+            ? "המדיה שוחזרה"
+            : "העיבוד הופעל מחדש",
+      );
     } catch {
-      toast.error(action === "disable" ? "לא ניתן להשבית את המדיה" : action === "restore" ? "לא ניתן לשחזר את המדיה" : "לא ניתן לעבד מחדש כרגע");
+      toast.error(
+        action === "disable"
+          ? "לא ניתן להשבית את המדיה"
+          : action === "restore"
+            ? "לא ניתן לשחזר את המדיה"
+            : "לא ניתן לעבד מחדש כרגע",
+      );
     } finally {
       setBusyAssetId(null);
     }
@@ -541,9 +692,7 @@ export function CharacterMediaDialog({
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
           <DialogTitle>מדיה עבור {character.name}</DialogTitle>
-          <DialogDescription className="sr-only">
-            העלאה וניהול תמונות לדמות זו.
-          </DialogDescription>
+          <DialogDescription className="sr-only">העלאה וניהול תמונות לדמות זו.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -557,7 +706,11 @@ export function CharacterMediaDialog({
             }}
           />
           <Button onClick={() => inputRef.current?.click()} disabled={uploading}>
-            {uploading ? <LoaderCircle className="h-4 w-4 ml-1 animate-spin" /> : <ImagePlus className="h-4 w-4 ml-1" />}
+            {uploading ? (
+              <LoaderCircle className="h-4 w-4 ml-1 animate-spin" />
+            ) : (
+              <ImagePlus className="h-4 w-4 ml-1" />
+            )}
             העלאת תמונה
           </Button>
           <span className="text-xs text-muted-foreground">JPEG, PNG או WebP עד 5MB</span>
@@ -569,14 +722,20 @@ export function CharacterMediaDialog({
               <h3 className="text-sm font-medium">תגיות מדיה</h3>
               <p className="text-xs text-muted-foreground">מיון וניהול מלאי המדיה של הדמות.</p>
             </div>
-            <Select value={selectedTagId} onValueChange={setSelectedTagId} disabled={tagsLoading || tags.length === 0}>
-              <SelectTrigger className="w-44">
+            <Select
+              value={selectedTagId}
+              onValueChange={setSelectedTagId}
+              disabled={tagsInitialLoading || tags.length === 0}
+            >
+              <SelectTrigger className="w-full sm:w-44" aria-label="סינון לפי תגית">
                 <SelectValue placeholder="סינון לפי תגית" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">כל התגיות</SelectItem>
                 {tags.map((tag) => (
-                  <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
+                  <SelectItem key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -596,28 +755,83 @@ export function CharacterMediaDialog({
               maxLength={120}
               disabled={busyTagId !== null}
             />
-            <Button size="sm" className="shrink-0" onClick={() => void createTag()} disabled={!newTagName.trim() || busyTagId !== null}>
-              {busyTagId === "create" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 ml-1" />}
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => void createTag()}
+              disabled={!newTagName.trim() || busyTagId !== null}
+            >
+              {busyTagId === "create" ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 ml-1" />
+              )}
               הוסף תגית
             </Button>
           </div>
 
-          {tagsLoading && <Skeleton className="h-16 w-full" />}
-          {tagsError && <p className="text-sm text-destructive">טעינת תגיות המדיה נכשלה.</p>}
-          {!tagsLoading && !tagsError && (
+          {tagsInitialLoading && (
+            <div role="status" aria-label="טוען תגיות מדיה">
+              <Skeleton className="h-16 w-full" />
+            </div>
+          )}
+          {tagsRefreshing && (
+            <p
+              role="status"
+              aria-label="מרענן תגיות מדיה"
+              className="text-xs text-muted-foreground"
+            >
+              מרענן תגיות מדיה...
+            </p>
+          )}
+          {tagsQuery.isError && (
+            <div
+              role="alert"
+              aria-label="שגיאת טעינת תגיות"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+            >
+              <p className="text-sm text-destructive">
+                {tags.length > 0
+                  ? "רענון תגיות המדיה נכשל. התגיות המוצגות עשויות להיות לא מעודכנות."
+                  : "טעינת תגיות המדיה נכשלה."}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void tagsQuery.refetch()}
+                disabled={tagsQuery.isFetching}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {tagsQuery.isFetching ? "טוען..." : "נסה לטעון תגיות שוב"}
+              </Button>
+            </div>
+          )}
+          {tagsQuery.isSuccess && tags.length === 0 && (
+            <p className="text-sm text-muted-foreground">אין תגיות מדיה לדמות זו.</p>
+          )}
+          {!tagsInitialLoading && tags.length > 0 && (
             <div className="space-y-2">
               {tags.map((tag) => {
                 const draft = tagDrafts[tag.id];
                 const busy = busyTagId === tag.id;
                 return (
-                  <div key={tag.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+                  <div
+                    key={tag.id}
+                    className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2"
+                  >
                     <Input
                       className="min-w-40 flex-1"
                       value={draft?.name ?? tag.name}
-                      onChange={(event) => setTagDrafts((drafts) => ({
-                        ...drafts,
-                        [tag.id]: { name: event.target.value, sortOrder: drafts[tag.id]?.sortOrder ?? String(tag.sort_order) },
-                      }))}
+                      onChange={(event) =>
+                        setTagDrafts((drafts) => ({
+                          ...drafts,
+                          [tag.id]: {
+                            name: event.target.value,
+                            sortOrder: drafts[tag.id]?.sortOrder ?? String(tag.sort_order),
+                          },
+                        }))
+                      }
                       maxLength={120}
                       disabled={busy}
                     />
@@ -627,21 +841,44 @@ export function CharacterMediaDialog({
                       min={0}
                       step={1}
                       value={draft?.sortOrder ?? String(tag.sort_order)}
-                      onChange={(event) => setTagDrafts((drafts) => ({
-                        ...drafts,
-                        [tag.id]: { name: drafts[tag.id]?.name ?? tag.name, sortOrder: event.target.value },
-                      }))}
+                      onChange={(event) =>
+                        setTagDrafts((drafts) => ({
+                          ...drafts,
+                          [tag.id]: {
+                            name: drafts[tag.id]?.name ?? tag.name,
+                            sortOrder: event.target.value,
+                          },
+                        }))
+                      }
                       aria-label="סדר תגית"
                       disabled={busy}
                     />
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{tag.asset_count} נכסים{tag.is_default ? " · ברירת מחדל" : ""}</span>
-                    <Button size="icon" variant="outline" title="שמור תגית" onClick={() => void updateTag(tag)} disabled={busy}>
-                      {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {tag.asset_count} נכסים{tag.is_default ? " · ברירת מחדל" : ""}
+                    </span>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      title="שמור תגית"
+                      onClick={() => void updateTag(tag)}
+                      disabled={busy}
+                    >
+                      {busy ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
                     </Button>
                     <Button
                       size="icon"
                       variant="outline"
-                      title={tag.is_default ? "לא ניתן למחוק תגית ברירת מחדל" : tag.asset_count > 0 ? "העבר נכסים לפני מחיקת התגית" : "מחק תגית"}
+                      title={
+                        tag.is_default
+                          ? "לא ניתן למחוק תגית ברירת מחדל"
+                          : tag.asset_count > 0
+                            ? "העבר נכסים לפני מחיקת התגית"
+                            : "מחק תגית"
+                      }
                       onClick={() => setTagToDelete(tag)}
                       disabled={busy || tag.is_default || tag.asset_count > 0}
                     >
@@ -654,12 +891,60 @@ export function CharacterMediaDialog({
           )}
         </section>
 
-        {isLoading && <Skeleton className="h-40 w-full" />}
-        {isError && <div className="py-10 text-center text-sm text-muted-foreground">טעינת המדיה נכשלה</div>}
-        {!isLoading && !isError && assets.length === 0 && (
+        <div className="relative min-w-0 sm:max-w-md">
+          <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            role="searchbox"
+            aria-label="חיפוש מדיה לפי שם"
+            placeholder="חיפוש לפי שם נכס"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="pr-9"
+          />
+        </div>
+
+        {assetsInitialLoading && (
+          <div role="status" aria-label="טוען מדיה">
+            <Skeleton className="h-40 w-full" />
+          </div>
+        )}
+        {assetsRefreshing && (
+          <p
+            role="status"
+            aria-label="מרענן את רשימת המדיה"
+            className="text-sm text-muted-foreground"
+          >
+            מרענן את רשימת המדיה...
+          </p>
+        )}
+        {assetsQuery.isError && (
+          <div
+            role="alert"
+            aria-label="שגיאת טעינת מדיה"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+          >
+            <p className="text-sm text-destructive">
+              {assets.length > 0
+                ? "רענון רשימת המדיה נכשל. הנכסים המוצגים עשויים להיות לא מעודכנים."
+                : "טעינת המדיה נכשלה."}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void assetsQuery.refetch()}
+              disabled={assetsQuery.isFetching}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              {assetsQuery.isFetching ? "טוען..." : "נסה לטעון מדיה שוב"}
+            </Button>
+          </div>
+        )}
+        {assetsQuery.isSuccess && assets.length === 0 && (
           <div className="py-10 text-center text-sm text-muted-foreground">אין מדיה לדמות זו</div>
         )}
-        {!isLoading && filteredAssets.length > 0 && (
+        {!assetsInitialLoading && filteredAssets.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {filteredAssets.map((asset) => (
               <AssetCard
@@ -680,17 +965,38 @@ export function CharacterMediaDialog({
                     .finally(() => setBusyAssetId(null));
                 }}
                 onConfigureLocked={(priceCredits) => void configureLocked(asset.id, priceCredits)}
-                onConfigurePaidOpen={(priceCredits) => void configurePaidOpen(asset.id, priceCredits)}
+                onConfigurePaidOpen={(priceCredits) =>
+                  void configurePaidOpen(asset.id, priceCredits)
+                }
                 onHardDelete={() => setAssetToHardDelete(asset)}
               />
             ))}
           </div>
         )}
-        {!isLoading && assets.length > 0 && selectedTagId !== "all" && filteredAssets.length === 0 && (
-          <div className="py-6 text-center text-sm text-muted-foreground">אין נכסים בתגית שנבחרה.</div>
-        )}
+        {!assetsInitialLoading &&
+          assets.length > 0 &&
+          hasActiveFilters &&
+          filteredAssets.length === 0 && (
+            <div className="space-y-3 py-6 text-center text-sm text-muted-foreground">
+              <p>לא נמצאו נכסים התואמים למסננים.</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedTagId("all");
+                }}
+              >
+                איפוס מסננים
+              </Button>
+            </div>
+          )}
       </DialogContent>
-      <AlertDialog open={tagToDelete !== null} onOpenChange={(open) => !open && setTagToDelete(null)}>
+      <AlertDialog
+        open={tagToDelete !== null}
+        onOpenChange={(open) => !open && setTagToDelete(null)}
+      >
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle>למחוק תגית מדיה?</AlertDialogTitle>
@@ -704,12 +1010,16 @@ export function CharacterMediaDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={assetToHardDelete !== null} onOpenChange={(open) => !open && setAssetToHardDelete(null)}>
+      <AlertDialog
+        open={assetToHardDelete !== null}
+        onOpenChange={(open) => !open && setAssetToHardDelete(null)}
+      >
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle>מחיקת מדיה מוחלטת</AlertDialogTitle>
             <AlertDialogDescription>
-              המדיה וכל הנגזרות שלה יימחקו לצמיתות. הפעולה זמינה רק כאשר המדיה לא נשלחה ולא נמצאת בשימוש, ולא ניתן לשחזר אותה.
+              המדיה וכל הנגזרות שלה יימחקו לצמיתות. הפעולה זמינה רק כאשר המדיה לא נשלחה ולא נמצאת
+              בשימוש, ולא ניתן לשחזר אותה.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
