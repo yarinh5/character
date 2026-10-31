@@ -62,8 +62,10 @@ function ProfileEditor() {
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loadedProfile, setLoadedProfile] = useState<EditableClientProfile | null>(null);
+  const [avatarSaveFailed, setAvatarSaveFailed] = useState(false);
   const alive = useRef(false);
   const saveInFlight = useRef(false);
+  const pendingAvatar = useRef<{ userId: string; value: string | null } | null>(null);
   const [account, setAccount] = useState<{
     email: string | null;
     status: string | null;
@@ -87,6 +89,7 @@ function ProfileEditor() {
     alive.current = true;
     return () => {
       alive.current = false;
+      pendingAvatar.current = null;
     };
   }, []);
 
@@ -154,6 +157,44 @@ function ProfileEditor() {
     };
   }, [userId, userEmail, loadAttempt]);
 
+  const persistPendingAvatar = async (expectedUserId: string) => {
+    let wroteAvatar = false;
+    let lastSavedValue: string | null | undefined;
+
+    while (alive.current) {
+      const request = pendingAvatar.current;
+      if (!request || request.userId !== expectedUserId) break;
+      pendingAvatar.current = null;
+
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .update({ avatar_url: request.value })
+          .eq("user_id", expectedUserId)
+          .select("user_id")
+          .maybeSingle();
+        if (!alive.current) return false;
+        if (error || data?.user_id !== expectedUserId) throw new Error("avatar_save_failed");
+        wroteAvatar = true;
+        lastSavedValue = request.value;
+      } catch {
+        if (!alive.current) return false;
+        // Preserve the failed choice for an explicit retry. A newer callback wins.
+        if (!pendingAvatar.current) pendingAvatar.current = request;
+        setAvatarSaveFailed(true);
+        toast.error("שמירת תמונת הפרופיל נכשלה");
+        return false;
+      }
+    }
+
+    if (!alive.current) return false;
+    if (wroteAvatar) {
+      setAvatarSaveFailed(false);
+      toast.success(lastSavedValue === null ? "תמונת הפרופיל הוסרה" : "תמונת הפרופיל עודכנה");
+    }
+    return true;
+  };
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId || !loadedProfile || loading || loadError || saveInFlight.current) return;
@@ -167,6 +208,7 @@ function ProfileEditor() {
     }
     saveInFlight.current = true;
     setSaving(true);
+    let formSaved = false;
     const interests = form.interests
       .split(",")
       .map((s) => s.trim())
@@ -227,36 +269,43 @@ function ProfileEditor() {
       ) {
         throw new Error("profile_save_failed");
       }
-      toast.success("נשמר");
+      formSaved = true;
     } catch {
       if (alive.current) toast.error("לא כל השינויים נשמרו. הקלט נשמר, אפשר לנסות שוב.");
+    } finally {
+      let avatarSaved = true;
+      if (alive.current && pendingAvatar.current?.userId === userId) {
+        avatarSaved = await persistPendingAvatar(userId);
+      }
+      if (alive.current && formSaved && avatarSaved) toast.success("נשמר");
+      saveInFlight.current = false;
+      if (alive.current) setSaving(false);
+    }
+  };
+
+  const flushPendingAvatar = async (expectedUserId: string) => {
+    if (saveInFlight.current || !alive.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+    try {
+      await persistPendingAvatar(expectedUserId);
     } finally {
       saveInFlight.current = false;
       if (alive.current) setSaving(false);
     }
   };
 
-  const updateAvatar = async (url: string | null) => {
-    if (!userId || !loadedProfile || loadError || saveInFlight.current || !alive.current) return;
+  const updateAvatar = (url: string | null) => {
+    if (!userId || !loadedProfile || loadError || !alive.current) return;
     setForm((current) => ({ ...current, avatar_url: url ?? "" }));
-    saveInFlight.current = true;
-    setSaving(true);
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .update({ avatar_url: url })
-        .eq("user_id", userId)
-        .select("user_id")
-        .maybeSingle();
-      if (!alive.current) return;
-      if (error || data?.user_id !== userId) throw new Error("avatar_save_failed");
-      toast.success(url ? "תמונת הפרופיל עודכנה" : "תמונת הפרופיל הוסרה");
-    } catch {
-      if (alive.current) toast.error("שמירת תמונת הפרופיל נכשלה");
-    } finally {
-      saveInFlight.current = false;
-      if (alive.current) setSaving(false);
-    }
+    pendingAvatar.current = { userId, value: url };
+    setAvatarSaveFailed(false);
+    if (!saveInFlight.current) void flushPendingAvatar(userId);
+  };
+
+  const retryAvatarSave = () => {
+    if (!userId || pendingAvatar.current?.userId !== userId || saveInFlight.current) return;
+    void flushPendingAvatar(userId);
   };
 
   return (
@@ -332,6 +381,14 @@ function ProfileEditor() {
                       onChange={(url) => void updateAvatar(url)}
                       label="תמונת פרופיל"
                     />
+                    {avatarSaveFailed && (
+                      <div role="alert" className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-destructive">שמירת תמונת הפרופיל נכשלה</span>
+                        <Button type="button" variant="outline" size="sm" onClick={retryAvatarSave}>
+                          נסה לשמור שוב
+                        </Button>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label htmlFor="interests">תחומי עניין (מופרדים בפסיקים)</Label>

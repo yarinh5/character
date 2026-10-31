@@ -11,6 +11,7 @@ const io = vi.hoisted(() => ({
   rpc: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  avatarChange: null as ((url: string | null) => void) | null,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -46,11 +47,14 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 vi.mock("@/components/common/AvatarUpload", () => ({
-  AvatarUpload: ({ onChange }: { onChange: (url: string | null) => void }) => (
-    <button type="button" onClick={() => onChange("demo-avatar.webp")}>
-      עדכון תמונה לבדיקה
-    </button>
-  ),
+  AvatarUpload: ({ onChange }: { onChange: (url: string | null) => void }) => {
+    io.avatarChange = onChange;
+    return (
+      <button type="button" onClick={() => onChange("demo-avatar.webp")}>
+        עדכון תמונה לבדיקה
+      </button>
+    );
+  },
 }));
 vi.mock("@/components/account/AccountSettingsShared", () => ({
   AccountSummaryCard: () => <div>סיכום חשבון</div>,
@@ -126,6 +130,7 @@ beforeEach(() => {
   io.rpc.mockReset();
   io.success.mockReset();
   io.error.mockReset();
+  io.avatarChange = null;
 });
 
 describe("client profile editing", () => {
@@ -338,6 +343,203 @@ describe("client profile editing", () => {
       ),
     );
     await waitFor(() => expect(io.success).toHaveBeenCalledWith("תמונת הפרופיל עודכנה"));
+  });
+
+  it("persists an avatar completion that arrives while both profile writes are pending", async () => {
+    const profileSave = deferred<Reply>();
+    const clientSave = deferred<Reply>();
+    io.write.mockImplementation((table, values) => {
+      if ("avatar_url" in values && Object.keys(values).length === 1) {
+        return Promise.resolve({ data: { user_id: "client-a" }, error: null });
+      }
+      return table === "profiles" ? profileSave.promise : clientSave.promise;
+    });
+    render(<Page />);
+    await loaded();
+    submit();
+    await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+
+    act(() => io.avatarChange?.("late-avatar.webp"));
+    expect(io.write).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+      clientSave.resolve({ data: { user_id: "client-a" }, error: null });
+    });
+
+    await waitFor(() =>
+      expect(io.write).toHaveBeenCalledWith(
+        "profiles",
+        { avatar_url: "late-avatar.webp" },
+        "client-a",
+      ),
+    );
+  });
+
+  it("does not lose a pending avatar when the active form save partially fails", async () => {
+    const profileSave = deferred<Reply>();
+    const clientSave = deferred<Reply>();
+    io.write.mockImplementation((table, values) => {
+      if ("avatar_url" in values && Object.keys(values).length === 1) {
+        return Promise.resolve({ data: { user_id: "client-a" }, error: null });
+      }
+      return table === "profiles" ? profileSave.promise : clientSave.promise;
+    });
+    render(<Page />);
+    await loaded();
+    submit();
+    await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+    act(() => io.avatarChange?.("kept-after-partial.webp"));
+
+    await act(async () => {
+      profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+      clientSave.resolve({ data: null, error: { message: "partial failure" } });
+    });
+
+    await waitFor(() =>
+      expect(io.write).toHaveBeenCalledWith(
+        "profiles",
+        { avatar_url: "kept-after-partial.webp" },
+        "client-a",
+      ),
+    );
+    expect(io.error).toHaveBeenCalledWith("לא כל השינויים נשמרו. הקלט נשמר, אפשר לנסות שוב.");
+  });
+
+  it("treats a pending null avatar as a removal request", async () => {
+    const profileSave = deferred<Reply>();
+    const clientSave = deferred<Reply>();
+    io.write.mockImplementation((table, values) => {
+      if ("avatar_url" in values && Object.keys(values).length === 1) {
+        return Promise.resolve({ data: { user_id: "client-a" }, error: null });
+      }
+      return table === "profiles" ? profileSave.promise : clientSave.promise;
+    });
+    render(<Page />);
+    await loaded();
+    submit();
+    await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+    act(() => io.avatarChange?.(null));
+
+    await act(async () => {
+      profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+      clientSave.resolve({ data: { user_id: "client-a" }, error: null });
+    });
+
+    await waitFor(() =>
+      expect(io.write).toHaveBeenCalledWith("profiles", { avatar_url: null }, "client-a"),
+    );
+    expect(io.success).toHaveBeenCalledWith("תמונת הפרופיל הוסרה");
+  });
+
+  it("persists only the last avatar choice queued during an active save", async () => {
+    const profileSave = deferred<Reply>();
+    const clientSave = deferred<Reply>();
+    io.write.mockImplementation((table, values) => {
+      if ("avatar_url" in values && Object.keys(values).length === 1) {
+        return Promise.resolve({ data: { user_id: "client-a" }, error: null });
+      }
+      return table === "profiles" ? profileSave.promise : clientSave.promise;
+    });
+    render(<Page />);
+    await loaded();
+    submit();
+    await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+    act(() => {
+      io.avatarChange?.("first-pending.webp");
+      io.avatarChange?.("last-pending.webp");
+    });
+
+    await act(async () => {
+      profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+      clientSave.resolve({ data: { user_id: "client-a" }, error: null });
+    });
+
+    await waitFor(() =>
+      expect(io.write).toHaveBeenCalledWith(
+        "profiles",
+        { avatar_url: "last-pending.webp" },
+        "client-a",
+      ),
+    );
+    expect(io.write).not.toHaveBeenCalledWith(
+      "profiles",
+      { avatar_url: "first-pending.webp" },
+      "client-a",
+    );
+  });
+
+  it.each(["switch", "logout"])(
+    "cancels a queued avatar before processing after %s",
+    async (change) => {
+      const profileSave = deferred<Reply>();
+      const clientSave = deferred<Reply>();
+      io.write.mockImplementation((table) =>
+        table === "profiles" ? profileSave.promise : clientSave.promise,
+      );
+      const view = render(<Page />);
+      await loaded();
+      submit();
+      await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+      act(() => io.avatarChange?.("stale-avatar.webp"));
+
+      io.user = change === "logout" ? null : { id: "client-b", email: "b@example.test" };
+      view.rerender(<Page />);
+      if (change === "switch") await loaded();
+      await act(async () => {
+        profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+        clientSave.resolve({ data: { user_id: "client-a" }, error: null });
+      });
+
+      expect(io.write).not.toHaveBeenCalledWith(
+        "profiles",
+        { avatar_url: "stale-avatar.webp" },
+        expect.any(String),
+      );
+      expect(io.success).not.toHaveBeenCalled();
+      expect(io.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a queued avatar failure, unlocks, and retries only on request", async () => {
+    const profileSave = deferred<Reply>();
+    const clientSave = deferred<Reply>();
+    let failAvatar = true;
+    io.write.mockImplementation((table, values) => {
+      if ("avatar_url" in values && Object.keys(values).length === 1) {
+        return Promise.resolve(
+          failAvatar
+            ? { data: null, error: { message: "avatar failure" } }
+            : { data: { user_id: "client-a" }, error: null },
+        );
+      }
+      return table === "profiles" ? profileSave.promise : clientSave.promise;
+    });
+    render(<Page />);
+    await loaded();
+    submit();
+    await waitFor(() => expect(io.write).toHaveBeenCalledTimes(2));
+    act(() => io.avatarChange?.("retry-avatar.webp"));
+    await act(async () => {
+      profileSave.resolve({ data: { user_id: "client-a" }, error: null });
+      clientSave.resolve({ data: { user_id: "client-a" }, error: null });
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("שמירת תמונת הפרופיל נכשלה");
+    expect(io.error).toHaveBeenCalledWith("שמירת תמונת הפרופיל נכשלה");
+    expect(io.success).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "שמירה" })).toBeEnabled();
+    const retry = screen.getByRole("button", { name: "נסה לשמור שוב" });
+    expect(retry).toBeEnabled();
+
+    failAvatar = false;
+    fireEvent.click(retry);
+    await waitFor(() => expect(io.success).toHaveBeenCalledWith("תמונת הפרופיל עודכנה"));
+    expect(io.write).toHaveBeenLastCalledWith(
+      "profiles",
+      { avatar_url: "retry-avatar.webp" },
+      "client-a",
+    );
   });
 
   it("does not let a late load replace a different user's form", async () => {
