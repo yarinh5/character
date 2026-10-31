@@ -1,22 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { CreditCard, Edit, Plus, Save, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CreditCard, Edit, Plus, RefreshCw, Save, Search } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,6 +48,31 @@ type CreditPackage = {
   created_at: string;
 };
 
+type PackageForm = {
+  name: string;
+  credits: string;
+  price: string;
+  currency: string;
+  isActive: boolean;
+  sortOrder: string;
+};
+
+type PackagePayload = {
+  name: string;
+  credits: number;
+  price: number;
+  currency: string;
+  is_active: boolean;
+  sort_order: number;
+};
+
+const EMPTY_CREDIT_PACKAGES: CreditPackage[] = [];
+const POSTGRES_INTEGER_MIN = -2_147_483_648;
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+const NUMERIC_10_2_MAX = 99_999_999.99;
+const INTEGER_TEXT = /^[+-]?\d+$/;
+const DECIMAL_TEXT = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+
 type ClientCreditRow = {
   user_id: string;
   email: string | null;
@@ -62,10 +95,20 @@ type CreditTransaction = {
 const CREDIT_SETTINGS = [
   { key: "credits_enabled", label: "מערכת קרדיטים פעילה", type: "bool", default: true },
   { key: "free_credits_on_signup", label: "קרדיטים בהרשמה", type: "number", default: 10 },
-  { key: "free_credits_reset_mode", label: "סוג איפוס קרדיטים חינם", type: "select", default: "none" },
+  {
+    key: "free_credits_reset_mode",
+    label: "סוג איפוס קרדיטים חינם",
+    type: "select",
+    default: "none",
+  },
   { key: "free_credits_reset_amount", label: "כמות קרדיטים בכל איפוס", type: "number", default: 0 },
   { key: "scoring_enabled", label: "ניקוד עובדים פעיל", type: "bool", default: true },
-  { key: "consecutive_message_limit", label: "מגבלת הודעות רצופות לניקוד", type: "number", default: 3 },
+  {
+    key: "consecutive_message_limit",
+    label: "מגבלת הודעות רצופות לניקוד",
+    type: "number",
+    default: 3,
+  },
 ] as const;
 
 function AdminCreditsPage() {
@@ -105,9 +148,11 @@ function AdminCreditsPage() {
 
 function PackagesTab() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [editing, setEditing] = useState<Partial<CreditPackage> | null>(null);
+  const previousUserId = useRef(user?.id ?? null);
 
-  const { data, isLoading } = useQuery({
+  const packagesQuery = useQuery({
     queryKey: ["admin-credit-packages"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -119,24 +164,82 @@ function PackagesTab() {
       return (data ?? []) as CreditPackage[];
     },
   });
+  const packages = packagesQuery.data ?? EMPTY_CREDIT_PACKAGES;
+  const hasCachedPackages = packagesQuery.data !== undefined;
+  const initialLoading = packagesQuery.isLoading && !hasCachedPackages;
+  const refreshing = packagesQuery.isFetching && hasCachedPackages;
+
+  useEffect(() => {
+    const currentUserId = user?.id ?? null;
+    if (previousUserId.current !== currentUserId) setEditing(null);
+    previousUserId.current = currentUserId;
+  }, [user?.id]);
+
+  const finishVerifiedSave = () => {
+    setEditing(null);
+    void Promise.allSettled([
+      qc.invalidateQueries({ queryKey: ["admin-credit-packages"] }),
+      qc.invalidateQueries({ queryKey: ["client-credit-packages"] }),
+    ]);
+  };
 
   return (
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">חבילות קרדיטים</CardTitle>
-          <Button onClick={() => setEditing(newPackage())}>
+          <Button
+            onClick={() => setEditing(newPackage())}
+            disabled={packagesQuery.isError || !user}
+          >
             <Plus className="h-4 w-4 ml-1" /> חבילה חדשה
           </Button>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && <div className="p-6"><Skeleton className="h-28" /></div>}
-          {!isLoading && (data?.length ?? 0) === 0 && (
+          {initialLoading && (
+            <div role="status" aria-label="טוען חבילות לאדמין" className="p-6">
+              <Skeleton className="h-28" />
+            </div>
+          )}
+          {refreshing && (
+            <div
+              role="status"
+              aria-label="מרענן את חבילות האדמין"
+              className="border-t px-4 py-3 text-sm text-muted-foreground"
+            >
+              מרענן חבילות...
+            </div>
+          )}
+          {packagesQuery.isError && (
+            <div
+              role="alert"
+              aria-label="שגיאת טעינת חבילות לאדמין"
+              className="m-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+            >
+              <p>
+                {hasCachedPackages
+                  ? "רענון החבילות נכשל. החבילות המוצגות עשויות להיות לא מעודכנות."
+                  : "לא ניתן לטעון את חבילות הקרדיטים כרגע."}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => void packagesQuery.refetch()}
+                disabled={packagesQuery.isFetching}
+              >
+                <RefreshCw className="h-4 w-4" />
+                {packagesQuery.isFetching ? "מנסה שוב..." : "נסה לטעון חבילות שוב"}
+              </Button>
+            </div>
+          )}
+          {packagesQuery.isSuccess && packages.length === 0 && (
             <p className="text-center text-muted-foreground py-12">אין חבילות קרדיטים עדיין</p>
           )}
-          {!isLoading && data && data.length > 0 && (
+          {packages.length > 0 && (
             <div className="divide-y">
-              {data.map((pkg) => (
+              {packages.map((pkg) => (
                 <div key={pkg.id} className="flex flex-wrap items-center gap-3 p-4">
                   <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
                     <CreditCard className="h-5 w-5" />
@@ -144,12 +247,20 @@ function PackagesTab() {
                   <div className="flex-1 min-w-[180px]">
                     <div className="font-medium">{pkg.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {pkg.credits.toLocaleString("he-IL")} קרדיטים · {formatPrice(pkg.price, pkg.currency)}
+                      {pkg.credits.toLocaleString("he-IL")} קרדיטים ·{" "}
+                      {formatPrice(pkg.price, pkg.currency)}
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground">סדר {pkg.sort_order}</div>
                   <StatusBadge status={pkg.is_active ? "active" : "inactive"} />
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(pkg)}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`עריכת ${pkg.name}`}
+                    onClick={() => setEditing(pkg)}
+                    disabled={packagesQuery.isError || !user}
+                  >
                     <Edit className="h-4 w-4" />
                   </Button>
                 </div>
@@ -161,11 +272,9 @@ function PackagesTab() {
       {editing && (
         <PackageDialog
           pkg={editing}
+          activeUserId={user?.id ?? null}
           onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            qc.invalidateQueries({ queryKey: ["admin-credit-packages"] });
-          }}
+          onSaved={finishVerifiedSave}
         />
       )}
     </>
@@ -174,51 +283,73 @@ function PackagesTab() {
 
 function PackageDialog({
   pkg,
+  activeUserId,
   onClose,
   onSaved,
 }: {
   pkg: Partial<CreditPackage>;
+  activeUserId: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState(pkg);
+  const [form, setForm] = useState<PackageForm>(() => packageForm(pkg));
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const originUserId = useRef(activeUserId);
+  const currentUserId = useRef(activeUserId);
   const isNew = !pkg.id;
+  currentUserId.current = activeUserId;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const isOriginalInstance = () =>
+    mountedRef.current &&
+    originUserId.current !== null &&
+    currentUserId.current === originUserId.current;
 
   const submit = async () => {
-    if (!form.name?.trim()) {
-      toast.error("שם חבילה הוא שדה חובה");
-      return;
-    }
-    if (!form.credits || form.credits <= 0) {
-      toast.error("כמות הקרדיטים חייבת להיות גדולה מ-0");
-      return;
-    }
-    if (form.price === undefined || form.price < 0) {
-      toast.error("מחיר חייב להיות 0 ומעלה");
-      return;
-    }
+    if (busyRef.current) return;
+    setSaveError(null);
+    const payload = validatePackageForm(form);
+    if (!payload || !isOriginalInstance()) return;
 
+    busyRef.current = true;
     setBusy(true);
-    const payload = {
-      name: form.name.trim(),
-      credits: Number(form.credits),
-      price: Number(form.price),
-      currency: form.currency?.trim() || "ILS",
-      is_active: form.is_active ?? true,
-      sort_order: Number(form.sort_order ?? 0),
-    };
-    const { error } = isNew
-      ? await supabase.from("credit_packages").insert(payload)
-      : await supabase.from("credit_packages").update(payload).eq("id", pkg.id!);
-    setBusy(false);
+    try {
+      const { data, error } = isNew
+        ? await supabase.from("credit_packages").insert(payload).select("id").single()
+        : await supabase
+            .from("credit_packages")
+            .update(payload)
+            .eq("id", pkg.id!)
+            .select("id")
+            .single();
+      if (!isOriginalInstance()) return;
 
-    if (error) {
-      toast.error("שמירת חבילה נכשלה: " + error.message);
-      return;
+      const returnedId = data && typeof data.id === "string" ? data.id : null;
+      if (error || !returnedId || (!isNew && returnedId !== pkg.id)) {
+        setSaveError("שמירת החבילה נכשלה. הקלט נשמר, אפשר לנסות שוב.");
+        toast.error("שמירת החבילה נכשלה. הקלט נשמר, אפשר לנסות שוב.");
+        return;
+      }
+
+      toast.success(isNew ? "חבילה נוצרה" : "חבילה עודכנה");
+      onSaved();
+    } catch {
+      if (!isOriginalInstance()) return;
+      setSaveError("שמירת החבילה נכשלה. הקלט נשמר, אפשר לנסות שוב.");
+      toast.error("שמירת החבילה נכשלה. הקלט נשמר, אפשר לנסות שוב.");
+    } finally {
+      busyRef.current = false;
+      if (isOriginalInstance()) setBusy(false);
     }
-    toast.success(isNew ? "חבילה נוצרה" : "חבילה עודכנה");
-    onSaved();
   };
 
   return (
@@ -226,63 +357,170 @@ function PackageDialog({
       <DialogContent dir="rtl">
         <DialogHeader>
           <DialogTitle>{isNew ? "חבילה חדשה" : "עריכת חבילה"}</DialogTitle>
+          <DialogDescription className="sr-only">
+            הגדרת שם, כמות קרדיטים, מחיר, מטבע, סדר ומצב החבילה.
+          </DialogDescription>
         </DialogHeader>
+        {saveError && (
+          <div
+            role="alert"
+            aria-label="שגיאת שמירת חבילה"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            {saveError}
+          </div>
+        )}
         <div className="space-y-3">
           <div>
-            <Label>שם חבילה</Label>
-            <Input value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <Label htmlFor="package-name">שם חבילה</Label>
+            <Input
+              id="package-name"
+              value={form.name}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>כמות קרדיטים</Label>
+              <Label htmlFor="package-credits">כמות קרדיטים</Label>
               <Input
-                type="number"
-                min={1}
-                value={form.credits ?? ""}
-                onChange={(e) => setForm({ ...form, credits: Number(e.target.value) })}
+                id="package-credits"
+                type="text"
+                inputMode="numeric"
+                value={form.credits}
+                onChange={(event) => setForm({ ...form, credits: event.target.value })}
               />
             </div>
             <div>
-              <Label>מחיר</Label>
+              <Label htmlFor="package-price">מחיר</Label>
               <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.price ?? ""}
-                onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+                id="package-price"
+                type="text"
+                inputMode="decimal"
+                value={form.price}
+                onChange={(event) => setForm({ ...form, price: event.target.value })}
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>מטבע</Label>
+              <Label htmlFor="package-currency">מטבע</Label>
               <Input
-                value={form.currency ?? "ILS"}
-                onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
+                id="package-currency"
+                value={form.currency}
+                onChange={(event) =>
+                  setForm({ ...form, currency: event.target.value.toUpperCase() })
+                }
                 dir="ltr"
               />
             </div>
             <div>
-              <Label>סדר הופעה</Label>
+              <Label htmlFor="package-sort-order">סדר הופעה</Label>
               <Input
-                type="number"
-                value={form.sort_order ?? 0}
-                onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })}
+                id="package-sort-order"
+                type="text"
+                inputMode="numeric"
+                value={form.sortOrder}
+                onChange={(event) => setForm({ ...form, sortOrder: event.target.value })}
               />
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <Label>פעילה</Label>
-            <Switch checked={form.is_active ?? true} onCheckedChange={(v) => setForm({ ...form, is_active: v })} />
+            <Label htmlFor="package-active">פעילה</Label>
+            <Switch
+              id="package-active"
+              checked={form.isActive}
+              onCheckedChange={(value) => setForm({ ...form, isActive: value })}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "שומר..." : "שמור"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button
+            type="button"
+            aria-label={busy ? "שומר..." : "שמור חבילה"}
+            onClick={submit}
+            disabled={busy}
+          >
+            {busy ? "שומר..." : "שמור"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function packageForm(pkg: Partial<CreditPackage>): PackageForm {
+  return {
+    name: pkg.name ?? "",
+    credits: pkg.credits?.toString() ?? "",
+    price: pkg.price?.toString() ?? "",
+    currency: pkg.currency ?? "ILS",
+    isActive: pkg.is_active ?? true,
+    sortOrder: pkg.sort_order?.toString() ?? "0",
+  };
+}
+
+function validatePackageForm(form: PackageForm): PackagePayload | null {
+  const name = form.name.trim();
+  if (name.length < 1 || name.length > 120) {
+    toast.error("שם החבילה חייב להכיל בין 1 ל-120 תווים");
+    return null;
+  }
+
+  const creditsText = form.credits.trim();
+  const credits = Number(creditsText);
+  if (
+    !INTEGER_TEXT.test(creditsText) ||
+    !Number.isInteger(credits) ||
+    credits < 1 ||
+    credits > POSTGRES_INTEGER_MAX
+  ) {
+    toast.error("כמות הקרדיטים חייבת להיות מספר שלם חיובי בטווח הנתמך");
+    return null;
+  }
+
+  const priceText = form.price.trim();
+  const price = Number(priceText);
+  const decimalPlaces = priceText.includes(".") ? priceText.split(".")[1].length : 0;
+  if (
+    !DECIMAL_TEXT.test(priceText) ||
+    !Number.isFinite(price) ||
+    price < 0 ||
+    price > NUMERIC_10_2_MAX ||
+    decimalPlaces > 2
+  ) {
+    toast.error("המחיר חייב להיות מספר לא שלילי עם עד שתי ספרות אחרי הנקודה");
+    return null;
+  }
+
+  const sortOrderText = form.sortOrder.trim();
+  const sortOrder = Number(sortOrderText);
+  if (
+    !INTEGER_TEXT.test(sortOrderText) ||
+    !Number.isInteger(sortOrder) ||
+    sortOrder < POSTGRES_INTEGER_MIN ||
+    sortOrder > POSTGRES_INTEGER_MAX
+  ) {
+    toast.error("סדר ההופעה חייב להיות מספר שלם בטווח הנתמך");
+    return null;
+  }
+
+  const currency = form.currency.trim();
+  if (currency.length < 3 || currency.length > 8) {
+    toast.error("קוד המטבע חייב להכיל בין 3 ל-8 תווים");
+    return null;
+  }
+
+  return {
+    name,
+    credits,
+    price,
+    currency,
+    is_active: form.isActive,
+    sort_order: sortOrder,
+  };
 }
 
 function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
@@ -296,7 +534,10 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["admin-client-credit-rows"],
     queryFn: async () => {
-      const [{ data: roles, error: rolesError }, { data: clientProfiles, error: clientProfilesError }] = await Promise.all([
+      const [
+        { data: roles, error: rolesError },
+        { data: clientProfiles, error: clientProfilesError },
+      ] = await Promise.all([
         supabase.from("user_roles").select("user_id, role"),
         supabase.from("client_profiles").select("user_id"),
       ]);
@@ -369,8 +610,7 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
-      client.email?.toLowerCase().includes(q) ||
-      client.display_name?.toLowerCase().includes(q)
+      client.email?.toLowerCase().includes(q) || client.display_name?.toLowerCase().includes(q)
     );
   });
 
@@ -403,7 +643,9 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
     setAmount("");
     setReason("");
     qc.invalidateQueries({ queryKey: ["admin-client-credit-rows"] });
-    qc.invalidateQueries({ queryKey: ["admin-client-credit-transactions", selectedClient.user_id] });
+    qc.invalidateQueries({
+      queryKey: ["admin-client-credit-transactions", selectedClient.user_id],
+    });
   };
 
   return (
@@ -438,7 +680,9 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{client.display_name ?? "ללא שם"}</div>
-                    <div className="text-xs text-muted-foreground truncate">{client.email ?? "אין אימייל"}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {client.email ?? "אין אימייל"}
+                    </div>
                   </div>
                   <div className="text-sm font-semibold">{client.balance}</div>
                   <StatusBadge status={client.status} />
@@ -455,7 +699,9 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
             <CardTitle className="text-base">ניהול יתרה</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!selectedClient && <p className="text-sm text-muted-foreground">בחר לקוח מהרשימה כדי לנהל קרדיטים.</p>}
+            {!selectedClient && (
+              <p className="text-sm text-muted-foreground">בחר לקוח מהרשימה כדי לנהל קרדיטים.</p>
+            )}
             {selectedClient && (
               <>
                 <div className="grid grid-cols-3 gap-2 text-sm">
@@ -506,8 +752,15 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
                 {transactions.map((tx) => (
                   <div key={tx.id} className="rounded-md border p-3 text-sm">
                     <div className="flex items-center justify-between gap-2">
-                      <span className={tx.amount >= 0 ? "text-success font-semibold" : "text-destructive font-semibold"}>
-                        {tx.amount > 0 ? "+" : ""}{tx.amount}
+                      <span
+                        className={
+                          tx.amount >= 0
+                            ? "text-success font-semibold"
+                            : "text-destructive font-semibold"
+                        }
+                      >
+                        {tx.amount > 0 ? "+" : ""}
+                        {tx.amount}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {new Date(tx.created_at).toLocaleString("he-IL")}
@@ -539,7 +792,10 @@ function CreditSettingsTab() {
       const { data, error } = await supabase
         .from("system_settings")
         .select("key, value")
-        .in("key", CREDIT_SETTINGS.map((setting) => setting.key));
+        .in(
+          "key",
+          CREDIT_SETTINGS.map((setting) => setting.key),
+        );
       if (error) throw error;
       return new Map((data ?? []).map((row) => [row.key, row.value]));
     },
@@ -587,38 +843,42 @@ function CreditSettingsTab() {
       </CardHeader>
       <CardContent className="space-y-4 max-w-2xl">
         {isLoading && <Skeleton className="h-48" />}
-        {!isLoading && CREDIT_SETTINGS.map((setting) => (
-          <div key={setting.key} className={setting.type === "bool" ? "flex items-center justify-between" : ""}>
-            <Label className={setting.type === "bool" ? "" : "block mb-1"}>{setting.label}</Label>
-            {setting.type === "bool" ? (
-              <Switch
-                checked={!!form[setting.key]}
-                onCheckedChange={(value) => setForm({ ...form, [setting.key]: value })}
-              />
-            ) : setting.type === "select" ? (
-              <Select
-                value={String(form[setting.key] ?? setting.default)}
-                onValueChange={(value) => setForm({ ...form, [setting.key]: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">חד פעמי בלבד</SelectItem>
-                  <SelectItem value="daily">יומי</SelectItem>
-                  <SelectItem value="monthly">חודשי</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                type="number"
-                min={0}
-                value={String(form[setting.key] ?? "")}
-                onChange={(e) => setForm({ ...form, [setting.key]: Number(e.target.value) })}
-              />
-            )}
-          </div>
-        ))}
+        {!isLoading &&
+          CREDIT_SETTINGS.map((setting) => (
+            <div
+              key={setting.key}
+              className={setting.type === "bool" ? "flex items-center justify-between" : ""}
+            >
+              <Label className={setting.type === "bool" ? "" : "block mb-1"}>{setting.label}</Label>
+              {setting.type === "bool" ? (
+                <Switch
+                  checked={!!form[setting.key]}
+                  onCheckedChange={(value) => setForm({ ...form, [setting.key]: value })}
+                />
+              ) : setting.type === "select" ? (
+                <Select
+                  value={String(form[setting.key] ?? setting.default)}
+                  onValueChange={(value) => setForm({ ...form, [setting.key]: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">חד פעמי בלבד</SelectItem>
+                    <SelectItem value="daily">יומי</SelectItem>
+                    <SelectItem value="monthly">חודשי</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  type="number"
+                  min={0}
+                  value={String(form[setting.key] ?? "")}
+                  onChange={(e) => setForm({ ...form, [setting.key]: Number(e.target.value) })}
+                />
+              )}
+            </div>
+          ))}
         {!isLoading && (
           <Button onClick={save} disabled={busy}>
             {busy ? "שומר..." : "שמור הגדרות"}
@@ -650,10 +910,19 @@ function newPackage(): Partial<CreditPackage> {
 }
 
 function formatPrice(price: number, currency: string) {
-  return new Intl.NumberFormat("he-IL", {
-    style: "currency",
-    currency: currency || "ILS",
-  }).format(Number(price));
+  const currencyCode = currency?.trim() || "ILS";
+  const numericPrice = Number(price);
+  try {
+    return new Intl.NumberFormat("he-IL", {
+      style: "currency",
+      currency: currencyCode,
+    }).format(numericPrice);
+  } catch {
+    return `${numericPrice.toLocaleString("he-IL", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} ${currencyCode}`;
+  }
 }
 
 function normalizeSetting(key: string, value: string | number | boolean | undefined) {
