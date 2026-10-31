@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Award, BarChart3, Clock, RefreshCw, Sparkles, Users } from "lucide-react";
 import { useOperator } from "@/components/operator/OperatorLayout";
+import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +30,13 @@ export const Route = createFileRoute("/operator/analytics")({
 });
 
 function OperatorAnalyticsPage() {
-  const { operator } = useOperator();
+  const { operator: contextOperator } = useOperator();
+  const { session, loading: authLoading } = useAuth();
+  const sessionUserId = session?.user.id;
+  const operator =
+    !authLoading && sessionUserId && contextOperator?.user_id === sessionUserId
+      ? contextOperator
+      : null;
   const qc = useQueryClient();
 
   const performanceQuery = useQuery({

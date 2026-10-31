@@ -20,8 +20,21 @@
 
 - Initial TDD run: **RED** — 11 failed / 1 passed, exposing the missing read states and a missing test-environment `ResizeObserver` stub.
 - Intermediate runs: **RED** — 7 passed / 5 failed, then 11 passed / 1 failed while assertions were aligned with the real component transition.
-- Final focused run: **PASS** — 12/12 tests.
+- Original slice focused run: **PASS** — 12/12 tests.
 - Covered states include initial loading/error/retry, cached refresh success/failure, empty history with genuine zero values, missing or mismatched operator context, delayed A-to-B responses, logout/unmount cleanup, subscription filters, invalidation, assignments, avatar, metrics, and chart history.
+
+## Session identity correction
+
+- Correction starts from `997e44e53c90182a0f1bed331bfa0d29072474b1`; the existing commit and original tests are preserved.
+- The earlier operator-only tests did not cover a changed Auth session while the layout still retained the previous operator.
+- **MODIFY:** the route reads the existing `useAuth` session and initialization state. An effective operator exists only after Auth initialization and when `session.user.id` matches `contextOperator.user_id`.
+- Query enablement, query identity, cached-data rendering, retry visibility, and subscriptions all use that effective operator. Mismatch or logout immediately hides old data and removes the old channel; late results cannot populate the active view.
+- **KEEP:** query prefix/invalidation, Realtime filters, fetch implementation, calculations, layout and Auth provider. This is a UI identity guard, not a replacement for server authorization.
+- **EXTEND:** independent Auth/operator mocks cover cached A during session A-to-B mismatch, logout with stale A context, delayed refresh completion, invalidation while mismatched, subsequent valid B, initial mismatch/no session, and Auth initialization.
+- **FAIL (RED):** 5 new regressions failed while the original 12 passed. Cached A remained visible and reads started without a matching ready session.
+- **PASS (GREEN):** all 17 focused component tests passed after the guard was added.
+- Correction gates: `npm.cmd run format:check`, `npm.cmd run lint:changed`, `npm.cmd run typecheck`, and `npm.cmd run build` **PASS**. `npm.cmd test`: **PASS**, 184 passed; **SKIPPED**, 24 existing tests. Both `git diff --check` and `git diff --cached --check` **PASS**. Build warnings: deprecated `punycode` and large chunks; tests emitted the jsdom navigation notice. No new skips or timeout changes.
+- Scoped acceptance: session guard, stale-cache isolation, late-response isolation and channel cleanup are **PASS** at the component boundary. Browser/live integration remain **NOT VERIFIED**; return to them in an authorized isolated environment before product acceptance.
 
 ## Boundaries and limitations
 

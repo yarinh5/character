@@ -60,6 +60,8 @@ type TestChannel = {
 };
 
 const io = vi.hoisted(() => ({
+  sessionUserId: "user-a" as string | null,
+  authLoading: false,
   operator: null as Operator | null,
   fetchPerformance: vi.fn<(operatorId: string) => Promise<Summary>>(),
   channels: [] as TestChannel[],
@@ -68,6 +70,14 @@ const io = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
+}));
+
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    session: io.sessionUserId ? { user: { id: io.sessionUserId } } : null,
+    user: io.sessionUserId ? { id: io.sessionUserId } : null,
+    loading: io.authLoading,
+  }),
 }));
 
 vi.mock("@/components/operator/OperatorLayout", () => ({
@@ -194,6 +204,8 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  io.sessionUserId = operatorA.user_id;
+  io.authLoading = false;
   io.operator = operatorA;
   io.fetchPerformance.mockReset().mockResolvedValue(makeSummary(operatorA));
   io.channels.length = 0;
@@ -201,6 +213,69 @@ beforeEach(() => {
 });
 
 describe("operator performance read states", () => {
+  it.each(["user-b", null])(
+    "hides cached A and cleans its channel when session becomes %s before context updates",
+    async (sessionUserId) => {
+      const refreshA = deferred<Summary>();
+      io.fetchPerformance
+        .mockResolvedValueOnce(makeSummary(operatorA))
+        .mockReturnValueOnce(refreshA.promise)
+        .mockResolvedValueOnce(makeSummary(operatorB, { availablePoints: 73 }));
+      const view = renderPage();
+      await screen.findByText("קרדיטים זמינים");
+      act(() => {
+        void view.queryClient.invalidateQueries({
+          queryKey: ["operator-performance", operatorA.id],
+        });
+      });
+      await screen.findByRole("status", { name: "מרענן נתוני ביצועים" });
+      const oldChannel = io.channels[0];
+
+      io.sessionUserId = sessionUserId;
+      view.rerender();
+      expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(io.removeChannel).toHaveBeenCalledWith(oldChannel);
+      expect(io.channels).toHaveLength(1);
+      await act(async () => refreshA.resolve(makeSummary(operatorA, { availablePoints: 999 })));
+      await act(async () => {
+        await view.queryClient.invalidateQueries({ queryKey: ["operator-performance"] });
+      });
+      expect(screen.queryByText("999")).not.toBeInTheDocument();
+      expect(io.fetchPerformance).toHaveBeenCalledTimes(2);
+
+      io.sessionUserId = operatorB.user_id;
+      io.operator = operatorB;
+      view.rerender();
+      expect(await screen.findByText("73")).toBeInTheDocument();
+      expect(io.fetchPerformance).toHaveBeenLastCalledWith(operatorB.id);
+      expect(io.channels).toHaveLength(2);
+      expect(io.channels[1].name).toBe("operator-performance-operator-b");
+    },
+  );
+
+  it.each(["user-b", null])(
+    "does not start a read or channel with stale operator A and session %s",
+    (sessionUserId) => {
+      io.sessionUserId = sessionUserId;
+      renderPage();
+      expect(io.fetchPerformance).not.toHaveBeenCalled();
+      expect(io.channels).toHaveLength(0);
+      expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+    },
+  );
+
+  it("waits for auth initialization even when session and operator match", () => {
+    io.authLoading = true;
+    const view = renderPage();
+    expect(io.fetchPerformance).not.toHaveBeenCalled();
+    expect(io.channels).toHaveLength(0);
+    io.authLoading = false;
+    view.rerender();
+    expect(io.fetchPerformance).toHaveBeenCalledWith(operatorA.id);
+    expect(io.channels).toHaveLength(1);
+  });
+
   it("shows only an accessible skeleton during initial loading", () => {
     io.fetchPerformance.mockReturnValue(deferred<Summary>().promise);
     renderPage();
@@ -337,6 +412,7 @@ describe("operator performance read states", () => {
     const channelA = io.channels[0];
 
     io.operator = operatorB;
+    io.sessionUserId = operatorB.user_id;
     view.rerender();
     expect(await screen.findByText("73")).toBeInTheDocument();
     expect(io.removeChannel).toHaveBeenCalledWith(channelA);
