@@ -13,6 +13,7 @@
 
 - Dashboard, analytics and operations snapshot wait for initialized Auth with an admin role and matching `user.id` / `session.user.id`. Query keys, component instances and the dashboard Realtime channel are scoped by that verified administrator identity; logout or replacement hides old UI and prevents late results from appearing in the new context.
 - Dashboard aggregate reads now verify every Supabase result and required count. A failed initial read does not invent zeroes or an empty list, while a failed refresh retains verified cached data and exposes one bounded manual retry. The independent server-analytics source has its own initial and cached-refresh states and retry.
+- F1 correction: recent-conversation rows now validate every field and nested relation consumed by the render, including contract-valid nullable values. Dashboard analytics validates consumed entries in `topCharacters`, `topOperatorsByAvailablePoints` and `lowBalanceUsers`; all required numbers must be finite. Malformed entries fail the existing source query instead of being coerced, filtered or displayed, so previously verified cache remains authoritative during a failed refresh.
 - The dashboard retains the 8-row recent-conversation query and existing links. Verified zero activity renders at zero height. Labels now distinguish profiles created today, consumed credits and historical operator credit balances.
 - Advanced analytics keeps draft dates local until explicit apply, rejects missing, impossible and reversed dates, and displays the actual range returned by the server. Identity and range are part of the cache key, so a newer request remains authoritative when older requests complete later.
 - Analytics responses are validated before consumed fields render. Initial and cached-refresh failures have separate retry states, verified zero activity renders at zero height, and consumed credits / historical points are not described as revenue or a new points engine.
@@ -32,6 +33,9 @@
 - Focused GREEN was extended with explicit malformed dashboard-analytics and stale-Realtime-callback coverage; the final focused command passed `22/22`.
 - Delivery snapshot: full Vitest passed `339` tests with `24` existing skips (`24` passed / `6` skipped files); format, changed-file lint, typecheck and the client/SSR production build passed.
 - The first format check identified six changed TS/TSX files and passed after scoped Prettier formatting. Full Vitest retained the existing non-failing jsdom document-navigation notice; build retained the existing `punycode` deprecation and chunk-size advisory.
+- F1 correction RED: the first expanded dashboard run failed nine tests; eight were the intended missing-validation failures and one was an imprecise valid-data selector. After correcting only that selector, the controlled RED was `8 failed / 8 passed` in the dashboard suite.
+- F1 correction focused GREEN: all three required suites passed `31/31`, including malformed initial/refresh responses, retained cache, retry recovery, source independence and legal `null`/zero values.
+- F1 correction delivery snapshot: full Vitest passed `348` tests with `24` existing skips (`24` passed / `6` skipped files); format, changed-file lint and the client/SSR production build passed. The first typecheck exposed only missing TypeScript narrowing after a dynamic array check; explicit local narrowing fixed it and the rerun passed.
 
 ## Boundaries and remaining acceptance
 

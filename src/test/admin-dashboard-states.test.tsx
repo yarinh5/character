@@ -338,6 +338,191 @@ describe("admin dashboard read states", () => {
     expect(screen.queryByText("NaN")).not.toBeInTheDocument();
   });
 
+  it.each([
+    {
+      name: "a non-numeric top-character count",
+      override: { topCharacters: [{ name: "דמות פגומה", count: "invalid-count" }] },
+      rejectedText: "invalid-count",
+    },
+    {
+      name: "a non-finite operator balance",
+      override: {
+        topOperatorsByAvailablePoints: [
+          {
+            id: "operator-invalid",
+            name: "עובד פגום",
+            availablePoints: Number.POSITIVE_INFINITY,
+            monthlyPayouts: 0,
+            messages: 0,
+            status: "offline",
+            isActive: true,
+          },
+        ],
+      },
+      rejectedText: "עובד פגום",
+    },
+    {
+      name: "a malformed low-balance user",
+      override: {
+        lowBalanceUsers: [
+          { userId: "client-invalid", name: "לקוח פגום", email: 42, balance: Number.NaN },
+        ],
+      },
+      rejectedText: "לקוח פגום",
+    },
+  ])(
+    "rejects analytics containing $name while verified sections remain visible",
+    async ({ override, rejectedText }) => {
+      io.dashboardAnalytics.mockResolvedValueOnce({ ...dashboardAnalytics, ...override });
+      mount();
+
+      expect(await screen.findByText("מאיה")).toBeInTheDocument();
+      expect(screen.getByText("מצב תפעולי")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("alert", { name: "שגיאת טעינת מדדי האנליטיקה" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(rejectedText)).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    {
+      name: "a numeric message preview",
+      row: { ...recentConversation, last_message_preview: 424242 },
+      rejectedText: "424242",
+    },
+    {
+      name: "an invalid character relation",
+      row: { ...recentConversation, characters: [] },
+      rejectedText: "מאיה",
+    },
+    {
+      name: "an invalid operator relation field",
+      row: { ...recentConversation, operators: { full_name: 123 } },
+      rejectedText: "123",
+    },
+  ])(
+    "rejects recent conversations containing $name while other sections remain visible",
+    async ({ row, rejectedText }) => {
+      io.readTable.mockImplementation((table: string) => {
+        if (table === "conversations") return { data: [row], error: null };
+        return defaultTableReply(table);
+      });
+      mount();
+
+      expect(
+        await screen.findByRole("alert", { name: "שגיאת טעינת נתוני הדשבורד" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("קרדיטים שנצרכו")).toBeInTheDocument();
+      expect(screen.getByText("מצב תפעולי")).toBeInTheDocument();
+      expect(screen.queryByText(rejectedText)).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps valid recent cache when a malformed refresh fails validation and recovers on retry", async () => {
+    let conversationAttempt = 0;
+    io.readTable.mockImplementation((table: string) => {
+      if (table !== "conversations") return defaultTableReply(table);
+      conversationAttempt += 1;
+      if (conversationAttempt === 1) return { data: [recentConversation], error: null };
+      if (conversationAttempt === 2) {
+        return { data: [{ ...recentConversation, last_message_preview: 424242 }], error: null };
+      }
+      return {
+        data: [{ ...recentConversation, last_message_preview: "הודעה שהתאוששה" }],
+        error: null,
+      };
+    });
+    const { client } = mount();
+    expect(await screen.findByText(/הודעה אחרונה/)).toBeInTheDocument();
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["admin-stats", "admin-a"] });
+    });
+    const warning = await screen.findByRole("alert", { name: "שגיאת רענון נתוני הדשבורד" });
+    expect(screen.getByText(/הודעה אחרונה/)).toBeInTheDocument();
+    expect(screen.queryByText("424242")).not.toBeInTheDocument();
+
+    fireEvent.click(within(warning).getByRole("button", { name: "נסה לרענן שוב" }));
+    expect(await screen.findByText(/הודעה שהתאוששה/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("alert", { name: "שגיאת רענון נתוני הדשבורד" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps valid analytics cache when a malformed refresh fails validation and recovers on retry", async () => {
+    io.dashboardAnalytics
+      .mockResolvedValueOnce({
+        ...dashboardAnalytics,
+        topCharacters: [{ name: "דמות תקינה", count: 3 }],
+      })
+      .mockResolvedValueOnce({
+        ...dashboardAnalytics,
+        topCharacters: [{ name: "דמות פגומה", count: "invalid-count" }],
+      })
+      .mockResolvedValueOnce({
+        ...dashboardAnalytics,
+        topCharacters: [{ name: "דמות שהתאוששה", count: 4 }],
+      });
+    const { client } = mount();
+    expect(await screen.findByText("דמות תקינה")).toBeInTheDocument();
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["admin-analytics", "admin-a"] });
+    });
+    const warning = await screen.findByRole("alert", { name: "שגיאת רענון מדדי האנליטיקה" });
+    expect(screen.getByText("דמות תקינה")).toBeInTheDocument();
+    expect(screen.queryByText("דמות פגומה")).not.toBeInTheDocument();
+
+    fireEvent.click(within(warning).getByRole("button", { name: "נסה לרענן אנליטיקה שוב" }));
+    expect(await screen.findByText("דמות שהתאוששה")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("alert", { name: "שגיאת רענון מדדי האנליטיקה" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("accepts contract-valid null relations and finite zero values", async () => {
+    io.readTable.mockImplementation((table: string) => {
+      if (table === "conversations") {
+        return {
+          data: [
+            {
+              ...recentConversation,
+              last_message_preview: null,
+              characters: null,
+              operators: null,
+            },
+          ],
+          error: null,
+        };
+      }
+      return defaultTableReply(table);
+    });
+    io.dashboardAnalytics.mockResolvedValueOnce({
+      ...dashboardAnalytics,
+      topCharacters: [{ name: "דמות אפס", count: 0 }],
+      topOperatorsByAvailablePoints: [
+        {
+          id: "operator-zero",
+          name: "עובד אפס",
+          availablePoints: 0,
+          monthlyPayouts: 0,
+          messages: 0,
+          status: "offline",
+          isActive: false,
+        },
+      ],
+      lowBalanceUsers: [{ userId: "client-zero", name: "לקוח אפס", email: null, balance: 0 }],
+    });
+    mount();
+
+    expect(await screen.findByText("דמות אפס")).toBeInTheDocument();
+    expect(screen.getByText(/עובד אפס/)).toBeInTheDocument();
+    expect(screen.getByText("לקוח אפס")).toBeInTheDocument();
+    expect(screen.getByText("ללא עובד · —")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does not show admin A cache or late completions after admin B takes over", async () => {
     const lateA = deferred<Reply<unknown>>();
     let clientsRead = 0;

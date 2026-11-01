@@ -46,7 +46,6 @@ function AdminDashboard() {
 type RecentConversation = {
   id: string;
   status: string;
-  last_message_at: string | null;
   last_message_preview: string | null;
   characters: { name: string; avatar_url: string | null } | null;
   operators: { full_name: string | null } | null;
@@ -116,13 +115,16 @@ function AdminDashboardWorkspace({ adminId }: { adminId: string }) {
       ) {
         throw new Error("admin_dashboard_stats_malformed");
       }
-      if (!Array.isArray(recent.data)) throw new Error("admin_dashboard_recent_malformed");
+      const recentRows = recent.data;
+      if (!Array.isArray(recentRows) || !recentRows.every(isRecentConversation)) {
+        throw new Error("admin_dashboard_recent_malformed");
+      }
 
       return {
         clients: clients.count as number,
         clientsToday: clientsToday.count as number,
         characters: characters.count as number,
-        recent: recent.data as unknown as RecentConversation[],
+        recent: recentRows,
       };
     },
     retry: false,
@@ -494,8 +496,8 @@ function ReadAlert({
 }
 
 function isDashboardAnalytics(value: unknown): value is DashboardAnalytics {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
+  const candidate = value;
   const scalars = [
     "avgResponseSec",
     "totalCreditsSpent",
@@ -509,19 +511,97 @@ function isDashboardAnalytics(value: unknown): value is DashboardAnalytics {
     )
   )
     return false;
-  const arrays = [
-    "days",
-    "topOperators",
-    "topCharacters",
-    "topOperatorsByAvailablePoints",
-    "lowBalanceUsers",
-  ];
-  if (!arrays.every((field) => Array.isArray(candidate[field]))) return false;
-  return (candidate.days as Array<Record<string, unknown>>).every(
-    (day) =>
-      typeof day.date === "string" &&
-      [day.conversations, day.users, day.messages].every(
-        (number) => typeof number === "number" && Number.isFinite(number),
-      ),
+  const days = candidate.days;
+  const topOperators = candidate.topOperators;
+  const topCharacters = candidate.topCharacters;
+  const operatorCreditSummaries = candidate.topOperatorsByAvailablePoints;
+  const lowBalanceUsers = candidate.lowBalanceUsers;
+  if (
+    !Array.isArray(days) ||
+    !Array.isArray(topOperators) ||
+    !Array.isArray(topCharacters) ||
+    !Array.isArray(operatorCreditSummaries) ||
+    !Array.isArray(lowBalanceUsers)
+  ) {
+    return false;
+  }
+  return (
+    days.every(isDashboardDay) &&
+    topCharacters.every(isTopCharacter) &&
+    operatorCreditSummaries.every(isOperatorCreditSummary) &&
+    lowBalanceUsers.every(isLowBalanceUser)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isRecentConversation(value: unknown): value is RecentConversation {
+  if (!isRecord(value)) return false;
+
+  const characters = value.characters;
+  const operators = value.operators;
+  const validCharacter =
+    characters === null ||
+    (isRecord(characters) &&
+      typeof characters.name === "string" &&
+      isNullableString(characters.avatar_url));
+  const validOperator =
+    operators === null || (isRecord(operators) && isNullableString(operators.full_name));
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.status === "string" &&
+    isNullableString(value.last_message_preview) &&
+    validCharacter &&
+    validOperator
+  );
+}
+
+function isDashboardDay(value: unknown): value is DashboardAnalytics["days"][number] {
+  return (
+    isRecord(value) &&
+    typeof value.date === "string" &&
+    isFiniteNumber(value.conversations) &&
+    isFiniteNumber(value.users) &&
+    isFiniteNumber(value.messages)
+  );
+}
+
+function isTopCharacter(value: unknown): value is DashboardAnalytics["topCharacters"][number] {
+  return isRecord(value) && typeof value.name === "string" && isFiniteNumber(value.count);
+}
+
+function isOperatorCreditSummary(
+  value: unknown,
+): value is DashboardAnalytics["topOperatorsByAvailablePoints"][number] {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    isFiniteNumber(value.availablePoints) &&
+    isFiniteNumber(value.monthlyPayouts) &&
+    isFiniteNumber(value.messages) &&
+    typeof value.status === "string" &&
+    typeof value.isActive === "boolean"
+  );
+}
+
+function isLowBalanceUser(value: unknown): value is DashboardAnalytics["lowBalanceUsers"][number] {
+  return (
+    isRecord(value) &&
+    typeof value.userId === "string" &&
+    typeof value.name === "string" &&
+    isNullableString(value.email) &&
+    isFiniteNumber(value.balance)
   );
 }
