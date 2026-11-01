@@ -18,12 +18,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/lib/auth";
 
-type OperationsSnapshot = Database["public"]["Functions"]["get_admin_operations_snapshot"]["Returns"][number];
-
-const snapshotQueryKey = ["admin-operations-snapshot"] as const;
+type OperationsSnapshot =
+  Database["public"]["Functions"]["get_admin_operations_snapshot"]["Returns"][number];
 
 export function AdminOperationsSnapshot() {
+  const { loading, role, user, session } = useAuth();
+  const adminId =
+    !loading && role === "admin" && user && session?.user.id === user.id ? user.id : null;
+
+  if (!adminId) {
+    return (
+      <p role="status" className="mb-6 text-sm text-muted-foreground">
+        נדרש חיבור מנהל מאומת להצגת המצב התפעולי.
+      </p>
+    );
+  }
+
+  return <AdminOperationsSnapshotContent key={adminId} adminId={adminId} />;
+}
+
+function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
   const {
     data: snapshot,
     isLoading,
@@ -31,17 +47,17 @@ export function AdminOperationsSnapshot() {
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: snapshotQueryKey,
+    queryKey: ["admin-operations-snapshot", adminId],
     queryFn: async (): Promise<OperationsSnapshot> => {
       const { data, error } = await supabase.rpc("get_admin_operations_snapshot");
-      if (error || !data?.[0]) {
+      if (error || !isValidSnapshot(data?.[0])) {
         throw new Error("admin_operations_snapshot_unavailable");
       }
 
       return data[0];
     },
     refetchInterval: 30_000,
-    retry: 2,
+    retry: false,
   });
 
   return (
@@ -53,7 +69,7 @@ export function AdminOperationsSnapshot() {
           </h2>
           {snapshot && (
             <p className="text-xs text-muted-foreground">
-              עודכן {formatSnapshotTime(snapshot.generated_at)}
+              {formatSnapshotTime(snapshot.generated_at)}
             </p>
           )}
         </div>
@@ -80,7 +96,7 @@ export function AdminOperationsSnapshot() {
       {isLoading && !snapshot && <SnapshotSkeleton />}
 
       {isError && !snapshot && (
-        <Card className="min-h-48">
+        <Card className="min-h-48" role="alert" aria-label="שגיאת טעינת מצב תפעולי">
           <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
             <AlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">טעינת המצב התפעולי נכשלה.</p>
@@ -94,9 +110,22 @@ export function AdminOperationsSnapshot() {
       {snapshot && (
         <>
           {isError && (
-            <p role="status" className="mb-3 text-xs text-muted-foreground">
-              העדכון האחרון נכשל. מוצגים הנתונים האחרונים שהתקבלו.
-            </p>
+            <div
+              role="alert"
+              aria-label="שגיאת רענון מצב תפעולי"
+              className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
+            >
+              <span>העדכון האחרון נכשל. מוצגים הנתונים האחרונים שהתקבלו.</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void refetch()}
+                disabled={isFetching}
+              >
+                נסה לרענן שוב
+              </Button>
+            </div>
           )}
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -107,26 +136,57 @@ export function AdminOperationsSnapshot() {
               linkLabel="למסך עובדים"
             >
               <Metric label="סה״כ NEW" value={snapshot.new_total} />
-              <Metric label="רגיל" value={snapshot.new_normal_count} icon={CheckCircle2} tone="normal" />
-              <Metric label="אזהרה" value={snapshot.new_warning_count} icon={AlertTriangle} tone="warning" />
-              <Metric label="קריטי" value={snapshot.new_critical_count} icon={AlertTriangle} tone="critical" />
+              <Metric
+                label="רגיל"
+                value={snapshot.new_normal_count}
+                icon={CheckCircle2}
+                tone="normal"
+              />
+              <Metric
+                label="אזהרה"
+                value={snapshot.new_warning_count}
+                icon={AlertTriangle}
+                tone="warning"
+              />
+              <Metric
+                label="קריטי"
+                value={snapshot.new_critical_count}
+                icon={AlertTriangle}
+                tone="critical"
+              />
               <Metric label="המתנה ותיקה" value={formatWait(snapshot.new_oldest_wait_seconds)} />
               <Metric label="חזרו ל-NEW" value={snapshot.new_returned_count} />
             </OperationsGroup>
 
-            <OperationsGroup title="כוח עבודה" icon={UsersRound} to="/admin/operators" linkLabel="למסך עובדים">
+            <OperationsGroup
+              title="כוח עבודה"
+              icon={UsersRound}
+              to="/admin/operators"
+              linkLabel="למסך עובדים"
+            >
               <Metric label="עובדים פעילים" value={snapshot.active_operator_count} />
               <Metric label="מחוברים" value={snapshot.online_operator_count} tone="normal" />
               <Metric label="לא מחוברים" value={snapshot.offline_operator_count} />
               <Metric label="מחזורי טיפול פעילים" value={snapshot.active_handling_cycle_count} />
             </OperationsGroup>
 
-            <OperationsGroup title="ONLINE" subtitle="24 השעות האחרונות" icon={MessageCircle} to="/admin/operators" linkLabel="למסך עובדים">
-              <Metric label="פניות שנשלחו" value={snapshot.outreach_sent_count} />
-              <Metric label="פניות שנענו" value={snapshot.outreach_replied_count} />
+            <OperationsGroup
+              title="פנייה יזומה היסטורית"
+              subtitle="24 השעות האחרונות"
+              icon={MessageCircle}
+              to="/admin/operators"
+              linkLabel="למסך עובדים"
+            >
+              <Metric label="פניות יזומות שנשלחו" value={snapshot.outreach_sent_count} />
+              <Metric label="פניות יזומות שנענו" value={snapshot.outreach_replied_count} />
             </OperationsGroup>
 
-            <OperationsGroup title="Moderation" icon={Flag} to="/admin/reports" linkLabel="לדיווחים">
+            <OperationsGroup
+              title="Moderation"
+              icon={Flag}
+              to="/admin/reports"
+              linkLabel="לדיווחים"
+            >
               <Metric label="דיווחי לקוחות פתוחים" value={snapshot.open_client_report_count} />
               <Metric label="דיווחי עובדים פתוחים" value={snapshot.open_operator_report_count} />
               <Metric label="חסימות פעילות" value={snapshot.active_operator_client_block_count} />
@@ -175,7 +235,10 @@ function OperationsGroup({
             {subtitle && <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         </div>
-        <Link to={to} className="flex shrink-0 items-center gap-1 text-xs text-primary hover:underline">
+        <Link
+          to={to}
+          className="flex shrink-0 items-center gap-1 text-xs text-primary hover:underline"
+        >
           {linkLabel}
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
@@ -218,7 +281,10 @@ function Metric({
 
 function SnapshotSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" aria-label="טוען מצב תפעולי">
+    <div
+      className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"
+      aria-label="טוען מצב תפעולי"
+    >
       {Array.from({ length: 5 }, (_, index) => (
         <Card key={index} className="min-h-56">
           <CardHeader className="p-4 pb-3">
@@ -247,9 +313,52 @@ function formatWait(waitSeconds: number) {
 }
 
 function formatSnapshotTime(value: string) {
-  return new Intl.DateTimeFormat("he-IL", {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "שעת עדכון לא זמינה";
+  const formatted = new Intl.DateTimeFormat("he-IL", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  }).format(new Date(value));
+  }).format(date);
+  return `עודכן ${formatted}`;
+}
+
+const numericSnapshotFields: Array<keyof OperationsSnapshot> = [
+  "new_total",
+  "new_normal_count",
+  "new_warning_count",
+  "new_critical_count",
+  "new_oldest_wait_seconds",
+  "new_returned_count",
+  "active_operator_count",
+  "online_operator_count",
+  "offline_operator_count",
+  "active_handling_cycle_count",
+  "outreach_sent_count",
+  "outreach_replied_count",
+  "open_client_report_count",
+  "open_operator_report_count",
+  "active_operator_client_block_count",
+  "archived_client_count",
+  "media_asset_total",
+  "media_asset_available_count",
+  "media_asset_reserved_count",
+  "media_asset_sent_count",
+  "media_asset_restored_count",
+  "media_asset_disabled_count",
+  "active_media_reservation_count",
+  "active_media_tag_count",
+];
+
+function isValidSnapshot(value: OperationsSnapshot | undefined): value is OperationsSnapshot {
+  if (
+    !value ||
+    typeof value.generated_at !== "string" ||
+    typeof value.activity_window_started_at !== "string"
+  ) {
+    return false;
+  }
+  return numericSnapshotFields.every(
+    (field) => typeof value[field] === "number" && Number.isFinite(value[field]),
+  );
 }
