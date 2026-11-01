@@ -2,13 +2,22 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { Award, BarChart3, Clock, Sparkles, Users } from "lucide-react";
+import { Award, BarChart3, Clock, RefreshCw, Sparkles, Users } from "lucide-react";
 import { useOperator } from "@/components/operator/OperatorLayout";
+import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   fetchOperatorPerformance,
   formatChange,
@@ -21,27 +30,57 @@ export const Route = createFileRoute("/operator/analytics")({
 });
 
 function OperatorAnalyticsPage() {
-  const { operator } = useOperator();
+  const { operator: contextOperator } = useOperator();
+  const { session, loading: authLoading } = useAuth();
+  const sessionUserId = session?.user.id;
+  const operator =
+    !authLoading && sessionUserId && contextOperator?.user_id === sessionUserId
+      ? contextOperator
+      : null;
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["operator-performance", operator?.id],
-    enabled: Boolean(operator?.id),
+  const performanceQuery = useQuery({
+    queryKey: ["operator-performance", operator?.id, operator?.user_id],
+    enabled: Boolean(operator?.id && operator?.user_id),
     queryFn: () => fetchOperatorPerformance(operator!.id),
   });
 
+  const currentData =
+    operator && performanceQuery.data?.operator?.id === operator.id
+      ? performanceQuery.data
+      : undefined;
+  const initialLoading = Boolean(
+    operator && performanceQuery.isLoading && performanceQuery.data === undefined,
+  );
+  const initialError = Boolean(operator && performanceQuery.isError && !currentData);
+  const refreshing = Boolean(currentData && performanceQuery.isFetching);
+  const refreshError = Boolean(currentData && performanceQuery.isError);
+  const unavailableSummary = Boolean(
+    operator && performanceQuery.isSuccess && performanceQuery.data !== undefined && !currentData,
+  );
+
   useEffect(() => {
-    if (!operator) return;
+    if (!operator?.id || !operator.user_id) return;
     const channel = supabase
       .channel(`operator-performance-${operator.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "credit_wallets", filter: `user_id=eq.${operator.user_id}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "credit_wallets",
+          filter: `user_id=eq.${operator.user_id}`,
+        },
         () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "credit_transactions", filter: `user_id=eq.${operator.user_id}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "credit_transactions",
+          filter: `user_id=eq.${operator.user_id}`,
+        },
         () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
       )
       .subscribe();
@@ -55,19 +94,91 @@ function OperatorAnalyticsPage() {
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
       <header>
         <h1 className="text-2xl md:text-3xl font-bold">ביצועים</h1>
-        <p className="text-sm text-muted-foreground mt-1">סיכום פעילות וקרדיטים על בסיס החודש והיסטוריה חודשית.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          סיכום פעילות וקרדיטים על בסיס החודש והיסטוריה חודשית.
+        </p>
       </header>
 
-      {isLoading && <AnalyticsSkeleton />}
-      {!isLoading && data && <AnalyticsContent data={data} />}
-      {!isLoading && !data && (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            לא נמצאו נתוני ביצועים עבור החשבון הזה.
-          </CardContent>
-        </Card>
+      {!operator && (
+        <UnavailablePerformanceState message="אין חשבון עובד פעיל להצגת נתוני ביצועים." />
+      )}
+      {initialLoading && <AnalyticsSkeleton />}
+      {initialError && (
+        <PerformanceReadError
+          refreshing={performanceQuery.isFetching}
+          onRetry={() => void performanceQuery.refetch()}
+        />
+      )}
+      {unavailableSummary && (
+        <UnavailablePerformanceState message="לא נמצאו נתוני עובד עבור החשבון הפעיל." />
+      )}
+      {currentData && (
+        <>
+          {refreshing && !refreshError && (
+            <div
+              role="status"
+              aria-label="מרענן נתוני ביצועים"
+              className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
+            >
+              מרענן את נתוני הביצועים...
+            </div>
+          )}
+          {refreshError && (
+            <PerformanceReadError
+              cached
+              refreshing={performanceQuery.isFetching}
+              onRetry={() => void performanceQuery.refetch()}
+            />
+          )}
+          <AnalyticsContent data={currentData} />
+        </>
       )}
     </div>
+  );
+}
+
+function PerformanceReadError({
+  cached = false,
+  refreshing,
+  onRetry,
+}: {
+  cached?: boolean;
+  refreshing: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      aria-label={cached ? "שגיאת רענון נתוני ביצועים" : "שגיאת טעינת נתוני ביצועים"}
+      className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+    >
+      <p>
+        {cached
+          ? "רענון נתוני הביצועים נכשל. הנתונים המוצגים לא עודכנו."
+          : "לא ניתן לטעון את נתוני הביצועים כרגע."}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-3"
+        onClick={onRetry}
+        disabled={refreshing}
+      >
+        <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+        {refreshing ? "מנסה לטעון" : cached ? "נסה לרענן שוב" : "נסה לטעון שוב"}
+      </Button>
+    </div>
+  );
+}
+
+function UnavailablePerformanceState({ message }: { message: string }) {
+  return (
+    <Card>
+      <CardContent className="py-12 text-center text-sm text-muted-foreground">
+        {message}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -80,7 +191,11 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
         <MetricCard label="קרדיטים זמינים" value={data.availablePoints} icon={Award} />
         <MetricCard label="פעולות מזכות" value={data.currentScoredMessages} icon={Sparkles} />
         <MetricCard label="דמויות משויכות" value={data.assignedCharacters.length} icon={Users} />
-        <MetricCard label="זמן תגובה ממוצע" value={formatResponseTime(data.avgResponseSec)} icon={Clock} />
+        <MetricCard
+          label="זמן תגובה ממוצע"
+          value={formatResponseTime(data.avgResponseSec)}
+          icon={Clock}
+        />
       </div>
 
       <Card>
@@ -95,7 +210,9 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
             </div>
             <div className="rounded-lg border border-border p-4">
               <div className="text-xs text-muted-foreground">פעולות מזכות</div>
-              <div className="mt-1 text-2xl font-bold">{formatChange(data.monthlyMessageChange)}</div>
+              <div className="mt-1 text-2xl font-bold">
+                {formatChange(data.monthlyMessageChange)}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -164,15 +281,24 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
           </CardHeader>
           <CardContent>
             {data.assignedCharacters.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">אין דמויות משויכות כרגע.</p>
+              <p className="text-sm text-muted-foreground text-center py-6">
+                אין דמויות משויכות כרגע.
+              </p>
             )}
             {data.assignedCharacters.length > 0 && (
               <div className="space-y-2">
                 {data.assignedCharacters.map((assignment) => (
-                  <div key={assignment.character_id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div
+                    key={assignment.character_id}
+                    className="flex items-center gap-3 rounded-lg border border-border p-3"
+                  >
                     <div className="h-9 w-9 rounded-full bg-muted overflow-hidden shrink-0">
                       {assignment.characters?.avatar_url ? (
-                        <img src={assignment.characters.avatar_url} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={assignment.characters.avatar_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center text-sm font-semibold">
                           {assignment.characters?.name?.[0] ?? "?"}
@@ -180,7 +306,9 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">{assignment.characters?.name ?? "דמות"}</div>
+                      <div className="text-sm font-medium truncate">
+                        {assignment.characters?.name ?? "דמות"}
+                      </div>
                       <div className="text-xs text-muted-foreground">פעילות</div>
                     </div>
                   </div>
@@ -230,7 +358,7 @@ function EmptyPerformanceState({ compact }: { compact?: boolean }) {
 
 function AnalyticsSkeleton() {
   return (
-    <div className="space-y-4">
+    <div role="status" aria-label="טוען נתוני ביצועים" className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {Array.from({ length: 4 }).map((_, index) => (
           <Skeleton key={index} className="h-24" />
