@@ -17,15 +17,28 @@ type Props = {
   value: string | null;
   onChange: (url: string | null) => void;
   label?: string;
+  disabled?: boolean;
+  onUploadStateChange?: (uploading: boolean) => void;
+  cancelCompletionOnUnmount?: boolean;
 };
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const OUTPUT_SIZE = 512;
 
-export function AvatarUpload({ bucket, folder, value, onChange, label = "תמונה" }: Props) {
+export function AvatarUpload({
+  bucket,
+  folder,
+  value,
+  onChange,
+  label = "תמונה",
+  disabled = false,
+  onUploadStateChange,
+  cancelCompletionOnUnmount = false,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const alive = useRef(true);
   const [busy, setBusy] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -33,7 +46,9 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
   const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
+    alive.current = true;
     return () => {
+      alive.current = false;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
@@ -48,6 +63,7 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
   };
 
   const handleFile = (file: File) => {
+    if (disabled) return;
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast.error("אפשר להעלות רק קובץ JPG, PNG או WebP");
       return;
@@ -96,8 +112,9 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
   };
 
   const uploadCroppedImage = async () => {
-    if (!selectedFile || !previewUrl) return;
+    if (!selectedFile || !previewUrl || disabled || busy) return;
     setBusy(true);
+    onUploadStateChange?.(true);
     try {
       const blob = await buildCroppedBlob();
       const path = `${folder ? `${folder}/` : ""}avatar-${Date.now()}-${Math.random()
@@ -112,14 +129,19 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
       if (error) throw error;
 
       const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
+      if (cancelCompletionOnUnmount && !alive.current) return;
       onChange(pub.publicUrl);
       toast.success("התמונה הועלתה");
       clearSelection();
     } catch (error) {
+      if (cancelCompletionOnUnmount && !alive.current) return;
       const message = error instanceof Error ? error.message : "שגיאה לא ידועה";
       toast.error(`העלאת התמונה נכשלה: ${message}`);
     } finally {
-      setBusy(false);
+      if (alive.current) {
+        setBusy(false);
+        onUploadStateChange?.(false);
+      }
     }
   };
 
@@ -143,6 +165,7 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
             accept="image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+            disabled={disabled}
           />
           <div className="flex flex-wrap gap-2">
             <Button
@@ -150,7 +173,7 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
               variant="outline"
               size="sm"
               onClick={() => inputRef.current?.click()}
-              disabled={busy}
+              disabled={busy || disabled}
             >
               <Upload className="ml-1 h-4 w-4" />
               {busy ? "מעלה..." : "העלה תמונה"}
@@ -160,19 +183,27 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => onChange(null)}
-                disabled={busy}
+                onClick={() => !disabled && onChange(null)}
+                disabled={busy || disabled}
               >
                 <X className="ml-1 h-4 w-4" />
                 הסר
               </Button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">JPG, PNG או WebP עד 5MB. התמונה תיחתך ביחס 1:1.</p>
+          <p className="text-xs text-muted-foreground">
+            JPG, PNG או WebP עד 5MB. התמונה תיחתך ביחס 1:1.
+          </p>
         </div>
       </div>
 
-      <Dialog open={cropOpen} onOpenChange={(open) => (open ? setCropOpen(true) : clearSelection())}>
+      <Dialog
+        open={cropOpen}
+        onOpenChange={(open) => {
+          if (open) setCropOpen(true);
+          else if (!busy) clearSelection();
+        }}
+      >
         <DialogContent dir="rtl" className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>חיתוך תמונת פרופיל</DialogTitle>
@@ -212,7 +243,7 @@ export function AvatarUpload({ bucket, folder, value, onChange, label = "תמו�
             <Button type="button" variant="outline" onClick={clearSelection} disabled={busy}>
               ביטול
             </Button>
-            <Button type="button" onClick={uploadCroppedImage} disabled={busy}>
+            <Button type="button" onClick={uploadCroppedImage} disabled={busy || disabled}>
               {busy ? "שומר..." : "שמור תמונה"}
             </Button>
           </DialogFooter>
