@@ -10,6 +10,60 @@ Requirements: `Product Specification and Work Plan 2026-10-06.md`, gaps D–E, R
 Approved baseline: `0107fcca6f18b5af450ed49011129197126d0bb5` (the WP03 merge).
 `origin/main` matched this baseline at preflight. Work is isolated on `codex/wp04-profile-discovery-ui` in the dedicated WP04 worktree; the WP03 branch was not reused. WP01.5 remains OPEN/PAUSED and its worktree and snapshot were not changed.
 
+## Character profile and favorites workflow — 2026-11-01
+
+This follow-up slice starts from approved `main` baseline
+`68a93f8dcd4026a5754b53af5db400da52668e36` on the isolated branch
+`codex/wp04-character-favorites-ui`. The profile editing and Discovery work described below was
+already merged before this slice; it is preserved. This slice extends only the existing client
+character profile, favorites list, favorites hook and card.
+
+### KEEP / MODIFY / EXTEND
+
+- KEEP: the existing routes, profile gallery and content, Like meaning, favorite ordering,
+  active/visible character filters, `client_hidden_at`/conversation status filters, query-key
+  prefixes and the existing `set_character_favorite` and `start_or_get_conversation` contracts.
+- MODIFY: both screens now wait for an initialized matching Client Auth/session identity. Reads,
+  cached views and actions are scoped by identity (including a logout/re-auth generation) and
+  character. Late completions cannot navigate, toast, roll back another identity or continue the
+  old favorites enrichment chain.
+- MODIFY: profile and favorites reads validate only fields consumed by these views, including
+  nullable character relations and finite numbers. Verified missing/empty results remain distinct
+  from malformed payloads and read failures. Cached data stays visible after a refresh failure with
+  one disabled-while-fetching retry path.
+- MODIFY: favorite writes use a synchronous lock and validate `character_id`, `is_favorite` and
+  `idempotent`. Explicit failure restores only the captured cache. An ambiguous transport or
+  unverifiable result triggers read reconciliation without an automatic write retry. A confirmed
+  mutation followed by refresh failure is reported separately, and retry performs only the read.
+- EXTEND: the favorite card links its image and name to the existing character profile without
+  nesting the remove/chat actions. Conversation actions retain direct navigation for a verified
+  existing profile conversation and the existing RPC elsewhere, validate UUID results, and lock
+  before profile telemetry or any other await.
+- EXTEND: focused component/hook regressions cover Auth loading/mismatch/logout, identity and route
+  switches, malformed and legal-null payloads, cached refresh recovery, idempotent/explicit/
+  ambiguous favorite outcomes, isolated rollback, post-mutation refresh failure, same-tick double
+  clicks, pending telemetry, invalid conversation IDs and suppression of late navigation/toasts.
+
+### Verification and remaining boundary
+
+- Initial RED on the approved baseline: 13 of the new regressions failed while the existing
+  Discovery suite remained green. The failures matched the missing Auth matching, response
+  validation, cached refresh warning, synchronous locks, late-completion guards and profile link.
+- Current focused result: 26/26 passed across
+  `client-character-profile`, `client-favorites-workflow` and the preserved
+  `client-discovery-states` suites. Full Vitest: 365 passed / 24 skipped (26 files passed, 6
+  skipped). Format, changed-file lint, typecheck and the client/SSR production build passed on the
+  final snapshot. The build retained the existing large-chunk and `punycode` deprecation warnings;
+  Vitest retained jsdom's existing unsupported document-navigation notice.
+- Browser RTL/mobile/desktop and live Auth/Supabase/RLS integration: **NOT VERIFIED**. The repository
+  has no isolated backend-free browser path for these authenticated routes, and no harness or live
+  environment was introduced.
+- No backend, RPC, schema, migration, RLS, generated type, dependency, workflow or runtime-service
+  change was made. This UI evidence does not prove server authorization, canonical conversation
+  history, WP04 completion or AC09–AC11.
+- Return condition: before accepting access/conversation integration, re-verify the relevant
+  WP01–WP02 contracts and run an authorized end-to-end flow. WP01.5 remains OPEN/PAUSED.
+
 ## KEEP / EXTEND / MODIFY / NEW
 
 - KEEP: existing routes, cards, form controls, avatar upload, account summary/security, wallet and notifications. Discovery hook, RPCs, query keys, filter semantics, Swipe, favorites, recycling and canonical conversation creation remain unchanged.
