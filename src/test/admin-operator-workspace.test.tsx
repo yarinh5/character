@@ -237,10 +237,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderPage() {
-  const queryClient = new QueryClient({
+function createQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity, refetchOnWindowFocus: false } },
   });
+}
+
+function renderPage(queryClient = createQueryClient()) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Page />
@@ -438,6 +441,47 @@ describe("admin operator workspace", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a retryable refresh error when cached presence has no selected operator", async () => {
+    io.presence
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({ data: null, error: new Error("missing presence refresh") })
+      .mockResolvedValueOnce({
+        data: [{ ...presenceA, active_work_item_count: 4 }],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: [], error: null });
+    const { queryClient } = renderPage();
+    await screen.findByText(operatorA.full_name);
+    fireEvent.click(
+      within(operatorCard(operatorA.full_name)).getByRole("button", {
+        name: `ניטור עובד: ${operatorA.full_name}`,
+      }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("נתוני נוכחות העובד אינם זמינים.")).toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-operator-presence-overview"] });
+    });
+    const alert = await within(dialog).findByRole("alert", {
+      name: "שגיאת רענון נוכחות עובדים",
+    });
+    expect(alert).not.toHaveTextContent("missing presence refresh");
+    expect(within(alert).getByRole("button", { name: "נסה לרענן נוכחות שוב" })).toBeEnabled();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "נסה לרענן נוכחות שוב" }));
+    expect(await within(dialog).findByLabelText("שיחות בטיפול: 4")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("alert", { name: "שגיאת רענון נוכחות עובדים" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["admin-operator-presence-overview"] });
+    });
+    expect(await within(dialog).findByText("נתוני נוכחות העובד אינם זמינים.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("מנותק")).not.toBeInTheDocument();
+  });
+
   it("distinguishes missing, empty, and failed performance reads and supports retry", async () => {
     io.fetchPerformance
       .mockResolvedValueOnce(makeSummary(operatorA, { operator: null }))
@@ -524,6 +568,103 @@ describe("admin operator workspace", () => {
     expect(alert).not.toHaveTextContent("refresh performance detail");
     fireEvent.click(within(alert).getByRole("button", { name: "נסה לרענן שוב" }));
     expect(await screen.findByText("41")).toBeInTheDocument();
+  });
+
+  it("shows a retryable refresh error when cached performance has no selected operator", async () => {
+    io.fetchPerformance
+      .mockResolvedValueOnce(makeSummary(operatorA, { operator: null }))
+      .mockRejectedValueOnce(new Error("missing performance refresh"))
+      .mockResolvedValueOnce(makeSummary(operatorA, { availablePoints: 41 }))
+      .mockResolvedValueOnce(makeSummary(operatorA, { operator: null }));
+    const { queryClient } = renderPage();
+    await screen.findByText(operatorA.full_name);
+    fireEvent.click(
+      within(operatorCard(operatorA.full_name)).getByRole("button", {
+        name: `ביצועי עובד: ${operatorA.full_name}`,
+      }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      await within(dialog).findByText("לא נמצאו נתוני עובד עבור העובד שנבחר."),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-operator-performance"] });
+    });
+    const alert = await within(dialog).findByRole("alert", {
+      name: "שגיאת רענון ביצועי עובד",
+    });
+    expect(alert).not.toHaveTextContent("missing performance refresh");
+    expect(within(alert).getByRole("button", { name: "נסה לרענן שוב" })).toBeEnabled();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "נסה לרענן שוב" }));
+    expect(await within(dialog).findByText("41")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("alert", { name: "שגיאת רענון ביצועי עובד" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["admin-operator-performance"] });
+    });
+    expect(
+      await within(dialog).findByText("לא נמצאו נתוני עובד עבור העובד שנבחר."),
+    ).toBeInTheDocument();
+  });
+
+  it("isolates cached and late admin A data across mismatch, role loss, and admin B", async () => {
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(["admin-operators", "admin-a", false], [operatorA]);
+    queryClient.setQueryData(["admin-operator-presence-overview", "admin-a"], [presenceA]);
+    const lateOperatorsA = deferred<TestOperator[]>();
+    const latePresenceA = deferred<{ data: (typeof presenceA)[]; error: null }>();
+    io.listOperators
+      .mockReset()
+      .mockReturnValueOnce(lateOperatorsA.promise)
+      .mockResolvedValueOnce([operatorB]);
+    io.presence
+      .mockReset()
+      .mockReturnValueOnce(latePresenceA.promise)
+      .mockResolvedValueOnce({ data: [], error: null });
+    const view = renderPage(queryClient);
+    expect(await screen.findByText(operatorA.full_name)).toBeInTheDocument();
+    const channelA = io.channels[0];
+    fireEvent.click(
+      within(operatorCard(operatorA.full_name)).getByRole("button", {
+        name: `ניטור עובד: ${operatorA.full_name}`,
+      }),
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(operatorA.full_name);
+    const listCallsForA = io.listOperators.mock.calls.length;
+    const presenceCallsForA = io.presence.mock.calls.length;
+
+    io.auth.sessionUserId = "admin-b";
+    view.rerender();
+    expect(screen.getByRole("status")).toHaveTextContent("נדרש חיבור מנהל מאומת");
+    expect(screen.queryByText(operatorA.full_name)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(io.listOperators).toHaveBeenCalledTimes(listCallsForA);
+    expect(io.presence).toHaveBeenCalledTimes(presenceCallsForA);
+    expect(io.removeChannel).toHaveBeenCalledWith(channelA);
+
+    io.auth.userId = "admin-b";
+    io.auth.role = "operator";
+    view.rerender();
+    expect(io.listOperators).toHaveBeenCalledTimes(listCallsForA);
+    expect(io.presence).toHaveBeenCalledTimes(presenceCallsForA);
+
+    io.auth.role = "admin";
+    view.rerender();
+    expect(await screen.findByText(operatorB.full_name)).toBeInTheDocument();
+    expect(screen.queryByText(operatorA.full_name)).not.toBeInTheDocument();
+    expect(io.channels.at(-1)?.name).toContain("admin-b");
+
+    await act(async () => {
+      lateOperatorsA.resolve([operatorA]);
+      latePresenceA.resolve({ data: [presenceA], error: null });
+    });
+    expect(screen.getByText(operatorB.full_name)).toBeInTheDocument();
+    expect(screen.queryByText(operatorA.full_name)).not.toBeInTheDocument();
+    expect(screen.queryByText("2 בטיפול")).not.toBeInTheDocument();
   });
 
   it("hides old data and dialogs on logout, ignores late completion, and cleans Realtime", async () => {

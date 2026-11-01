@@ -950,11 +950,15 @@ function OperatorMonitoringDialog({
             <Skeleton className="h-44" />
           </div>
         )}
-        {!loading && error && !dataAvailable && (
+        {!loading && error && !overview && (
           <ReadError
-            label="שגיאת טעינת נוכחות עובדים"
-            message="נתוני נוכחות העובד אינם זמינים כרגע."
-            retryLabel="נסה לטעון נוכחות שוב"
+            label={`שגיאת ${dataAvailable ? "רענון" : "טעינת"} נוכחות עובדים`}
+            message={
+              dataAvailable
+                ? "רענון נתוני נוכחות העובד נכשל ואין מידע זמין להצגה."
+                : "נתוני נוכחות העובד אינם זמינים כרגע."
+            }
+            retryLabel={dataAvailable ? "נסה לרענן נוכחות שוב" : "נסה לטעון נוכחות שוב"}
             busy={refreshing}
             onRetry={onRetry}
           />
@@ -1247,6 +1251,8 @@ function OperatorPerformanceDialog({
   const initialLoading = performanceQuery.isLoading && performanceQuery.data === undefined;
   const initialError = performanceQuery.isError && performanceQuery.data === undefined;
   const refreshError = performanceQuery.isError && currentData !== undefined;
+  const missingRefreshError =
+    performanceQuery.isError && performanceQuery.data !== undefined && !currentData;
   const unavailable =
     performanceQuery.isSuccess && performanceQuery.data !== undefined && !currentData;
 
@@ -1269,6 +1275,15 @@ function OperatorPerformanceDialog({
             label="שגיאת טעינת ביצועי עובד"
             message="טעינת ביצועי העובד נכשלה."
             retryLabel="נסה לטעון שוב"
+            busy={performanceQuery.isFetching}
+            onRetry={() => void performanceQuery.refetch()}
+          />
+        )}
+        {missingRefreshError && (
+          <ReadError
+            label="שגיאת רענון ביצועי עובד"
+            message="רענון ביצועי העובד נכשל ואין נתונים זמינים להצגה."
+            retryLabel="נסה לרענן שוב"
             busy={performanceQuery.isFetching}
             onRetry={() => void performanceQuery.refetch()}
           />
