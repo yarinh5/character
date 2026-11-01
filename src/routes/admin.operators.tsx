@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -12,7 +12,9 @@ import {
   Link as LinkIcon,
   Mail,
   Plus,
+  RefreshCw,
   RotateCcw,
+  Search,
   Undo2,
   UserPlus,
   UserRoundPlus,
@@ -53,6 +55,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import { AnalyticsContent } from "@/routes/operator.analytics";
 import { fetchOperatorPerformance } from "@/lib/operatorPerformance";
 import { adminCreateInvite } from "@/lib/invites.functions";
@@ -155,10 +158,26 @@ function PresenceBadge({ status }: { status: OperatorPresenceOverview["presence_
     offline: "bg-muted text-muted-foreground",
   } as const;
 
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${classes[status]}`}>{labels[status]}</span>;
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${classes[status]}`}>
+      {labels[status]}
+    </span>
+  );
 }
 
 function OperatorsPage() {
+  const { session, user, role, loading } = useAuth();
+  const adminId =
+    !loading && role === "admin" && user && session?.user.id === user.id ? user.id : null;
+
+  return adminId ? (
+    <OperatorWorkspace key={adminId} adminId={adminId} />
+  ) : (
+    <p role="status">נדרש חיבור מנהל מאומת.</p>
+  );
+}
+
+function OperatorWorkspace({ adminId }: { adminId: string }) {
   const qc = useQueryClient();
   const listOperators = useServerFn(adminListOperators);
   const [createOpen, setCreateOpen] = useState(false);
@@ -175,14 +194,17 @@ function OperatorsPage() {
   const [convertOp, setConvertOp] = useState<Operator | null>(null);
   const [createdInvite, setCreatedInvite] = useState<{ token: string; email: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activityFilter, setActivityFilter] = useState<"all" | "active" | "inactive">("all");
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["admin-operators", showArchived],
-    queryFn: async () => (await listOperators({ data: { show_archived_only: showArchived } })) as Operator[],
+  const listQuery = useQuery({
+    queryKey: ["admin-operators", adminId, showArchived],
+    queryFn: async () =>
+      (await listOperators({ data: { show_archived_only: showArchived } })) as Operator[],
   });
 
-  const { data: presenceData } = useQuery({
-    queryKey: ["admin-operator-presence-overview"],
+  const presenceQuery = useQuery({
+    queryKey: ["admin-operator-presence-overview", adminId],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_admin_operator_presence_overview");
       if (error) throw error;
@@ -191,8 +213,8 @@ function OperatorsPage() {
     refetchInterval: 30_000,
   });
 
-  const { data: newQueueData } = useQuery({
-    queryKey: ["admin-new-queue-overview"],
+  const newQueueQuery = useQuery({
+    queryKey: ["admin-new-queue-overview", adminId],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_admin_new_queue_overview");
       if (error) throw error;
@@ -201,8 +223,8 @@ function OperatorsPage() {
     refetchInterval: 30_000,
   });
 
-  const { data: newSlaData } = useQuery({
-    queryKey: ["admin-new-sla-summary"],
+  const newSlaQuery = useQuery({
+    queryKey: ["admin-new-sla-summary", adminId],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_admin_new_sla_summary");
       if (error) throw error;
@@ -211,39 +233,81 @@ function OperatorsPage() {
     refetchInterval: 30_000,
   });
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["admin-operators"] });
     qc.invalidateQueries({ queryKey: ["admin-users"] });
-  };
+  }, [qc]);
 
-  const refreshCreditData = () => {
+  const refreshCreditData = useCallback(() => {
     refresh();
     qc.invalidateQueries({ queryKey: ["admin-operator-performance"] });
     qc.invalidateQueries({ queryKey: ["admin-operator-credits"] });
-  };
+  }, [qc, refresh]);
 
-  const refreshMonitoring = () => {
+  const refreshMonitoring = useCallback(() => {
     refresh();
     qc.invalidateQueries({ queryKey: ["admin-operator-presence-overview"] });
     qc.invalidateQueries({ queryKey: ["admin-new-queue-overview"] });
     qc.invalidateQueries({ queryKey: ["admin-new-sla-summary"] });
-  };
+  }, [qc, refresh]);
 
   useEffect(() => {
     const channel = supabase
-      .channel("admin-operators-wallets")
-      .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, refreshCreditData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, refreshCreditData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "operators" }, refreshMonitoring)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_work_items" }, refreshMonitoring)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_handling_cycles" }, refreshMonitoring)
+      .channel(`admin-operators-wallets-${adminId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_wallets" },
+        refreshCreditData,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "credit_transactions" },
+        refreshCreditData,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "operators" },
+        refreshMonitoring,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_work_items" },
+        refreshMonitoring,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_handling_cycles" },
+        refreshMonitoring,
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [qc]);
+  }, [adminId, refreshCreditData, refreshMonitoring]);
 
+  const operators = listQuery.data ?? [];
+  const normalizedSearch = search.trim().toLocaleLowerCase("he");
+  const filteredOperators = operators.filter((operator) => {
+    const matchesSearch =
+      !normalizedSearch ||
+      [operator.full_name, operator.email]
+        .filter(Boolean)
+        .some((value) => value!.toLocaleLowerCase("he").includes(normalizedSearch));
+    const matchesActivity =
+      activityFilter === "all" ||
+      (activityFilter === "active" ? operator.is_active : !operator.is_active);
+    return matchesSearch && matchesActivity;
+  });
+  const filtersActive = Boolean(normalizedSearch || activityFilter !== "all");
+  const resetFilters = () => {
+    setSearch("");
+    setActivityFilter("all");
+  };
+
+  const presenceData = presenceQuery.data;
+  const newQueueData = newQueueQuery.data;
+  const newSlaData = newSlaQuery.data;
   const presenceByOperator = new Map((presenceData ?? []).map((item) => [item.operator_id, item]));
   const newQueueTotals = (newQueueData ?? []).reduce(
     (totals, item) => ({
@@ -262,7 +326,9 @@ function OperatorsPage() {
     }),
     { total: 0, warning: 0, critical: 0, oldest: 0 },
   );
-  const onlineOperators = (presenceData ?? []).filter((item) => item.presence_status === "online").length;
+  const onlineOperators = presenceData
+    ? presenceData.filter((item) => item.presence_status === "online").length
+    : null;
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8" dir="rtl">
@@ -285,12 +351,59 @@ function OperatorsPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <MonitoringStat label="עובדים מחוברים" value={onlineOperators} />
-        <MonitoringStat label="פניות NEW" value={newSlaTotals.total} />
-        <MonitoringStat label="אזהרת SLA" value={newSlaTotals.warning} />
-        <MonitoringStat label="חריגה קריטית" value={newSlaTotals.critical} />
-        <MonitoringStat label="הוותיקה ביותר" value={formatWaitSeconds(newSlaTotals.oldest)} />
-        <MonitoringStat label="חזרו לתור" value={newQueueTotals.returned} />
+        <MonitoringStat
+          label="עובדים מחוברים"
+          value={onlineOperators ?? (presenceQuery.isLoading ? "טוען..." : "לא זמין")}
+        />
+        <MonitoringStat
+          label="פניות NEW"
+          value={newSlaData ? newSlaTotals.total : newSlaQuery.isLoading ? "טוען..." : "לא זמין"}
+        />
+        <MonitoringStat
+          label="אזהרת SLA"
+          value={newSlaData ? newSlaTotals.warning : newSlaQuery.isLoading ? "טוען..." : "לא זמין"}
+        />
+        <MonitoringStat
+          label="חריגה קריטית"
+          value={newSlaData ? newSlaTotals.critical : newSlaQuery.isLoading ? "טוען..." : "לא זמין"}
+        />
+        <MonitoringStat
+          label="הוותיקה ביותר"
+          value={
+            newSlaData
+              ? formatWaitSeconds(newSlaTotals.oldest)
+              : newSlaQuery.isLoading
+                ? "טוען..."
+                : "לא זמין"
+          }
+        />
+        <MonitoringStat
+          label="חזרו לתור"
+          value={
+            newQueueData ? newQueueTotals.returned : newQueueQuery.isLoading ? "טוען..." : "לא זמין"
+          }
+        />
+      </div>
+
+      <div className="mb-6 grid gap-3 lg:grid-cols-3">
+        <MonitoringSourceState
+          label="נוכחות עובדים"
+          retryLabel="נוכחות"
+          dataAvailable={presenceData !== undefined}
+          query={presenceQuery}
+        />
+        <MonitoringSourceState
+          label="תור NEW"
+          retryLabel="תור NEW"
+          dataAvailable={newQueueData !== undefined}
+          query={newQueueQuery}
+        />
+        <MonitoringSourceState
+          label="סיכום SLA"
+          retryLabel="SLA"
+          dataAvailable={newSlaData !== undefined}
+          query={newSlaQuery}
+        />
       </div>
 
       <Card>
@@ -302,112 +415,263 @@ function OperatorsPage() {
                 במצב רגיל מוצגים עובדים פעילים/לא פעילים בלבד. במצב ארכיון מוצגים רק עובדים שנמחקו.
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <span>הצג עובדים שנמחקו בלבד</span>
-              <Switch checked={showArchived} onCheckedChange={setShowArchived} />
-            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void listQuery.refetch()}
+                disabled={listQuery.isFetching}
+              >
+                <RefreshCw className={`h-4 w-4 ${listQuery.isFetching ? "animate-spin" : ""}`} />
+                רענן רשימה
+              </Button>
+              <label className="flex items-center gap-2 text-sm">
+                <span>הצג עובדים שנמחקו בלבד</span>
+                <Switch checked={showArchived} onCheckedChange={setShowArchived} />
+              </label>
+            </div>
           </div>
-          {isLoading && (
-            <div className="p-6">
+
+          <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center">
+            <label className="relative block">
+              <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="חיפוש לפי שם או אימייל"
+                aria-label="חיפוש לפי שם או אימייל"
+                className="pr-9"
+              />
+            </label>
+            <div role="group" aria-label="סינון פעילות" className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={activityFilter === "all" ? "default" : "outline"}
+                onClick={() => setActivityFilter("all")}
+              >
+                הכול
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activityFilter === "active" ? "default" : "outline"}
+                onClick={() => setActivityFilter("active")}
+              >
+                פעילים
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activityFilter === "inactive" ? "default" : "outline"}
+                onClick={() => setActivityFilter("inactive")}
+              >
+                לא פעילים
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={resetFilters}
+              disabled={!filtersActive}
+            >
+              איפוס מסננים
+            </Button>
+            <p className="text-xs text-muted-foreground md:col-span-3">
+              {filteredOperators.length} מתוך {operators.length} עובדים ברשימה שנטענה
+            </p>
+          </div>
+
+          {listQuery.isLoading && listQuery.data === undefined && (
+            <div className="p-6" role="status" aria-label="טוען רשימת עובדים">
               <Skeleton className="h-32" />
             </div>
           )}
-          {!isLoading && error && (
-            <p className="text-center text-destructive py-12">טעינת רשימת העובדים נכשלה.</p>
+          {listQuery.isError && listQuery.data === undefined && (
+            <ReadError
+              label="שגיאת טעינת רשימת העובדים"
+              message="טעינת רשימת העובדים נכשלה."
+              retryLabel="נסה לטעון שוב"
+              busy={listQuery.isFetching}
+              onRetry={() => void listQuery.refetch()}
+            />
           )}
-          {!isLoading && !error && (data?.length ?? 0) === 0 && (
+          {listQuery.data !== undefined && listQuery.isError && (
+            <ReadError
+              cached
+              label="שגיאת רענון רשימת העובדים"
+              message="רענון רשימת העובדים נכשל. הנתונים השמורים עדיין מוצגים."
+              retryLabel="נסה לרענן שוב"
+              busy={listQuery.isFetching}
+              onRetry={() => void listQuery.refetch()}
+            />
+          )}
+          {listQuery.data !== undefined && listQuery.isFetching && !listQuery.isError && (
+            <p role="status" className="border-b px-4 py-3 text-sm text-muted-foreground">
+              מרענן את רשימת העובדים...
+            </p>
+          )}
+          {listQuery.data !== undefined && operators.length === 0 && (
             <p className="text-center text-muted-foreground py-12">
               {showArchived ? "אין עובדים שנמחקו" : "אין עובדים עדיין"}
             </p>
           )}
-          {!isLoading && !error && data && data.length > 0 && (
+          {listQuery.data !== undefined &&
+            operators.length > 0 &&
+            filteredOperators.length === 0 && (
+              <div className="py-12 text-center">
+                <p className="text-sm text-muted-foreground">לא נמצאו עובדים התואמים למסננים</p>
+              </div>
+            )}
+          {listQuery.data !== undefined && filteredOperators.length > 0 && (
             <div className="divide-y">
-              {data.map((operator) => {
+              {filteredOperators.map((operator) => {
                 const monitoring = presenceByOperator.get(operator.id);
                 return (
-                <div
-                  key={operator.id}
-                  className="grid grid-cols-[40px_minmax(100px,0.75fr)_minmax(160px,1fr)_minmax(120px,auto)_minmax(420px,auto)] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
-                >
-                  <div className="h-10 w-10 rounded-full bg-muted overflow-hidden justify-self-start">
-                    <div className="h-full w-full flex items-center justify-center text-sm font-medium">
-                      {(operator.full_name ?? operator.email ?? "?")[0]?.toUpperCase()}
+                  <div
+                    key={operator.id}
+                    role="article"
+                    aria-label={operator.full_name}
+                    className="grid grid-cols-[40px_minmax(100px,0.75fr)_minmax(160px,1fr)_minmax(120px,auto)_minmax(420px,auto)] items-center gap-x-4 gap-y-3 p-4 max-xl:grid-cols-[auto_minmax(0,1fr)_auto] max-md:grid-cols-[auto_minmax(0,1fr)]"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-muted overflow-hidden justify-self-start">
+                      <div className="h-full w-full flex items-center justify-center text-sm font-medium">
+                        {(operator.full_name ?? operator.email ?? "?")[0]?.toUpperCase()}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="min-w-0 justify-self-stretch">
-                    <div className="font-medium truncate">{operator.full_name}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                      <PresenceBadge status={monitoring?.presence_status ?? "offline"} />
-                      <span>{formatLastSeen(monitoring?.last_seen_at ?? null)}</span>
-                      <span>{monitoring?.active_work_item_count ?? 0} בטיפול</span>
+                    <div className="min-w-0 justify-self-stretch">
+                      <div className="font-medium truncate">{operator.full_name}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        {monitoring ? (
+                          <>
+                            <PresenceBadge status={monitoring.presence_status} />
+                            <span>{formatLastSeen(monitoring.last_seen_at)}</span>
+                            <span>{monitoring.active_work_item_count} בטיפול</span>
+                          </>
+                        ) : (
+                          <span>ניטור לא זמין</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="min-w-0 justify-self-stretch truncate text-left text-xs text-muted-foreground" dir="ltr">
-                    {operator.email ?? "-"}
-                  </div>
-
-                  <div className="min-w-0 justify-self-stretch">
-                    {operator.role === "admin" && (
-                      <span className="inline-flex w-fit text-xs px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary">
-                        מנהל שפועל גם כעובד
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-end gap-3 min-w-0 max-xl:col-span-2 max-xl:col-start-2 max-xl:row-start-2 max-xl:justify-start max-md:col-span-2 max-md:col-start-1">
-                    <div className="shrink-0">
-                      {operator.deleted_at ? <StatusBadge status="archived" /> : <OperatorActiveToggle operator={operator} onDone={refresh} />}
+                    <div
+                      className="min-w-0 justify-self-stretch truncate text-left text-xs text-muted-foreground"
+                      dir="ltr"
+                    >
+                      {operator.email ?? "-"}
                     </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 whitespace-nowrap">
-                      <Button size="icon" variant="ghost" onClick={() => setMonitoringOp(operator)} title="ניטור עובד" aria-label="ניטור עובד">
-                        <Activity className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => setPerformanceOp(operator)} title="ביצועי עובד" aria-label="ביצועי עובד">
-                        <BarChart3 className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="shrink-0 whitespace-nowrap" onClick={() => setCreditsOp(operator)}>
-                        <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => setAssignOp(operator)} title="שיוך דמויות" aria-label="שיוך דמויות">
-                        <LinkIcon className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => setEditing(operator)} title="עריכת עובד" aria-label="עריכת עובד">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => setResetOp(operator)} title="שליחת איפוס סיסמה" aria-label="שליחת איפוס סיסמה">
-                        <RotateCcw className="h-4 w-4" />
-                      </Button>
-                      {operator.deleted_at && (
-                        <Button size="icon" variant="ghost" onClick={() => setRestoreOp(operator)} title="שחזר עובד" aria-label="שחזר עובד">
-                          <Undo2 className="h-4 w-4" />
-                        </Button>
+
+                    <div className="min-w-0 justify-self-stretch">
+                      {operator.role === "admin" && (
+                        <span className="inline-flex w-fit text-xs px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary">
+                          מנהל שפועל גם כעובד
+                        </span>
                       )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setArchiveOp(operator)}
-                        disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
-                        title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
-                        aria-label={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
-                      >
-                        <UserX className="h-4 w-4" />
-                      </Button>
-                      {operator.role !== "admin" && !operator.deleted_at && (
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-3 min-w-0 max-xl:col-span-2 max-xl:col-start-2 max-xl:row-start-2 max-xl:justify-start max-md:col-span-2 max-md:col-start-1">
+                      <div className="shrink-0">
+                        {operator.deleted_at ? (
+                          <StatusBadge status="archived" />
+                        ) : (
+                          <OperatorActiveToggle operator={operator} onDone={refresh} />
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 whitespace-nowrap">
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => setConvertOp(operator)}
-                          title="הפוך ללקוח"
-                          aria-label="הפוך ללקוח"
+                          onClick={() => setMonitoringOp(operator)}
+                          title={`ניטור עובד: ${operator.full_name}`}
+                          aria-label={`ניטור עובד: ${operator.full_name}`}
                         >
-                          <UserPlus className="h-4 w-4" />
+                          <Activity className="h-4 w-4" />
                         </Button>
-                      )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setPerformanceOp(operator)}
+                          title={`ביצועי עובד: ${operator.full_name}`}
+                          aria-label={`ביצועי עובד: ${operator.full_name}`}
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 whitespace-nowrap"
+                          onClick={() => setCreditsOp(operator)}
+                        >
+                          <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setAssignOp(operator)}
+                          title="שיוך דמויות"
+                          aria-label="שיוך דמויות"
+                        >
+                          <LinkIcon className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setEditing(operator)}
+                          title="עריכת עובד"
+                          aria-label="עריכת עובד"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setResetOp(operator)}
+                          title="שליחת איפוס סיסמה"
+                          aria-label="שליחת איפוס סיסמה"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </Button>
+                        {operator.deleted_at && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setRestoreOp(operator)}
+                            title="שחזר עובד"
+                            aria-label="שחזר עובד"
+                          >
+                            <Undo2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setArchiveOp(operator)}
+                          disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
+                          title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
+                          aria-label={
+                            operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"
+                          }
+                        >
+                          <UserX className="h-4 w-4" />
+                        </Button>
+                        {operator.role !== "admin" && !operator.deleted_at && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setConvertOp(operator)}
+                            title="הפוך ללקוח"
+                            aria-label="הפוך ללקוח"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
                 );
               })}
             </div>
@@ -417,6 +681,7 @@ function OperatorsPage() {
 
       {createOpen && (
         <CreateOperatorDialog
+          adminId={adminId}
           onClose={() => setCreateOpen(false)}
           onDone={() => {
             setCreateOpen(false);
@@ -426,6 +691,7 @@ function OperatorsPage() {
       )}
       {inviteOpen && (
         <CreateInviteDialog
+          adminId={adminId}
           onClose={() => setInviteOpen(false)}
           onCreated={(token, email) => {
             setInviteOpen(false);
@@ -442,6 +708,7 @@ function OperatorsPage() {
       )}
       {promoteOpen && (
         <PromoteClientDialog
+          adminId={adminId}
           onClose={() => setPromoteOpen(false)}
           onDone={() => {
             setPromoteOpen(false);
@@ -461,6 +728,7 @@ function OperatorsPage() {
       )}
       {assignOp && (
         <AssignCharactersDialog
+          adminId={adminId}
           operator={assignOp}
           onClose={() => setAssignOp(null)}
           onDone={() => {
@@ -469,16 +737,29 @@ function OperatorsPage() {
           }}
         />
       )}
-      {performanceOp && <OperatorPerformanceDialog operator={performanceOp} onClose={() => setPerformanceOp(null)} />}
+      {performanceOp && (
+        <OperatorPerformanceDialog
+          key={`${adminId}:${performanceOp.id}`}
+          adminId={adminId}
+          operator={performanceOp}
+          onClose={() => setPerformanceOp(null)}
+        />
+      )}
       {monitoringOp && (
         <OperatorMonitoringDialog
           operator={monitoringOp}
           overview={presenceByOperator.get(monitoringOp.id)}
+          loading={presenceQuery.isLoading && presenceData === undefined}
+          refreshing={presenceQuery.isFetching}
+          error={presenceQuery.isError}
+          dataAvailable={presenceData !== undefined}
+          onRetry={() => void presenceQuery.refetch()}
           onClose={() => setMonitoringOp(null)}
         />
       )}
       {creditsOp && (
         <OperatorCreditsDialog
+          adminId={adminId}
           operator={creditsOp}
           onClose={() => setCreditsOp(null)}
           onChanged={refreshCreditData}
@@ -519,6 +800,96 @@ function OperatorsPage() {
   );
 }
 
+function ReadError({
+  label,
+  message,
+  retryLabel,
+  busy,
+  onRetry,
+  cached = false,
+}: {
+  label: string;
+  message: string;
+  retryLabel: string;
+  busy: boolean;
+  onRetry: () => void;
+  cached?: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      aria-label={label}
+      className={`m-4 rounded-md border p-4 text-sm ${
+        cached
+          ? "border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200"
+          : "border-destructive/30 bg-destructive/5 text-destructive"
+      }`}
+    >
+      <p>{message}</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-3"
+        onClick={onRetry}
+        disabled={busy}
+      >
+        <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+        {busy ? "מנסה שוב" : retryLabel}
+      </Button>
+    </div>
+  );
+}
+
+function MonitoringSourceState({
+  label,
+  retryLabel,
+  dataAvailable,
+  query,
+}: {
+  label: string;
+  retryLabel: string;
+  dataAvailable: boolean;
+  query: {
+    isLoading: boolean;
+    isFetching: boolean;
+    isError: boolean;
+    refetch: () => unknown;
+  };
+}) {
+  if (query.isLoading && !dataAvailable) {
+    return (
+      <div role="status" aria-label={`טוען ${label}`} className="rounded-md border p-3">
+        <Skeleton className="h-10" />
+      </div>
+    );
+  }
+  if (query.isError) {
+    return (
+      <ReadError
+        cached={dataAvailable}
+        label={`שגיאת ${dataAvailable ? "רענון" : "טעינת"} ${label}`}
+        message={
+          dataAvailable
+            ? `רענון ${label} נכשל. המידע השמור עדיין מוצג.`
+            : `טעינת ${label} נכשלה. מקורות הניטור האחרים נשארים זמינים.`
+        }
+        retryLabel={`נסה ${dataAvailable ? "לרענן" : "לטעון"} ${retryLabel} שוב`}
+        busy={query.isFetching}
+        onRetry={() => void query.refetch()}
+      />
+    );
+  }
+  if (dataAvailable && query.isFetching) {
+    return (
+      <p role="status" className="rounded-md border p-3 text-sm text-muted-foreground">
+        מרענן {label}...
+      </p>
+    );
+  }
+  return null;
+}
+
 type OperatorCreditTransaction = {
   id: string;
   amount: number;
@@ -532,7 +903,7 @@ type OperatorCreditTransaction = {
 
 function MonitoringStat({ label, value }: { label: string; value: number | string }) {
   return (
-    <Card>
+    <Card aria-label={`${label}: ${value}`}>
       <CardContent className="p-4">
         <div className="text-2xl font-semibold tabular-nums">{value}</div>
         <div className="mt-1 text-xs text-muted-foreground">{label}</div>
@@ -544,10 +915,20 @@ function MonitoringStat({ label, value }: { label: string; value: number | strin
 function OperatorMonitoringDialog({
   operator,
   overview,
+  loading,
+  refreshing,
+  error,
+  dataAvailable,
+  onRetry,
   onClose,
 }: {
   operator: Operator;
   overview: OperatorPresenceOverview | undefined;
+  loading: boolean;
+  refreshing: boolean;
+  error: boolean;
+  dataAvailable: boolean;
+  onRetry: () => void;
   onClose: () => void;
 }) {
   const heldConversations = overview?.held_conversations ?? [];
@@ -559,13 +940,53 @@ function OperatorMonitoringDialog({
           <DialogTitle className="flex items-center gap-2">
             <Activity className="h-5 w-5" /> ניטור עובד: {operator.full_name}
           </DialogTitle>
-          <DialogDescription>תצוגת מעקב בלבד. אין פעולות הקצאה או שינוי שיחה במסך זה.</DialogDescription>
+          <DialogDescription>
+            תצוגת מעקב בלבד. אין פעולות הקצאה או שינוי שיחה במסך זה.
+          </DialogDescription>
         </DialogHeader>
 
-        {!overview ? (
-          <Skeleton className="h-44" />
-        ) : (
+        {loading && (
+          <div role="status" aria-label="טוען ניטור עובד">
+            <Skeleton className="h-44" />
+          </div>
+        )}
+        {!loading && error && !dataAvailable && (
+          <ReadError
+            label="שגיאת טעינת נוכחות עובדים"
+            message="נתוני נוכחות העובד אינם זמינים כרגע."
+            retryLabel="נסה לטעון נוכחות שוב"
+            busy={refreshing}
+            onRetry={onRetry}
+          />
+        )}
+        {!loading && !error && dataAvailable && !overview && (
+          <div className="rounded-md border p-4 text-sm text-muted-foreground">
+            <p>נתוני נוכחות העובד אינם זמינים.</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={onRetry}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "מנסה שוב" : "נסה לטעון נוכחות שוב"}
+            </Button>
+          </div>
+        )}
+        {overview && (
           <div className="space-y-5">
+            {error && (
+              <ReadError
+                cached
+                label="שגיאת רענון נוכחות עובדים"
+                message="רענון נוכחות העובד נכשל. המידע השמור עדיין מוצג."
+                retryLabel="נסה לרענן נוכחות שוב"
+                busy={refreshing}
+                onRetry={onRetry}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <PresenceBadge status={overview.presence_status} />
               <span className="inline-flex items-center gap-1 text-muted-foreground">
@@ -586,10 +1007,15 @@ function OperatorMonitoringDialog({
               ) : (
                 <div className="divide-y rounded-md border">
                   {heldConversations.map((conversation) => (
-                    <div key={conversation.conversation_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+                    <div
+                      key={conversation.conversation_id}
+                      className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm"
+                    >
                       <div>
                         <div className="font-medium">{conversation.character_name ?? "דמות"}</div>
-                        <div className="text-xs text-muted-foreground">{conversation.client_display_name ?? "לקוח"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {conversation.client_display_name ?? "לקוח"}
+                        </div>
                       </div>
                       <div className="text-left text-xs text-muted-foreground">
                         <div>{conversation.status}</div>
@@ -608,10 +1034,12 @@ function OperatorMonitoringDialog({
 }
 
 function OperatorCreditsDialog({
+  adminId,
   operator,
   onClose,
   onChanged,
 }: {
+  adminId: string;
   operator: Operator;
   onClose: () => void;
   onChanged: () => void;
@@ -622,7 +1050,7 @@ function OperatorCreditsDialog({
   const [busy, setBusy] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["admin-operator-credits", operator.id],
+    queryKey: ["admin-operator-credits", adminId, operator.id],
     queryFn: async () => {
       const [walletResult, transactionsResult] = await Promise.all([
         supabase
@@ -634,7 +1062,12 @@ function OperatorCreditsDialog({
           .from("credit_transactions")
           .select("id, amount, balance_after, type, reason, created_at, message_id, metadata")
           .eq("user_id", operator.user_id)
-          .in("type", ["operator_message_payout", "message_payout", "sticker_payout", "admin_adjustment"])
+          .in("type", [
+            "operator_message_payout",
+            "message_payout",
+            "sticker_payout",
+            "admin_adjustment",
+          ])
           .order("created_at", { ascending: false })
           .limit(30),
       ]);
@@ -680,7 +1113,7 @@ function OperatorCreditsDialog({
       setAmount("");
       setReason("");
       onChanged();
-      qc.invalidateQueries({ queryKey: ["admin-operator-credits", operator.id] });
+      qc.invalidateQueries({ queryKey: ["admin-operator-credits", adminId, operator.id] });
     } finally {
       setBusy(false);
     }
@@ -691,9 +1124,7 @@ function OperatorCreditsDialog({
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
           <DialogTitle>ניהול קרדיטים - {operator.full_name}</DialogTitle>
-          <DialogDescription>
-            התאמות נרשמות בארנק העובד, ב־ledger וביומן הביקורת.
-          </DialogDescription>
+          <DialogDescription>התאמות נרשמות בארנק העובד, ב־ledger וביומן הביקורת.</DialogDescription>
         </DialogHeader>
 
         {isLoading && <Skeleton className="h-72" />}
@@ -745,8 +1176,15 @@ function OperatorCreditsDialog({
                   {data.transactions.map((transaction) => (
                     <div key={transaction.id} className="rounded-md border p-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
-                        <span className={transaction.amount >= 0 ? "font-semibold text-success" : "font-semibold text-destructive"}>
-                          {transaction.amount > 0 ? "+" : ""}{transaction.amount}
+                        <span
+                          className={
+                            transaction.amount >= 0
+                              ? "font-semibold text-success"
+                              : "font-semibold text-destructive"
+                          }
+                        >
+                          {transaction.amount > 0 ? "+" : ""}
+                          {transaction.amount}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {new Date(transaction.created_at).toLocaleString("he-IL")}
@@ -754,11 +1192,15 @@ function OperatorCreditsDialog({
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {transaction.type} · יתרה אחרי: {transaction.balance_after}
-                        {transaction.message_id && <> · הודעה: {transaction.message_id.slice(0, 8)}</>}
+                        {transaction.message_id && (
+                          <> · הודעה: {transaction.message_id.slice(0, 8)}</>
+                        )}
                       </div>
                       {transaction.reason && <p className="mt-1">{transaction.reason}</p>}
                       {getTransactionSource(transaction.metadata) && (
-                        <p className="mt-1 text-xs text-muted-foreground">מקור: {getTransactionSource(transaction.metadata)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          מקור: {getTransactionSource(transaction.metadata)}
+                        </p>
                       )}
                     </div>
                   ))}
@@ -787,11 +1229,26 @@ function getTransactionSource(metadata: unknown) {
   return typeof source === "string" ? source : null;
 }
 
-function OperatorPerformanceDialog({ operator, onClose }: { operator: Operator; onClose: () => void }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["admin-operator-performance", operator.id],
+function OperatorPerformanceDialog({
+  adminId,
+  operator,
+  onClose,
+}: {
+  adminId: string;
+  operator: Operator;
+  onClose: () => void;
+}) {
+  const performanceQuery = useQuery({
+    queryKey: ["admin-operator-performance", adminId, operator.id],
     queryFn: () => fetchOperatorPerformance(operator.id),
   });
+  const currentData =
+    performanceQuery.data?.operator?.id === operator.id ? performanceQuery.data : undefined;
+  const initialLoading = performanceQuery.isLoading && performanceQuery.data === undefined;
+  const initialError = performanceQuery.isError && performanceQuery.data === undefined;
+  const refreshError = performanceQuery.isError && currentData !== undefined;
+  const unavailable =
+    performanceQuery.isSuccess && performanceQuery.data !== undefined && !currentData;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -802,11 +1259,45 @@ function OperatorPerformanceDialog({ operator, onClose }: { operator: Operator; 
             אותם נתוני ביצועים שהעובד רואה בדף האנליטיקה האישי שלו.
           </DialogDescription>
         </DialogHeader>
-        {isLoading && <Skeleton className="h-96" />}
-        {!isLoading && error && (
-          <p className="text-sm text-destructive text-center py-8">טעינת ביצועי העובד נכשלה.</p>
+        {initialLoading && (
+          <div role="status" aria-label="טוען ביצועי עובד">
+            <Skeleton className="h-96" />
+          </div>
         )}
-        {!isLoading && data && <AnalyticsContent data={data} />}
+        {initialError && (
+          <ReadError
+            label="שגיאת טעינת ביצועי עובד"
+            message="טעינת ביצועי העובד נכשלה."
+            retryLabel="נסה לטעון שוב"
+            busy={performanceQuery.isFetching}
+            onRetry={() => void performanceQuery.refetch()}
+          />
+        )}
+        {unavailable && (
+          <div className="rounded-md border py-12 text-center text-sm text-muted-foreground">
+            לא נמצאו נתוני עובד עבור העובד שנבחר.
+          </div>
+        )}
+        {currentData && (
+          <>
+            {performanceQuery.isFetching && !refreshError && (
+              <p role="status" className="rounded-md border p-3 text-sm text-muted-foreground">
+                מרענן את ביצועי העובד...
+              </p>
+            )}
+            {refreshError && (
+              <ReadError
+                cached
+                label="שגיאת רענון ביצועי עובד"
+                message="רענון ביצועי העובד נכשל. הנתונים השמורים עדיין מוצגים."
+                retryLabel="נסה לרענן שוב"
+                busy={performanceQuery.isFetching}
+                onRetry={() => void performanceQuery.refetch()}
+              />
+            )}
+            <AnalyticsContent data={currentData} />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -847,15 +1338,21 @@ function OperatorActiveToggle({ operator, onDone }: { operator: Operator; onDone
       className="inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-xs"
       title={isProtectedAdmin ? "לא ניתן להשבית מנהל" : undefined}
     >
-      <span className="min-w-12 whitespace-nowrap text-center">{operator.is_active ? "פעיל" : "לא פעיל"}</span>
-      <Switch checked={operator.is_active} onCheckedChange={toggle} disabled={busy || isProtectedAdmin} />
+      <span className="min-w-12 whitespace-nowrap text-center">
+        {operator.is_active ? "פעיל" : "לא פעיל"}
+      </span>
+      <Switch
+        checked={operator.is_active}
+        onCheckedChange={toggle}
+        disabled={busy || isProtectedAdmin}
+      />
     </label>
   );
 }
 
-function useCharactersQuery(queryKey: string) {
+function useCharactersQuery(queryKey: string, adminId: string) {
   return useQuery({
-    queryKey: [queryKey],
+    queryKey: [queryKey, adminId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("characters")
@@ -883,17 +1380,24 @@ function CharacterChecklist({
   return (
     <div className="border rounded-md max-h-56 overflow-y-auto p-2 space-y-1">
       {visible.map((char) => (
-        <label key={char.id} className="flex items-center gap-3 p-2 rounded hover:bg-accent cursor-pointer">
+        <label
+          key={char.id}
+          className="flex items-center gap-3 p-2 rounded hover:bg-accent cursor-pointer"
+        >
           <Checkbox checked={selected.has(char.id)} onCheckedChange={() => onToggle(char.id)} />
           <div className="h-8 w-8 rounded-full bg-muted overflow-hidden">
             {char.avatar_url ? (
               <img src={char.avatar_url} alt="" className="h-full w-full object-cover" />
             ) : (
-              <div className="h-full w-full flex items-center justify-center text-xs">{char.name[0]}</div>
+              <div className="h-full w-full flex items-center justify-center text-xs">
+                {char.name[0]}
+              </div>
             )}
           </div>
           <span className="text-sm">{char.name}</span>
-          {char.is_active === false && <span className="text-xs text-muted-foreground mr-auto">לא פעילה</span>}
+          {char.is_active === false && (
+            <span className="text-xs text-muted-foreground mr-auto">לא פעילה</span>
+          )}
         </label>
       ))}
       {visible.length === 0 && (
@@ -903,9 +1407,17 @@ function CharacterChecklist({
   );
 }
 
-function CreateOperatorDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function CreateOperatorDialog({
+  adminId,
+  onClose,
+  onDone,
+}: {
+  adminId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const create = useServerFn(adminCreateOperatorUser);
-  const { data: chars, isLoading } = useCharactersQuery("admin-create-operator-chars");
+  const { data: chars, isLoading } = useCharactersQuery("admin-create-operator-chars", adminId);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -915,12 +1427,14 @@ function CreateOperatorDialog({ onClose, onDone }: { onClose: () => void; onDone
 
   const toggle = (id: string) => {
     const next = new Set(selectedChars);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelectedChars(next);
   };
 
   const submit = async () => {
-    if (!email.trim() || !password || !fullName.trim()) return toast.error("נא למלא שם, אימייל וסיסמה זמנית");
+    if (!email.trim() || !password || !fullName.trim())
+      return toast.error("נא למלא שם, אימייל וסיסמה זמנית");
     if (password.length < 8) return toast.error("הסיסמה חייבת להיות לפחות 8 תווים");
     setBusy(true);
     try {
@@ -948,7 +1462,8 @@ function CreateOperatorDialog({ onClose, onDone }: { onClose: () => void; onDone
         <DialogHeader>
           <DialogTitle>יצירת עובד חדש</DialogTitle>
           <DialogDescription>
-            יצירת משתמש Auth ועובד מתבצעת דרך server function עם בדיקת מנהל. הסיסמה זמנית וניתן לשלוח איפוס לאחר מכן.
+            יצירת משתמש Auth ועובד מתבצעת דרך server function עם בדיקת מנהל. הסיסמה זמנית וניתן
+            לשלוח איפוס לאחר מכן.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -958,11 +1473,21 @@ function CreateOperatorDialog({ onClose, onDone }: { onClose: () => void; onDone
           </div>
           <div>
             <Label>אימייל</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Input
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
           <div>
             <Label>סיסמה זמנית</Label>
-            <Input type="password" dir="ltr" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <Input
+              type="password"
+              dir="ltr"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
           </div>
           <div className="flex items-center justify-between">
             <Label>חשבון פעיל</Label>
@@ -973,22 +1498,39 @@ function CreateOperatorDialog({ onClose, onDone }: { onClose: () => void; onDone
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
-              <CharacterChecklist chars={chars ?? []} selected={selectedChars} onToggle={toggle} activeOnly />
+              <CharacterChecklist
+                chars={chars ?? []}
+                selected={selectedChars}
+                onToggle={toggle}
+                activeOnly
+              />
             )}
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "יוצר..." : "צור עובד"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "יוצר..." : "צור עובד"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function PromoteClientDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function PromoteClientDialog({
+  adminId,
+  onClose,
+  onDone,
+}: {
+  adminId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const promote = useServerFn(adminPromoteClientToOperator);
-  const { data: chars, isLoading } = useCharactersQuery("admin-promote-client-chars");
+  const { data: chars, isLoading } = useCharactersQuery("admin-promote-client-chars", adminId);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -997,7 +1539,8 @@ function PromoteClientDialog({ onClose, onDone }: { onClose: () => void; onDone:
 
   const toggle = (id: string) => {
     const next = new Set(selectedChars);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelectedChars(next);
   };
 
@@ -1034,7 +1577,12 @@ function PromoteClientDialog({ onClose, onDone }: { onClose: () => void; onDone:
         <div className="space-y-3">
           <div>
             <Label>אימייל של לקוח קיים</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Input
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
           <div>
             <Label>שם עובד</Label>
@@ -1049,13 +1597,22 @@ function PromoteClientDialog({ onClose, onDone }: { onClose: () => void; onDone:
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
-              <CharacterChecklist chars={chars ?? []} selected={selectedChars} onToggle={toggle} activeOnly />
+              <CharacterChecklist
+                chars={chars ?? []}
+                selected={selectedChars}
+                onToggle={toggle}
+                activeOnly
+              />
             )}
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "שומר..." : "הפוך לעובד"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "שומר..." : "הפוך לעובד"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1063,14 +1620,16 @@ function PromoteClientDialog({ onClose, onDone }: { onClose: () => void; onDone:
 }
 
 function CreateInviteDialog({
+  adminId,
   onClose,
   onCreated,
 }: {
+  adminId: string;
   onClose: () => void;
   onCreated: (token: string, email: string) => void;
 }) {
   const create = useServerFn(adminCreateInvite);
-  const { data: chars, isLoading } = useCharactersQuery("admin-operator-invite-chars");
+  const { data: chars, isLoading } = useCharactersQuery("admin-operator-invite-chars", adminId);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [selectedChars, setSelectedChars] = useState<Set<string>>(new Set());
@@ -1078,7 +1637,8 @@ function CreateInviteDialog({
 
   const toggle = (id: string) => {
     const next = new Set(selectedChars);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelectedChars(next);
   };
 
@@ -1087,7 +1647,11 @@ function CreateInviteDialog({
     setBusy(true);
     try {
       const result = await create({
-        data: { email: email.trim(), full_name: fullName.trim(), character_ids: Array.from(selectedChars) },
+        data: {
+          email: email.trim(),
+          full_name: fullName.trim(),
+          character_ids: Array.from(selectedChars),
+        },
       });
       toast.success("הזמנה נוצרה");
       onCreated(result.token, email.trim());
@@ -1112,27 +1676,49 @@ function CreateInviteDialog({
           </div>
           <div>
             <Label>אימייל</Label>
-            <Input dir="ltr" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Input
+              dir="ltr"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
           <div>
             <Label>שיוך לדמויות</Label>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
-              <CharacterChecklist chars={chars ?? []} selected={selectedChars} onToggle={toggle} activeOnly />
+              <CharacterChecklist
+                chars={chars ?? []}
+                selected={selectedChars}
+                onToggle={toggle}
+                activeOnly
+              />
             )}
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "יוצר..." : "צור הזמנה"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "יוצר..." : "צור הזמנה"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function InviteLinkDialog({ token, email, onClose }: { token: string; email: string; onClose: () => void }) {
+function InviteLinkDialog({
+  token,
+  email,
+  onClose,
+}: {
+  token: string;
+  email: string;
+  onClose: () => void;
+}) {
   const url = `${window.location.origin}/accept-invite/${token}`;
   const copy = async () => {
     await navigator.clipboard.writeText(url);
@@ -1145,13 +1731,20 @@ function InviteLinkDialog({ token, email, onClose }: { token: string; email: str
         <DialogHeader>
           <DialogTitle>הזמנה נוצרה</DialogTitle>
           <DialogDescription>
-            שלח את הקישור הבא אל <strong dir="ltr">{email}</strong>. שליחת מייל אוטומטית תלויה בהגדרות SMTP.
+            שלח את הקישור הבא אל <strong dir="ltr">{email}</strong>. שליחת מייל אוטומטית תלויה
+            בהגדרות SMTP.
           </DialogDescription>
         </DialogHeader>
-        <div className="p-3 bg-muted rounded-md break-all text-xs font-mono" dir="ltr">{url}</div>
+        <div className="p-3 bg-muted rounded-md break-all text-xs font-mono" dir="ltr">
+          {url}
+        </div>
         <DialogFooter>
-          <Button onClick={copy}><Copy className="h-4 w-4 ml-1" /> העתק קישור</Button>
-          <Button variant="outline" onClick={onClose}>סגור</Button>
+          <Button onClick={copy}>
+            <Copy className="h-4 w-4 ml-1" /> העתק קישור
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            סגור
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1200,7 +1793,9 @@ function EditOperatorDialog({
       <DialogContent dir="rtl">
         <DialogHeader>
           <DialogTitle>עריכת עובד</DialogTitle>
-          <DialogDescription>אימייל מנוהל דרך Supabase Auth ולכן מוצג לקריאה בלבד בשלב הזה.</DialogDescription>
+          <DialogDescription>
+            אימייל מנוהל דרך Supabase Auth ולכן מוצג לקריאה בלבד בשלב הזה.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
@@ -1213,8 +1808,13 @@ function EditOperatorDialog({
           </div>
           <div>
             <Label>סטטוס זמינות</Label>
-            <Select value={status} onValueChange={(value) => setStatus(value as Operator["availability_status"])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={status}
+              onValueChange={(value) => setStatus(value as Operator["availability_status"])}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="available">זמין</SelectItem>
                 <SelectItem value="busy">עסוק</SelectItem>
@@ -1224,12 +1824,20 @@ function EditOperatorDialog({
           </div>
           <div className="flex items-center justify-between">
             <Label>חשבון עובד פעיל</Label>
-            <Switch checked={isProtectedAdmin ? true : isActive} onCheckedChange={setIsActive} disabled={isProtectedAdmin} />
+            <Switch
+              checked={isProtectedAdmin ? true : isActive}
+              onCheckedChange={setIsActive}
+              disabled={isProtectedAdmin}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "שומר..." : "שמור"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "שומר..." : "שמור"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1237,22 +1845,28 @@ function EditOperatorDialog({
 }
 
 function AssignCharactersDialog({
+  adminId,
   operator,
   onClose,
   onDone,
 }: {
+  adminId: string;
   operator: Operator;
   onClose: () => void;
   onDone: () => void;
 }) {
   const update = useServerFn(adminUpdateOperator);
   const { data, isLoading } = useQuery({
-    queryKey: ["admin-op-chars", operator.id],
+    queryKey: ["admin-op-chars", adminId, operator.id],
     queryFn: async () => {
-      const [{ data: chars, error: charsError }, { data: assigns, error: assignsError }] = await Promise.all([
-        supabase.from("characters").select("id, name, avatar_url, is_active").order("name"),
-        supabase.from("character_operator_assignments").select("character_id").eq("operator_id", operator.id),
-      ]);
+      const [{ data: chars, error: charsError }, { data: assigns, error: assignsError }] =
+        await Promise.all([
+          supabase.from("characters").select("id, name, avatar_url, is_active").order("name"),
+          supabase
+            .from("character_operator_assignments")
+            .select("character_id")
+            .eq("operator_id", operator.id),
+        ]);
       if (charsError) throw charsError;
       if (assignsError) throw assignsError;
       return {
@@ -1266,7 +1880,8 @@ function AssignCharactersDialog({
   const current = selected ?? data?.assigned ?? new Set<string>();
   const toggle = (id: string) => {
     const next = new Set(current);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelected(next);
   };
 
@@ -1297,10 +1912,14 @@ function AssignCharactersDialog({
           <DialogDescription>השיוך הזה הוא מקור האמת ל-Shared Inbox.</DialogDescription>
         </DialogHeader>
         {isLoading && <Skeleton className="h-40" />}
-        {!isLoading && data && <CharacterChecklist chars={data.chars} selected={current} onToggle={toggle} />}
+        {!isLoading && data && (
+          <CharacterChecklist chars={data.chars} selected={current} onToggle={toggle} />
+        )}
         <DialogFooter>
           <Button onClick={save}>שמור</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1335,12 +1954,17 @@ function ResetPasswordDialog({ operator, onClose }: { operator: Operator; onClos
         <DialogHeader>
           <DialogTitle>איפוס סיסמה</DialogTitle>
           <DialogDescription>
-            ייווצר קישור איפוס עבור {operator.email ?? operator.full_name}. אם Supabase מחזיר קישור פעולה, הוא יועתק ללוח.
+            ייווצר קישור איפוס עבור {operator.email ?? operator.full_name}. אם Supabase מחזיר קישור
+            פעולה, הוא יועתק ללוח.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "שולח..." : "שלח איפוס"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "שולח..." : "שלח איפוס"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1380,12 +2004,17 @@ function ArchiveOperatorConfirm({
         <AlertDialogHeader>
           <AlertDialogTitle>השבתת עובד</AlertDialogTitle>
           <AlertDialogDescription>
-            העובד {operator.full_name} יישאר בהיסטוריה, בהודעות, בניקוד ובהערות, אבל לא יוכל לפעול כעובד פעיל.
+            העובד {operator.full_name} יישאר בהיסטוריה, בהודעות, בניקוד ובהערות, אבל לא יוכל לפעול
+            כעובד פעיל.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>ביטול</AlertDialogCancel>
-          <AlertDialogAction onClick={submit} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction
+            onClick={submit}
+            disabled={busy}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             {busy ? "משבית..." : "השבת עובד"}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -1427,8 +2056,8 @@ function RestoreOperatorConfirm({
         <AlertDialogHeader>
           <AlertDialogTitle>שחזור עובד</AlertDialogTitle>
           <AlertDialogDescription>
-            העובד {operator.full_name} יחזור לרשימת העובדים הרגילה, אך יישאר לא פעיל עד שתפעיל אותו ידנית.
-            כל ההיסטוריה, ההודעות, הניקוד וההערות נשמרים ללא שינוי.
+            העובד {operator.full_name} יחזור לרשימת העובדים הרגילה, אך יישאר לא פעיל עד שתפעיל אותו
+            ידנית. כל ההיסטוריה, ההודעות, הניקוד וההערות נשמרים ללא שינוי.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1473,7 +2102,8 @@ function ConvertOperatorConfirm({
         <AlertDialogHeader>
           <AlertDialogTitle>הפיכת עובד ללקוח</AlertDialogTitle>
           <AlertDialogDescription>
-            הפעולה תסיר את תפקיד העובד, תוודא שיש פרופיל לקוח, ותשאיר את כל ההיסטוריה ללא מחיקה פיזית.
+            הפעולה תסיר את תפקיד העובד, תוודא שיש פרופיל לקוח, ותשאיר את כל ההיסטוריה ללא מחיקה
+            פיזית.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
