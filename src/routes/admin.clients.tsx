@@ -868,6 +868,13 @@ function EditClientDialog({
     interests: string[];
     preferences: string | null;
   } | null>(null);
+  const initialForm = useRef<{
+    displayName: string;
+    age: string;
+    gender: string;
+    interests: string;
+    preferences: string;
+  } | null>(null);
 
   useEffect(
     () => () => {
@@ -887,32 +894,44 @@ function EditClientDialog({
       interests: data.client_profile.interests ?? [],
       preferences: data.client_profile.conversation_preferences,
     };
+    const formSnapshot = {
+      displayName: snapshot.displayName,
+      age: snapshot.age === null ? "" : String(snapshot.age),
+      gender: snapshot.gender ?? "",
+      interests: snapshot.interests.join(", "),
+      preferences: snapshot.preferences ?? "",
+    };
     original.current = snapshot;
+    initialForm.current = formSnapshot;
     initialized.current = true;
-    setDisplayName(snapshot.displayName);
+    setDisplayName(formSnapshot.displayName);
     setIsActive(snapshot.isActive);
-    setAge(snapshot.age === null ? "" : String(snapshot.age));
-    setGender(snapshot.gender ?? "");
-    setInterests(snapshot.interests.join(", "));
-    setPreferences(snapshot.preferences ?? "");
+    setAge(formSnapshot.age);
+    setGender(formSnapshot.gender);
+    setInterests(formSnapshot.interests);
+    setPreferences(formSnapshot.preferences);
   }, [detailsQuery.data]);
 
   const submit = async () => {
-    if (submitInFlight.current || !initialized.current || !original.current) return;
-    const nextName = displayName.trim();
-    const nextAge = age === "" ? null : Number(age);
-    const nextGender = gender.trim() || null;
-    const nextInterests = interests
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const nextPreferences = preferences.trim() || null;
+    if (submitInFlight.current || !initialized.current || !original.current || !initialForm.current)
+      return;
     const snapshot = original.current;
-    const changedName = nextName !== snapshot.displayName;
-    const changedAge = nextAge !== snapshot.age;
-    const changedGender = nextGender !== snapshot.gender;
-    const changedInterests = JSON.stringify(nextInterests) !== JSON.stringify(snapshot.interests);
-    const changedPreferences = nextPreferences !== snapshot.preferences;
+    const formSnapshot = initialForm.current;
+    const changedName = displayName !== formSnapshot.displayName;
+    const changedAge = age !== formSnapshot.age;
+    const changedGender = gender !== formSnapshot.gender;
+    const changedInterests = interests !== formSnapshot.interests;
+    const changedPreferences = preferences !== formSnapshot.preferences;
+    const nextName = changedName ? displayName.trim() : snapshot.displayName;
+    const nextAge = changedAge ? (age === "" ? null : Number(age)) : snapshot.age;
+    const nextGender = changedGender ? gender.trim() || null : snapshot.gender;
+    const nextInterests = changedInterests
+      ? interests
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : snapshot.interests;
+    const nextPreferences = changedPreferences ? preferences.trim() || null : snapshot.preferences;
 
     if (changedName && (nextName.length < 1 || nextName.length > 120)) {
       toast.error("שם התצוגה חייב להכיל 1–120 תווים");
@@ -1283,7 +1302,12 @@ function ArchiveClientConfirm({
   };
 
   return (
-    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !inFlight.current) onClose();
+      }}
+    >
       <AlertDialogContent dir="rtl">
         <AlertDialogHeader>
           <AlertDialogTitle>ארכוב לקוח</AlertDialogTitle>
@@ -1293,9 +1317,12 @@ function ArchiveClientConfirm({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>ביטול</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>ביטול</AlertDialogCancel>
           <AlertDialogAction
-            onClick={submit}
+            onClick={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
             disabled={busy}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
@@ -1425,7 +1452,12 @@ function RestoreClientConfirm({
   };
 
   return (
-    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !inFlight.current) onClose();
+      }}
+    >
       <AlertDialogContent dir="rtl">
         <AlertDialogHeader>
           <AlertDialogTitle>שחזור לקוח</AlertDialogTitle>
@@ -1435,8 +1467,14 @@ function RestoreClientConfirm({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>ביטול</AlertDialogCancel>
-          <AlertDialogAction onClick={submit} disabled={busy}>
+          <AlertDialogCancel disabled={busy}>ביטול</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+            disabled={busy}
+          >
             {busy ? "משחזר..." : "שחזר לקוח"}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -1489,7 +1527,12 @@ function PromoteClientConfirm({
   };
 
   return (
-    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !inFlight.current) onClose();
+      }}
+    >
       <AlertDialogContent dir="rtl">
         <AlertDialogHeader>
           <AlertDialogTitle>הפיכת לקוח לעובד</AlertDialogTitle>
@@ -1499,8 +1542,14 @@ function PromoteClientConfirm({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>ביטול</AlertDialogCancel>
-          <AlertDialogAction onClick={submit} disabled={busy}>
+          <AlertDialogCancel disabled={busy}>ביטול</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+            disabled={busy}
+          >
             {busy ? "מעביר..." : "הפוך לעובד"}
           </AlertDialogAction>
         </AlertDialogFooter>

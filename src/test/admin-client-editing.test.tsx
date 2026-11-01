@@ -81,7 +81,12 @@ function makeDetails(client = a, hasProfile = true) {
   return {
     profile: client,
     client_profile: hasProfile
-      ? { age: null, gender: "legacy-value", interests: ["מוזיקה"], conversation_preferences: null }
+      ? {
+          age: null as number | null,
+          gender: "legacy-value" as string | null,
+          interests: ["מוזיקה"] as string[],
+          conversation_preferences: null as string | null,
+        }
       : null,
     wallet: { balance: 25, lifetime_earned: 40, lifetime_spent: 15, updated_at: null },
     conversations: [],
@@ -144,6 +149,59 @@ beforeEach(() => {
 });
 
 describe("admin client editing", () => {
+  it("does not normalize untouched legacy strings or comma-bearing interests into writes", async () => {
+    const details = makeDetails();
+    details.client_profile = {
+      age: null,
+      gender: "",
+      interests: ["rock, roll"],
+      conversation_preferences: "  original  ",
+    };
+    io.details.mockResolvedValue(details);
+    mount();
+    const dialog = await open();
+    fireEvent.change(await within(dialog).findByRole("textbox", { name: "שם תצוגה" }), {
+      target: { value: "new name" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+
+    await waitFor(() => expect(io.update).toHaveBeenCalledTimes(1));
+    expect(io.update).toHaveBeenCalledWith({
+      data: { user_id: a.user_id, display_name: "new name" },
+    });
+  });
+
+  it("treats fields returned to their original form representation as unchanged", async () => {
+    const details = makeDetails();
+    details.client_profile = {
+      age: null,
+      gender: "",
+      interests: ["rock, roll"],
+      conversation_preferences: "  original  ",
+    };
+    io.details.mockResolvedValue(details);
+    mount();
+    const dialog = await open();
+    const name = await within(dialog).findByRole("textbox", { name: "שם תצוגה" });
+    const gender = within(dialog).getByRole("textbox", { name: "מגדר" });
+    const interests = within(dialog).getByRole("textbox", { name: "תחומי עניין" });
+    const preferences = within(dialog).getByRole("textbox", { name: "העדפות שיחה" });
+
+    fireEvent.change(gender, { target: { value: "temporary" } });
+    fireEvent.change(gender, { target: { value: "" } });
+    fireEvent.change(interests, { target: { value: "temporary" } });
+    fireEvent.change(interests, { target: { value: "rock, roll" } });
+    fireEvent.change(preferences, { target: { value: "temporary" } });
+    fireEvent.change(preferences, { target: { value: "  original  " } });
+    fireEvent.change(name, { target: { value: "renamed" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+
+    await waitFor(() => expect(io.update).toHaveBeenCalledTimes(1));
+    expect(io.update).toHaveBeenCalledWith({
+      data: { user_id: a.user_id, display_name: "renamed" },
+    });
+  });
+
   it("blocks save until details load, preserves a dirty draft on refetch and sends only changed fields", async () => {
     const first = deferred<ReturnType<typeof makeDetails>>();
     io.details

@@ -19,6 +19,8 @@
 - Save sends only changed optional fields, preserving untouched `null` and legacy values. Client-side validation mirrors the existing server contract: display name 1–120, integer age 18–120 or null, gender 80, up to 30 interests of 60 characters, and preferences 1000.
 - Synchronous double-submit is blocked before rerender. A returned `{ ok: true }` is required for success; mutation failure preserves the draft. A successful mutation is not relabeled as failed if subsequent invalidation/refetch fails.
 - Existing status, credit, archive, PII archive, restore, promotion and reset flows retain their endpoints, payloads and confirmations. Local busy/identity guards suppress late UI side effects. Clipboard failure is reported and never produces a false “copied” success.
+- F1 correction: archive, restore and promotion confirmations now retain ownership of their real Radix `AlertDialog` while a mutation is pending. Success closes and refreshes, failure leaves an enabled manual retry, and logout/admin replacement still discards late UI side effects.
+- F2 correction: edit dirtiness is determined from the initial form representation before normalization. Untouched empty, whitespace-bearing, legacy and comma-bearing values stay outside the payload; normalization and validation run only for fields actually edited.
 
 ## Verification evidence
 
@@ -30,6 +32,10 @@
 - Required focused regression command: `58/58` passed across client workspace/editing, reports workflow and operator workspace.
 - Final verification on the delivery snapshot: format, changed-file lint and typecheck passed; the required focused command passed `58/58` tests; full Vitest passed `277` tests with `24` existing skips (`19` passed / `6` skipped files); and the client/SSR production build passed.
 - Existing non-failing notices remained visible: jsdom document navigation, Node `punycode` deprecation and the Vite chunk-size advisory. No assertion, skip, timeout or dependency setting was changed to obtain a pass.
+- Correction RED: `8` failures reproduced the reviewed gaps (`6` confirmation lifecycle assertions and `2` untouched-field payload assertions); the other `17` tests passed.
+- Correction GREEN: the client workspace/editing suites passed `28/28`, including delayed success, failure/manual retry, logout and admin replacement for each of archive/restore/promotion.
+- Correction delivery snapshot: the required four-suite command passed `72/72`; full Vitest passed `291` tests with `24` existing skips (`19` passed / `6` skipped files); format, changed-file lint, typecheck and the client/SSR build passed.
+- During correction verification, the first format check reported the route and workspace test, then passed after scoped Prettier formatting. The first typecheck exposed a too-narrow nullable test fixture; the fixture was aligned with the server data shape and the rerun passed.
 
 ## Boundaries and remaining acceptance
 

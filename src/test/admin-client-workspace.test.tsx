@@ -150,10 +150,12 @@ function makeDetails(profile: typeof clientA | null = clientA) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((yes) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
     resolve = yes;
+    reject = no;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 function qc() {
   return new QueryClient({
@@ -174,6 +176,49 @@ function mount(client = qc()) {
     );
   return { ...view, queryClient: client, rerender };
 }
+
+const confirmationCases = [
+  {
+    label: "archive",
+    confirmName: "ארכב לקוח",
+    busyName: "מאורכב...",
+    successMessage: "הלקוח אורכב",
+    request: () => io.archive,
+    open: async () => {
+      await screen.findByText(clientA.display_name);
+      fireEvent.click(screen.getAllByTitle("ארכוב לקוח")[0]);
+      return screen.findByRole("alertdialog");
+    },
+  },
+  {
+    label: "restore",
+    confirmName: "שחזר לקוח",
+    busyName: "משחזר...",
+    successMessage: "הלקוח שוחזר לרשימה הרגילה כלא פעיל",
+    request: () => io.restore,
+    open: async () => {
+      await screen.findByText(clientA.display_name);
+      fireEvent.click(screen.getByRole("switch", { name: "הצג לקוחות שנמחקו בלבד" }));
+      await screen.findByText(archived.display_name);
+      fireEvent.click(screen.getByTitle("שחזור לקוח"));
+      return screen.findByRole("alertdialog");
+    },
+  },
+  {
+    label: "promote",
+    confirmName: "הפוך לעובד",
+    busyName: "מעביר...",
+    successMessage: "הלקוח הועבר לתפקיד עובד",
+    request: () => io.promote,
+    open: async () => {
+      await screen.findByText(clientA.display_name);
+      fireEvent.click(screen.getAllByTitle("פרטי לקוח")[0]);
+      await screen.findByText("הרשמה הושלמה");
+      fireEvent.click(screen.getByRole("button", { name: "הפוך לעובד" }));
+      return screen.findByRole("alertdialog");
+    },
+  },
+] as const;
 
 beforeEach(() => {
   Object.assign(io.auth, {
@@ -202,6 +247,102 @@ beforeEach(() => {
 });
 
 describe("admin client workspace", () => {
+  it.each(confirmationCases)(
+    "$label confirmation stays mounted until success and then refreshes once",
+    async ({ confirmName, busyName, successMessage, request, open }) => {
+      const pending = deferred<{ ok: true }>();
+      request().mockReturnValueOnce(pending.promise);
+      mount();
+      const dialog = await open();
+      const listCallsBeforeMutation = io.list.mock.calls.length;
+
+      fireEvent.click(within(dialog).getByRole("button", { name: confirmName }));
+
+      expect(request()).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: busyName })).toBeDisabled();
+      pending.resolve({ ok: true });
+      await act(async () => pending.promise);
+
+      await waitFor(() =>
+        expect(io.list.mock.calls.length).toBeGreaterThan(listCallsBeforeMutation),
+      );
+      expect(io.success).toHaveBeenCalledWith(successMessage);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(confirmationCases)(
+    "$label confirmation reports failure and remains available for a manual retry",
+    async ({ confirmName, request, open }) => {
+      const pending = deferred<{ ok: true }>();
+      request().mockReturnValueOnce(pending.promise);
+      mount();
+      const dialog = await open();
+      const listCallsBeforeMutation = io.list.mock.calls.length;
+
+      fireEvent.click(within(dialog).getByRole("button", { name: confirmName }));
+      pending.reject(new Error("הפעולה נכשלה"));
+      await act(async () => pending.promise.catch(() => undefined));
+
+      expect(request()).toHaveBeenCalledTimes(1);
+      expect(io.error).toHaveBeenCalledWith("הפעולה נכשלה");
+      expect(io.list).toHaveBeenCalledTimes(listCallsBeforeMutation);
+      expect(
+        within(screen.getByRole("alertdialog")).getByRole("button", { name: confirmName }),
+      ).toBeEnabled();
+    },
+  );
+
+  it.each(confirmationCases)(
+    "$label pending completion has no late side effects after logout",
+    async ({ confirmName, request, open }) => {
+      const pending = deferred<{ ok: true }>();
+      request().mockReturnValueOnce(pending.promise);
+      const view = mount();
+      const dialog = await open();
+      fireEvent.click(within(dialog).getByRole("button", { name: confirmName }));
+      expect(request()).toHaveBeenCalledTimes(1);
+
+      Object.assign(io.auth, { sessionUserId: null, userId: null, role: null });
+      view.rerender();
+      expect(screen.getByRole("status")).toHaveTextContent("נדרש חיבור מנהל מאומת");
+      const listCallsAfterIdentityLoss = io.list.mock.calls.length;
+      pending.resolve({ ok: true });
+      await act(async () => pending.promise);
+
+      expect(io.success).not.toHaveBeenCalled();
+      expect(io.list).toHaveBeenCalledTimes(listCallsAfterIdentityLoss);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(confirmationCases)(
+    "$label pending completion has no late side effects after admin replacement",
+    async ({ confirmName, request, open }) => {
+      const pending = deferred<{ ok: true }>();
+      request().mockReturnValueOnce(pending.promise);
+      const view = mount();
+      const dialog = await open();
+      fireEvent.click(within(dialog).getByRole("button", { name: confirmName }));
+      expect(request()).toHaveBeenCalledTimes(1);
+
+      Object.assign(io.auth, { sessionUserId: "admin-b", userId: "admin-b", role: "admin" });
+      const listCallsBeforeReplacement = io.list.mock.calls.length;
+      view.rerender();
+      await waitFor(() =>
+        expect(io.list.mock.calls.length).toBeGreaterThan(listCallsBeforeReplacement),
+      );
+      const listCallsAfterReplacement = io.list.mock.calls.length;
+      pending.resolve({ ok: true });
+      await act(async () => pending.promise);
+
+      expect(io.success).not.toHaveBeenCalled();
+      expect(io.list).toHaveBeenCalledTimes(listCallsAfterReplacement);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    },
+  );
+
   it("waits for a matching admin and isolates admin B from a pending admin A read", async () => {
     io.auth.loading = true;
     const view = mount();
