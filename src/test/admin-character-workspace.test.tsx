@@ -12,7 +12,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-type Reply<T = unknown> = { data: T; error: unknown };
+type Reply<T = unknown> = { data: T; error: unknown; status?: number };
 type Character = {
   id: string;
   name: string;
@@ -219,6 +219,11 @@ async function openEdit(name = character.name) {
   return await screen.findByRole("dialog", { name: `עריכת ${name}` });
 }
 
+async function openCreate() {
+  fireEvent.click(await screen.findByRole("button", { name: "דמות חדשה" }));
+  return await screen.findByRole("dialog", { name: "דמות חדשה" });
+}
+
 beforeAll(() => {
   window.scrollTo = vi.fn();
   globalThis.ResizeObserver = class ResizeObserver {
@@ -269,6 +274,56 @@ describe("admin character workspace", () => {
     expect(screen.queryByText("אין דמויות עדיין")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "נסה שוב לטעון דמויות" }));
     expect(await screen.findByText(character.name)).toBeInTheDocument();
+  });
+
+  it("keeps cached rows and an open draft visible when a background refresh fails, then clears the warning after retry", async () => {
+    const view = mount();
+    const dialog = await openEdit();
+    const name = within(dialog).getByLabelText("שם *");
+    fireEvent.change(name, { target: { value: "טיוטה בזמן כשל רענון" } });
+    io.characters.mockResolvedValueOnce({
+      data: null as never,
+      error: new Error("background refresh"),
+    });
+    await act(async () => {
+      await view.qc.invalidateQueries({ queryKey: ["admin-characters", "admin-a"] });
+    });
+    expect(
+      view.container.querySelector(`article[aria-label="${character.name}"]`),
+    ).toBeInTheDocument();
+    expect(name).toHaveValue("טיוטה בזמן כשל רענון");
+    expect(await within(view.container).findByRole("alert", { hidden: true })).toHaveTextContent(
+      "רענון רשימת הדמויות נכשל",
+    );
+    io.characters.mockResolvedValueOnce({ data: [character, second], error: null });
+    fireEvent.click(
+      within(view.container).getByRole("button", {
+        name: "נסה שוב לרענן דמויות",
+        hidden: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("רענון רשימת הדמויות נכשל")).not.toBeInTheDocument(),
+    );
+    expect(name).toHaveValue("טיוטה בזמן כשל רענון");
+  });
+
+  it("does not carry a cached refresh failure into a different admin identity", async () => {
+    const view = mount();
+    await screen.findByRole("article", { name: character.name });
+    view.qc.setQueryData(["admin-characters", "admin-b"], [second]);
+    io.characters.mockResolvedValueOnce({ data: null as never, error: new Error("admin-a") });
+    await act(async () => {
+      await view.qc.invalidateQueries({ queryKey: ["admin-characters", "admin-a"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("רענון רשימת הדמויות נכשל");
+    io.characters.mockResolvedValueOnce({ data: [second], error: null });
+    io.sessionId = io.userId = "admin-b";
+    view.rerenderAuth();
+    expect(await screen.findByRole("article", { name: second.name })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("רענון רשימת הדמויות נכשל")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps the list when one counter fails and retries that counter independently", async () => {
@@ -353,7 +408,10 @@ describe("admin character workspace", () => {
     const dialog = await openEdit();
     fireEvent.change(within(dialog).getByLabelText("שם *"), { target: { value: "שם מעודכן" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("הדמות נשמרה, אך רענון הרשימה נכשל");
+    const warning = await screen.findByRole("alert");
+    expect(warning).toHaveTextContent("הדמות נשמרה, אך רענון הרשימה נכשל");
+    expect(screen.getAllByText("הדמות נשמרה, אך רענון הרשימה נכשל")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "נסה שוב לרענן דמויות" })).toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: `עריכת ${character.name}` }),
     ).not.toBeInTheDocument();
@@ -390,22 +448,131 @@ describe("admin character workspace", () => {
     );
   });
 
-  it("blocks ambiguous create retry until the list is checked", async () => {
+  it("keeps a rejected create attempt immutable and unresolved after an existing-name check", async () => {
     io.insert.mockRejectedValueOnce(new Error("timeout"));
+    io.characters.mockResolvedValueOnce({ data: [character], error: null }).mockResolvedValueOnce({
+      data: [{ ...character, name: "דמות מקורית" }],
+      error: null,
+    });
+    mount();
+    const dialog = await openCreate();
+    const name = within(dialog).getByLabelText("שם *");
+    fireEvent.change(name, { target: { value: "דמות מקורית" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("דמות מקורית");
+    fireEvent.change(name, { target: { value: "שם טיוטה חדש" } });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("דמות מקורית");
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "בדוק את הרשימה לקבלת מידע נוסף" }));
+    expect(await within(dialog).findByText(/נמצאה רשומה.*אין אפשרות לוודא/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "ביטול" }));
+    expect(screen.queryByRole("dialog", { name: "דמות חדשה" })).not.toBeInTheDocument();
+    expect(io.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a resolved status-zero transport error as an ambiguous create", async () => {
+    io.insert.mockResolvedValueOnce({
+      data: null,
+      error: { message: "TypeError: Failed to fetch" },
+      status: 0,
+    });
+    mount();
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות transport" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("תוצאת יצירת");
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    expect(io.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an explicit SQL rejection retryable instead of marking it ambiguous", async () => {
+    io.insert.mockResolvedValueOnce({ data: null, error: new Error("duplicate"), status: 409 });
+    mount();
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות דחויה" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("שמירת הדמות נכשלה");
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeEnabled();
+    expect(within(dialog).queryByText(/תוצאת יצירת/)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    await waitFor(() => expect(io.insert).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps a malformed successful create result ambiguous", async () => {
+    io.insert.mockResolvedValueOnce({ data: {}, error: null, status: 201 });
+    mount();
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות ללא מזהה" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("תוצאת יצירת");
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
+  });
+
+  it("does not treat absence from the loaded list as proof that an ambiguous create failed", async () => {
+    io.insert.mockResolvedValueOnce({ data: null, error: new Error("fetch"), status: 0 });
     io.characters
       .mockResolvedValueOnce({ data: [character], error: null })
       .mockResolvedValueOnce({ data: [character], error: null });
     mount();
-    fireEvent.click(await screen.findByRole("button", { name: "דמות חדשה" }));
-    const dialog = await screen.findByRole("dialog", { name: "דמות חדשה" });
-    fireEvent.change(within(dialog).getByLabelText("שם *"), { target: { value: "דמות חדשה" } });
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות שאינה בתוצאה החלקית" },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("לא ידוע אם הדמות נוצרה");
+    await within(dialog).findByRole("alert");
+    fireEvent.click(within(dialog).getByRole("button", { name: "בדוק את הרשימה לקבלת מידע נוסף" }));
+    expect(await within(dialog).findByText(/לא נמצאה התאמה.*אינה הוכחה/)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "בדוק את הרשימה לפני ניסיון נוסף" }),
-    );
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "שמור" })).toBeEnabled());
+    expect(io.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an ambiguous create blocked when the list check fails", async () => {
+    io.insert.mockRejectedValueOnce(new Error("timeout"));
+    io.characters
+      .mockResolvedValueOnce({ data: [character], error: null })
+      .mockResolvedValueOnce({ data: null as never, error: new Error("list unavailable") });
+    mount();
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות לא ודאית" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    await within(dialog).findByRole("alert");
+    fireEvent.click(within(dialog).getByRole("button", { name: "בדוק את הרשימה לקבלת מידע נוסף" }));
+    expect(await within(dialog).findByText(/בדיקת הרשימה נכשלה/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "שמור" })).toBeDisabled();
+    expect(io.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops an ambiguous-create list-check completion after an admin identity change", async () => {
+    const pending = deferred<Reply<Character[]>>();
+    io.insert.mockRejectedValueOnce(new Error("timeout"));
+    io.characters
+      .mockResolvedValueOnce({ data: [character], error: null })
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({ data: [second], error: null });
+    const view = mount();
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("שם *"), {
+      target: { value: "דמות זהות ישנה" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "שמור" }));
+    await within(dialog).findByRole("alert");
+    fireEvent.click(within(dialog).getByRole("button", { name: "בדוק את הרשימה לקבלת מידע נוסף" }));
+    io.sessionId = io.userId = "admin-b";
+    view.rerenderAuth();
+    await act(async () => pending.resolve({ data: [], error: null }));
+    expect(screen.queryByRole("dialog", { name: "דמות חדשה" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/לא נמצאה התאמה/)).not.toBeInTheDocument();
+    expect(io.insert).toHaveBeenCalledTimes(1);
   });
 
   it("creates a character with the existing defaults and verifies the returned id", async () => {

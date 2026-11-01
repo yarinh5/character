@@ -62,7 +62,8 @@ type CharRow = {
 };
 type EditableKey = Exclude<keyof CharRow, "id">;
 type EditingState = { character: Partial<CharRow>; instance: number };
-type CreateCheck = "clear" | "possible-match" | "error";
+type CreateCheck = "no-match" | "possible-match" | "error";
+type UncertainCreateAttempt = Readonly<{ name: string }>;
 
 const availabilityOptions = [
   { value: "available", label: "זמין" },
@@ -156,6 +157,14 @@ function CharacterWorkspace({ adminId }: { adminId: string }) {
     queryFn: () => readCountMap("conversations", ids),
     enabled: listQuery.data !== undefined && ids.length > 0,
   });
+  const listRefreshMessage =
+    listQuery.data && listQuery.isError
+      ? refreshWarning || "רענון רשימת הדמויות נכשל. הנתונים השמורים עדיין מוצגים."
+      : refreshWarning;
+
+  useEffect(() => {
+    if (listQuery.data && !listQuery.isError) setRefreshWarning("");
+  }, [listQuery.dataUpdatedAt, listQuery.isError, listQuery.data]);
 
   const normalizedSearch = search.trim().toLocaleLowerCase("he");
   const filtered = characters.filter((character) => {
@@ -208,7 +217,7 @@ function CharacterWorkspace({ adminId }: { adminId: string }) {
       (character) => character.name.trim().toLocaleLowerCase("he") === name.toLocaleLowerCase("he"),
     )
       ? "possible-match"
-      : "clear";
+      : "no-match";
   };
   const toggleVisibility = async (character: CharRow) => {
     const lockKey = `character:${character.id}`;
@@ -320,7 +329,13 @@ function CharacterWorkspace({ adminId }: { adminId: string }) {
           </Button>
         </div>
       )}
-      {refreshWarning && <Message role="alert">{refreshWarning}</Message>}
+      {listRefreshMessage && (
+        <RetryMessage
+          label={listRefreshMessage}
+          button="נסה שוב לרענן דמויות"
+          onRetry={() => void refreshList()}
+        />
+      )}
       {assignmentsQuery.isError && characters.length > 0 && (
         <RetryMessage
           label="מוני העובדים אינם זמינים כרגע."
@@ -478,14 +493,6 @@ function FilterSelect({
   );
 }
 
-function Message({ role, children }: { role: "alert" | "status"; children: React.ReactNode }) {
-  return (
-    <div role={role} className="rounded-md border p-3 text-sm">
-      {children}
-    </div>
-  );
-}
-
 function RetryMessage({
   label,
   button,
@@ -583,7 +590,8 @@ function CharacterDialog({
   const [cityToCreate, setCityToCreate] = useState<string | null>(null);
   const [creatingCity, setCreatingCity] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [createUncertain, setCreateUncertain] = useState(false);
+  const [uncertainCreateAttempt, setUncertainCreateAttempt] =
+    useState<UncertainCreateAttempt | null>(null);
   const [createCheckMessage, setCreateCheckMessage] = useState("");
   const isNew = !character.id;
   const operationKey = isNew ? `character:create:${adminId}` : `character:${character.id}`;
@@ -713,7 +721,7 @@ function CharacterDialog({
   };
 
   const submit = async () => {
-    if (locks.current.has(operationKey) || avatarUploading || createUncertain) return;
+    if (locks.current.has(operationKey) || avatarUploading || uncertainCreateAttempt) return;
     if (!form.name?.trim()) {
       toast.error("שם דמות חובה");
       return;
@@ -727,8 +735,17 @@ function CharacterDialog({
     setBusy(true);
     setActionError("");
     const payload = buildPayload();
+    const createAttempt: UncertainCreateAttempt | null = isNew
+      ? Object.freeze({ name: form.name.trim() })
+      : null;
+    const markCreateUncertain = () => {
+      if (!alive.current || !createAttempt) return;
+      setUncertainCreateAttempt(createAttempt);
+      setActionError("");
+      setCreateCheckMessage("");
+    };
     try {
-      let response: { data: { id?: string } | null; error: unknown };
+      let response: { data: { id?: string } | null; error: unknown; status?: number };
       try {
         const createPayload: TablesInsert<"characters"> = {
           ...payload,
@@ -743,16 +760,27 @@ function CharacterDialog({
               .select("id")
               .maybeSingle();
       } catch (error) {
-        if (isNew && alive.current) {
-          setCreateUncertain(true);
-          setActionError("לא ידוע אם הדמות נוצרה. יש לבדוק את הרשימה לפני ניסיון יצירה נוסף.");
+        if (isNew) {
+          markCreateUncertain();
           return;
         }
         throw error;
       }
-      const expectedId = isNew ? response.data?.id : character.id;
-      if (response.error || !response.data?.id || response.data.id !== expectedId)
+      if (isNew) {
+        if (response.error) {
+          if (response.status === 0) {
+            markCreateUncertain();
+            return;
+          }
+          throw response.error;
+        }
+        if (typeof response.data?.id !== "string" || !response.data.id) {
+          markCreateUncertain();
+          return;
+        }
+      } else if (response.error || response.data?.id !== character.id) {
         throw response.error ?? new Error("invalid_character_result");
+      }
       if (!alive.current) return;
       toast.success(isNew ? "דמות נוצרה" : "הדמות עודכנה");
       await onSaved();
@@ -771,19 +799,20 @@ function CharacterDialog({
   };
 
   const verifyAmbiguousCreate = async () => {
-    if (!form.name?.trim() || busy) return;
+    if (!uncertainCreateAttempt || busy) return;
     setBusy(true);
-    const result = await onCheckCreate(form.name.trim());
+    setCreateCheckMessage("");
+    const result = await onCheckCreate(uncertainCreateAttempt.name);
     if (!alive.current) return;
     setBusy(false);
-    if (result === "clear") {
-      setCreateUncertain(false);
-      setActionError("");
-      setCreateCheckMessage("הרשימה נבדקה. ניתן לנסות ליצור שוב.");
-    } else if (result === "possible-match") {
-      setActionError("נמצאה דמות בשם זה. יש לבדוק אותה לפני יצירה נוספת.");
+    if (result === "possible-match") {
+      setCreateCheckMessage(
+        "נמצאה רשומה באותו שם בנתונים הטעונים; אין אפשרות לוודא שהיא נוצרה בניסיון הזה.",
+      );
+    } else if (result === "no-match") {
+      setCreateCheckMessage("לא נמצאה התאמה בנתונים הטעונים; תוצאה זו אינה הוכחה שהיצירה נכשלה.");
     } else {
-      setActionError("בדיקת הרשימה נכשלה. אין לנסות ליצור שוב עדיין.");
+      setCreateCheckMessage("בדיקת הרשימה נכשלה. תוצאת היצירה עדיין אינה ידועה.");
     }
   };
 
@@ -808,6 +837,12 @@ function CharacterDialog({
           {actionError && (
             <p role="alert" className="text-sm text-destructive">
               {actionError}
+            </p>
+          )}
+          {uncertainCreateAttempt && (
+            <p role="alert" className="text-sm text-destructive">
+              תוצאת יצירת &quot;{uncertainCreateAttempt.name}&quot; אינה ידועה. אין לנסות ליצור שוב
+              מתוך הטופס הזה עד לבירור מתאים.
             </p>
           )}
           {createCheckMessage && <p role="status">{createCheckMessage}</p>}
@@ -1001,13 +1036,13 @@ function CharacterDialog({
         <DialogFooter className="gap-2 sm:justify-start">
           <Button
             onClick={() => void submit()}
-            disabled={busy || avatarUploading || createUncertain}
+            disabled={busy || avatarUploading || uncertainCreateAttempt !== null}
           >
             {busy ? "שומר..." : "שמור"}
           </Button>
-          {createUncertain && (
+          {uncertainCreateAttempt && (
             <Button type="button" variant="outline" onClick={() => void verifyAmbiguousCreate()}>
-              בדוק את הרשימה לפני ניסיון נוסף
+              בדוק את הרשימה לקבלת מידע נוסף
             </Button>
           )}
           <Button
