@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import { StrictMode, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +117,17 @@ function mount(client = makeClient()) {
   };
 }
 
+function mountStrict(client = makeClient()) {
+  const view = render(
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <Page />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+  return { ...view, client };
+}
+
 beforeEach(() => {
   Object.assign(io.auth, {
     loading: false,
@@ -175,6 +186,16 @@ describe("client character profile", () => {
     });
     mount();
     expect(await screen.findByRole("heading", { name: "מאיה" })).toBeInTheDocument();
+  });
+
+  it("rejects a valid profile that belongs to a different requested character", async () => {
+    io.profileRead.mockResolvedValueOnce({
+      data: [{ ...profile, id: ids.characterB }],
+      error: null,
+    });
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת הפרופיל נכשלה");
+    expect(screen.queryByRole("heading", { name: "מאיה" })).not.toBeInTheDocument();
   });
 
   it("keeps cached profile data with one retryable warning after a failed refresh", async () => {
@@ -255,6 +276,35 @@ describe("client character profile", () => {
     expect(io.navigate).not.toHaveBeenCalled();
   });
 
+  it("does not dispatch a conversation after unmount while telemetry is pending", async () => {
+    const telemetry = deferred<unknown>();
+    io.analytics.mockReturnValue(telemetry.promise);
+    const view = mount();
+    await screen.findByRole("heading", { name: "מאיה" });
+    fireEvent.click(screen.getByRole("button", { name: "התחל שיחה" }));
+    view.unmount();
+
+    await act(async () => telemetry.resolve(undefined));
+
+    expect(io.conversationWrite).not.toHaveBeenCalled();
+    expect(io.navigate).not.toHaveBeenCalled();
+    expect(io.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active StrictMode mount usable and invalidates it on final unmount", async () => {
+    const telemetry = deferred<unknown>();
+    io.analytics.mockReturnValue(telemetry.promise);
+    const view = mountStrict();
+    await screen.findByRole("heading", { name: "מאיה" });
+    fireEvent.click(screen.getByRole("button", { name: "התחל שיחה" }));
+    view.unmount();
+
+    await act(async () => telemetry.resolve(undefined));
+
+    expect(io.conversationWrite).not.toHaveBeenCalled();
+    expect(io.navigate).not.toHaveBeenCalled();
+  });
+
   it("uses an existing conversation directly and suppresses late navigation and toast after identity change", async () => {
     io.profileRead.mockResolvedValueOnce({
       data: [{ ...profile, conversation_id: ids.conversation }],
@@ -296,5 +346,82 @@ describe("client character profile", () => {
     await act(async () => oldRead.resolve({ data: [profile], error: null }));
     expect(screen.getByRole("heading", { name: "נועה" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "מאיה" })).not.toBeInTheDocument();
+  });
+
+  it("does not revive an old character response after an A to B to A route cycle", async () => {
+    const oldA = deferred<Reply>();
+    io.profileRead
+      .mockReturnValueOnce(oldA.promise)
+      .mockResolvedValueOnce({
+        data: [{ ...profile, id: ids.characterB, name: "נועה" }],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: [{ ...profile, name: "מאיה חדשה" }], error: null });
+    const view = mount();
+    await waitFor(() => expect(io.profileRead).toHaveBeenCalledTimes(1));
+
+    io.characterId = ids.characterB;
+    view.rerenderPage();
+    expect(await screen.findByRole("heading", { name: "נועה" })).toBeInTheDocument();
+    io.characterId = ids.characterA;
+    view.rerenderPage();
+    expect(await screen.findByRole("heading", { name: "מאיה חדשה" })).toBeInTheDocument();
+
+    await act(async () => oldA.resolve({ data: [profile], error: null }));
+    expect(screen.getByRole("heading", { name: "מאיה חדשה" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "מאיה" })).not.toBeInTheDocument();
+  });
+
+  it("reconciles a rejected favorite write by reading and never dispatches a second write", async () => {
+    io.favoriteWrite.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    io.profileRead
+      .mockResolvedValueOnce({ data: [profile], error: null })
+      .mockResolvedValueOnce({ data: [{ ...profile, is_favorite: true }], error: null });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הוספה למועדפים" }));
+
+    await waitFor(() => expect(io.error).toHaveBeenCalled());
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+    expect(io.profileRead).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "הסרה ממועדפים" })).toBeEnabled();
+  });
+
+  it("reconciles a resolved transport failure and suppresses favorite side effects after unmount", async () => {
+    io.favoriteWrite.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Failed to fetch" },
+      status: 0,
+    });
+    io.profileRead
+      .mockResolvedValueOnce({ data: [profile], error: null })
+      .mockResolvedValueOnce({ data: [{ ...profile, is_favorite: true }], error: null });
+    const reconciled = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הוספה למועדפים" }));
+    await waitFor(() => expect(io.profileRead).toHaveBeenCalledTimes(2));
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "הסרה ממועדפים" })).toBeEnabled();
+    reconciled.unmount();
+
+    const pending = deferred<Reply>();
+    io.favoriteWrite.mockReset().mockReturnValueOnce(pending.promise);
+    io.profileRead.mockReset().mockResolvedValue({ data: [profile], error: null });
+    io.error.mockClear();
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הוספה למועדפים" }));
+    view.unmount();
+    await act(async () =>
+      pending.resolve({
+        data: { character_id: ids.characterA, is_favorite: true, idempotent: false },
+        error: null,
+      }),
+    );
+
+    const cachedProfile = view.client
+      .getQueryCache()
+      .findAll({ queryKey: ["character-profile", ids.clientA, ids.characterA] })[0]?.state.data as
+      | typeof profile
+      | undefined;
+    expect(cachedProfile?.is_favorite).toBe(false);
+    expect(io.error).not.toHaveBeenCalled();
   });
 });

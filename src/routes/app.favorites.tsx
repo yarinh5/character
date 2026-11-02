@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Heart, RefreshCw, Star } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { FavoriteCard } from "@/components/favorites/FavoriteCard";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,15 @@ function FavoritesPage() {
   const clientScope = clientId ? `${clientId}:${authGenerationRef.current.value}` : null;
   const identityRef = useRef(clientScope);
   identityRef.current = clientScope;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const isScopeCurrent = (scope: string | null) =>
+    mountedRef.current && identityRef.current === scope;
   const favorites = useFavorites(clientId ?? undefined, authGenerationRef.current.value);
   const startLockRef = useRef<{ scope: string; token: symbol } | null>(null);
   const [startingScope, setStartingScope] = useState<string | null>(null);
@@ -43,7 +52,7 @@ function FavoritesPage() {
     try {
       await favorites.setFavorite(characterId, false);
     } catch (error) {
-      if (identityRef.current !== requestScope) return;
+      if (!isScopeCurrent(requestScope)) return;
       logSupabaseError("client favorites remove favorite", error);
       toast.error(
         error instanceof AmbiguousFavoriteResultError
@@ -64,17 +73,17 @@ function FavoritesPage() {
       const { data, error } = await supabase.rpc("start_or_get_conversation", {
         _character_id: characterId,
       });
-      if (identityRef.current !== requestIdentityScope) return;
+      if (!isScopeCurrent(requestIdentityScope)) return;
       if (error) throw error;
       if (!isUuid(data)) throw new Error("invalid_conversation_response");
       await navigate({ to: "/app/chat/$conversationId", params: { conversationId: data } });
     } catch (error) {
-      if (identityRef.current !== requestIdentityScope) return;
+      if (!isScopeCurrent(requestIdentityScope)) return;
       logSupabaseError("client favorites start conversation", error);
       toast.error("לא הצלחנו לפתוח את השיחה. אפשר לנסות שוב.");
     } finally {
       if (startLockRef.current?.token === token) startLockRef.current = null;
-      if (identityRef.current === requestIdentityScope) setStartingScope(null);
+      if (isScopeCurrent(requestIdentityScope)) setStartingScope(null);
     }
   };
 
@@ -125,17 +134,22 @@ function FavoritesPage() {
           </div>
         )}
 
-        {(showInitialError || showCachedRefreshError || favorites.mutationRefreshFailed) && (
+        {(showInitialError ||
+          showCachedRefreshError ||
+          favorites.mutationRefreshFailed ||
+          favorites.ambiguousRefreshFailed) && (
           <div
             className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-destructive/30 bg-destructive/5 p-3"
             role="alert"
           >
             <p className="text-sm text-destructive">
-              {favorites.mutationRefreshFailed
-                ? "המועדף עודכן, אך רענון הרשימה נכשל."
-                : showCachedRefreshError
-                  ? "רענון המועדפים נכשל. הרשימה השמורה נשארה מוצגת."
-                  : "טעינת המועדפים נכשלה"}
+              {favorites.ambiguousRefreshFailed
+                ? "לא ניתן היה לאשר את תוצאת העדכון. המידע השמור נשאר מוצג."
+                : favorites.mutationRefreshFailed
+                  ? "המועדף עודכן, אך רענון הרשימה נכשל."
+                  : showCachedRefreshError
+                    ? "רענון המועדפים נכשל. הרשימה השמורה נשארה מוצגת."
+                    : "טעינת המועדפים נכשלה"}
             </p>
             <Button
               variant="outline"

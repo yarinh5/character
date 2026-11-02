@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import { StrictMode, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -177,6 +177,17 @@ function mount(client = makeClient()) {
   };
 }
 
+function mountStrict(client = makeClient()) {
+  const view = render(
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <Page />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+  return { ...view, client };
+}
+
 beforeEach(() => {
   Object.assign(io.auth, {
     loading: false,
@@ -237,6 +248,44 @@ describe("client favorites workflow", () => {
     mount();
     expect(await screen.findByRole("alert")).toHaveTextContent("טעינת המועדפים נכשלה");
     expect(screen.queryByText("אין דמויות במועדפים עדיין")).not.toBeInTheDocument();
+  });
+
+  it("treats null preferences as an invalid read while an empty array remains a verified empty list", async () => {
+    io.read.mockResolvedValueOnce({ data: null, error: null });
+    const malformed = mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת המועדפים נכשלה");
+    expect(screen.queryByText("אין דמויות במועדפים עדיין")).not.toBeInTheDocument();
+    malformed.unmount();
+
+    io.read.mockResolvedValueOnce({ data: [], error: null });
+    mount();
+    expect(await screen.findByText("אין דמויות במועדפים עדיין")).toBeInTheDocument();
+  });
+
+  it("rejects coerced availability values and null conversation reads", async () => {
+    io.read.mockResolvedValueOnce({
+      data: [
+        {
+          ...preference,
+          characters: {
+            ...preference.characters,
+            availability_status: { toString: () => "available" },
+          },
+        },
+      ],
+      error: null,
+    });
+    const malformedAvailability = mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת המועדפים נכשלה");
+    malformedAvailability.unmount();
+
+    io.read.mockImplementation((table, operations) =>
+      table === "conversations"
+        ? Promise.resolve({ data: null, error: null })
+        : defaultRead(table, operations),
+    );
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת המועדפים נכשלה");
   });
 
   it("stops conversation enrichment when identity changes after the preference read", async () => {
@@ -327,6 +376,172 @@ describe("client favorites workflow", () => {
     expect(io.error).not.toHaveBeenCalledWith(expect.stringContaining("הצלחה"));
   });
 
+  it("reconciles a rejected transport promise with a read and never retries the write", async () => {
+    io.favoriteWrite.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    let preferenceReads = 0;
+    io.read.mockImplementation((table, operations) => {
+      if (table !== "client_character_preferences") return defaultRead(table, operations);
+      preferenceReads += 1;
+      return Promise.resolve({ data: preferenceReads === 1 ? [preference] : [], error: null });
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הסר ממועדפים" }));
+
+    expect(await screen.findByText("אין דמויות במועדפים עדיין")).toBeInTheDocument();
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+    expect(preferenceReads).toBeGreaterThan(1);
+  });
+
+  it("reconciles a malformed successful transport reply without a second write", async () => {
+    io.favoriteWrite.mockResolvedValueOnce({ data: { character_id: ids.characterA }, error: null });
+    let preferenceReads = 0;
+    io.read.mockImplementation((table, operations) => {
+      if (table !== "client_character_preferences") return defaultRead(table, operations);
+      preferenceReads += 1;
+      return Promise.resolve({ data: preferenceReads === 1 ? [preference] : [], error: null });
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הסר ממועדפים" }));
+
+    expect(await screen.findByText("אין דמויות במועדפים עדיין")).toBeInTheDocument();
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+    expect(preferenceReads).toBeGreaterThan(1);
+  });
+
+  it("preserves valid cached data when ambiguous reconciliation fails and recovers by read retry", async () => {
+    io.favoriteWrite.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    let preferenceReads = 0;
+    io.read.mockImplementation((table, operations) => {
+      if (table !== "client_character_preferences") return defaultRead(table, operations);
+      preferenceReads += 1;
+      if (preferenceReads === 2) {
+        return Promise.resolve({ data: null, error: { message: "reconciliation unavailable" } });
+      }
+      return Promise.resolve({ data: [preference], error: null });
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הסר ממועדפים" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("לא ניתן היה לאשר");
+    expect(screen.getByRole("heading", { name: "מאיה" })).toBeInTheDocument();
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "נסה שוב" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "מאיה" })).toBeInTheDocument();
+    expect(io.favoriteWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the next identity actions enabled while the previous identity removal is pending", async () => {
+    const pending = deferred<Reply>();
+    io.favoriteWrite.mockReturnValueOnce(pending.promise);
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הסר ממועדפים" }));
+    await waitFor(() => expect(io.favoriteWrite).toHaveBeenCalledTimes(1));
+
+    io.auth.userId = io.auth.sessionUserId = ids.clientB;
+    view.rerenderPage();
+
+    expect(await screen.findByRole("button", { name: "הסר ממועדפים" })).toBeEnabled();
+    await act(async () =>
+      pending.resolve({
+        data: { character_id: ids.characterA, is_favorite: false, idempotent: false },
+        error: null,
+      }),
+    );
+  });
+
+  it("does not write a favorite after identity changes while query cancellation is pending", async () => {
+    const view = mount();
+    const remove = await screen.findByRole("button", { name: "הסר ממועדפים" });
+    const cancellation = deferred<void>();
+    vi.spyOn(view.client, "cancelQueries").mockReturnValueOnce(cancellation.promise);
+    fireEvent.click(remove);
+
+    io.auth.userId = io.auth.sessionUserId = ids.clientB;
+    view.rerenderPage();
+    await act(async () => cancellation.resolve());
+
+    expect(io.favoriteWrite).not.toHaveBeenCalled();
+  });
+
+  it("does not revive pending state or rollback after an A to B to A identity cycle", async () => {
+    const pending = deferred<Reply>();
+    io.favoriteWrite.mockReturnValueOnce(pending.promise);
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "הסר ממועדפים" }));
+    await waitFor(() => expect(io.favoriteWrite).toHaveBeenCalledTimes(1));
+
+    io.auth.userId = io.auth.sessionUserId = ids.clientB;
+    view.rerenderPage();
+    await screen.findByRole("heading", { name: "מאיה" });
+    io.auth.userId = io.auth.sessionUserId = ids.clientA;
+    view.rerenderPage();
+    expect(await screen.findByRole("button", { name: "הסר ממועדפים" })).toBeEnabled();
+
+    await act(async () =>
+      pending.resolve({ data: null, error: { message: "late explicit failure" }, status: 403 }),
+    );
+    expect(screen.getByRole("button", { name: "הסר ממועדפים" })).toBeEnabled();
+    expect(io.error).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old completion release a newer identity action lock", async () => {
+    const actionA = deferred<Reply>();
+    const actionB = deferred<Reply>();
+    const secondPreference = {
+      ...preference,
+      character_id: ids.characterB,
+      characters: {
+        ...preference.characters,
+        id: ids.characterB,
+        name: "נועה",
+      },
+    };
+    io.read.mockImplementation((table, operations) => {
+      if (table === "client_character_preferences") {
+        return Promise.resolve({ data: [preference, secondPreference], error: null });
+      }
+      if (table === "conversations") {
+        return Promise.resolve({
+          data: [
+            { id: ids.conversation, character_id: ids.characterA },
+            {
+              id: "00000000-0000-4000-8000-000000000202",
+              character_id: ids.characterB,
+            },
+          ],
+          error: null,
+        });
+      }
+      return defaultRead(table, operations);
+    });
+    io.favoriteWrite.mockReturnValueOnce(actionA.promise).mockReturnValueOnce(actionB.promise);
+    const view = mount();
+    fireEvent.click((await screen.findAllByRole("button", { name: "הסר ממועדפים" }))[0]);
+    await waitFor(() => expect(io.favoriteWrite).toHaveBeenCalledTimes(1));
+
+    io.auth.userId = io.auth.sessionUserId = ids.clientB;
+    view.rerenderPage();
+    const removeB = (await screen.findAllByRole("button", { name: "הסר ממועדפים" }))[0];
+    fireEvent.click(removeB);
+    await waitFor(() => expect(io.favoriteWrite).toHaveBeenCalledTimes(2));
+    await act(async () =>
+      actionA.resolve({
+        data: { character_id: ids.characterA, is_favorite: false, idempotent: false },
+        error: null,
+      }),
+    );
+    expect(screen.getByRole("button", { name: "הסר ממועדפים" })).toBeDisabled();
+
+    await act(async () =>
+      actionB.resolve({
+        data: { character_id: ids.characterA, is_favorite: false, idempotent: false },
+        error: null,
+      }),
+    );
+  });
+
   it("rolls back an explicit failed removal only into the captured identity cache", async () => {
     io.favoriteWrite.mockResolvedValueOnce({
       data: null,
@@ -385,5 +600,31 @@ describe("client favorites workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "המשך שיחה" }));
     await waitFor(() => expect(io.error).toHaveBeenCalled());
     expect(io.navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate after unmount while the conversation request is pending", async () => {
+    const pending = deferred<Reply>();
+    io.conversationWrite.mockReturnValueOnce(pending.promise);
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "המשך שיחה" }));
+    view.unmount();
+
+    await act(async () => pending.resolve({ data: ids.conversation, error: null }));
+
+    expect(io.navigate).not.toHaveBeenCalled();
+    expect(io.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active StrictMode mount usable and cancels navigation on final unmount", async () => {
+    const pending = deferred<Reply>();
+    io.conversationWrite.mockReturnValueOnce(pending.promise);
+    const view = mountStrict();
+    fireEvent.click(await screen.findByRole("button", { name: "המשך שיחה" }));
+    view.unmount();
+
+    await act(async () => pending.resolve({ data: ids.conversation, error: null }));
+
+    expect(io.navigate).not.toHaveBeenCalled();
+    expect(io.error).not.toHaveBeenCalled();
   });
 });

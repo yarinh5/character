@@ -64,6 +64,40 @@ character profile, favorites list, favorites hook and card.
 - Return condition: before accepting access/conversation integration, re-verify the relevant
   WP01–WP02 contracts and run an authorized end-to-end flow. WP01.5 remains OPEN/PAUSED.
 
+### Favorites lifecycle and response-contract correction — 2026-11-02
+
+- F1: profile and favorites actions now require a currently mounted identity/character scope after
+  every awaited boundary. Unmount, logout, identity replacement, character A→B→A and StrictMode
+  cleanup invalidate old work. Pending and refresh state is keyed to the active identity, and an old
+  completion cannot navigate, toast, write cache, roll back another identity or release its lock.
+  This is client-side completion isolation only; a request already dispatched to the server is not
+  claimed to be cancelled.
+- F2: rejected promises, resolved transport failures and malformed favorite replies are treated as
+  ambiguous after dispatch. They trigger one read-only reconciliation and never an automatic second
+  write. When that read also fails, the last valid cache is restored with an explicit uncertainty
+  warning and a read retry. A proven server rejection still follows the ordinary failure/rollback
+  path, while a confirmed mutation followed by refresh failure remains a separate state.
+- F3: favorites preference and conversation reads no longer normalize `null` to a verified empty
+  array. Character availability accepts only the existing string enum without coercion, and a
+  profile response must match the requested character ID. Legal empty arrays, zero values and
+  nullable fields remain accepted according to the existing contract.
+- RED evidence: the focused regression run failed 8 of 25 cases on the reviewed snapshot, matching
+  the confirmed lifecycle, rejected-transport, null-normalization, availability and profile-ID
+  gaps. The subsequent StrictMode regression also reproduced the effect cleanup/setup defect before
+  the lifecycle setup was corrected.
+- Current focused result: 43/43 passed across `client-character-profile`,
+  `client-favorites-workflow` and the preserved `client-discovery-states` suite. Coverage includes
+  unmount/remount and StrictMode, A→B→A scopes, stale locks and reads, explicit and ambiguous write
+  outcomes, failed reconciliation with recovery, `null` versus `[]`, strict enums, wrong profile ID
+  and legal nullable payloads.
+- Final repository verification on the correction snapshot: full Vitest 382 passed / 24 skipped (26
+  files passed, 6 skipped); format, changed-file lint, typecheck and client/SSR build passed. The
+  existing jsdom navigation notice, large client chunk warning and `punycode` deprecation remained.
+- Browser RTL/mobile/desktop and live Auth/Supabase/RLS integration remain **NOT VERIFIED**. The
+  regression evidence uses real screens/hooks with mocked I/O and does not prove server-side
+  cancellation, authorization or idempotency. No backend, RPC, schema, migration, RLS, dependency,
+  workflow or runtime environment was changed.
+
 ## KEEP / EXTEND / MODIFY / NEW
 
 - KEEP: existing routes, cards, form controls, avatar upload, account summary/security, wallet and notifications. Discovery hook, RPCs, query keys, filter semantics, Swipe, favorites, recycling and canonical conversation creation remain unchanged.

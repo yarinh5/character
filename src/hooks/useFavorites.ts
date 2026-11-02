@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -60,7 +60,8 @@ function isCharacter(value: unknown): value is Character {
     isNullableString(row.short_description) &&
     isNullableString(row.category) &&
     isNullableStringArray(row.interests) &&
-    ["available", "busy", "offline"].includes(String(row.availability_status))
+    typeof row.availability_status === "string" &&
+    ["available", "busy", "offline"].includes(row.availability_status)
   );
 }
 
@@ -135,7 +136,7 @@ async function fetchFavorites(
   if (!isCurrent()) throw new Error("stale_favorites_request");
   if (preferenceError) throw preferenceError;
 
-  const preferences = parsePreferences(preferenceData ?? []);
+  const preferences = parsePreferences(preferenceData);
   const characterIds = preferences.map((preference) => preference.character_id);
   if (characterIds.length === 0) return [];
 
@@ -148,7 +149,7 @@ async function fetchFavorites(
   if (!isCurrent()) throw new Error("stale_favorites_request");
   if (conversationError) throw conversationError;
 
-  const conversationIds = parseConversationMap(conversationData ?? [], new Set(characterIds));
+  const conversationIds = parseConversationMap(conversationData, new Set(characterIds));
   return preferences.map((preference) => ({
     ...preference.characters,
     favorited_at: preference.favorited_at,
@@ -160,12 +161,32 @@ async function fetchFavorites(
 export function useFavorites(userId?: string, identityGeneration = 0) {
   const queryClient = useQueryClient();
   const identityKey = userId ? `${userId}:${identityGeneration}` : undefined;
-  const identityRef = useRef(identityKey);
-  identityRef.current = identityKey;
+  const lifecycleRef = useRef({ mounted: true, identityKey });
+  lifecycleRef.current.identityKey = identityKey;
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+    return () => {
+      lifecycle.mounted = false;
+    };
+  }, []);
   const mutationLockRef = useRef<{ identityKey: string; token: symbol } | null>(null);
-  const [pendingCharacterId, setPendingCharacterId] = useState<string | null>(null);
-  const [mutationRefreshFailed, setMutationRefreshFailed] = useState(false);
+  const [pendingMutation, setPendingMutation] = useState<{
+    identityKey: string;
+    characterId: string;
+  } | null>(null);
+  const [mutationRefreshFailureIdentity, setMutationRefreshFailureIdentity] = useState<
+    string | null
+  >(null);
+  const [ambiguousRefreshFailureIdentity, setAmbiguousRefreshFailureIdentity] = useState<
+    string | null
+  >(null);
   const queryKey = ["favorites", userId, identityGeneration] as const;
+  const isIdentityCurrent = useCallback(
+    (capturedIdentityKey: string | undefined) =>
+      lifecycleRef.current.mounted && lifecycleRef.current.identityKey === capturedIdentityKey,
+    [],
+  );
 
   const favoritesQuery = useQuery({
     queryKey,
@@ -174,15 +195,19 @@ export function useFavorites(userId?: string, identityGeneration = 0) {
       const capturedUserId = userId;
       if (!capturedUserId) throw new Error("missing_favorites_identity");
       const capturedIdentityKey = identityKey;
-      return fetchFavorites(capturedUserId, () => identityRef.current === capturedIdentityKey);
+      return fetchFavorites(capturedUserId, () => isIdentityCurrent(capturedIdentityKey));
     },
   });
 
   const retry = useCallback(async () => {
+    const capturedIdentityKey = identityKey;
     const result = await favoritesQuery.refetch();
-    if (!result.isError) setMutationRefreshFailed(false);
+    if (isIdentityCurrent(capturedIdentityKey) && !result.isError) {
+      setMutationRefreshFailureIdentity(null);
+      setAmbiguousRefreshFailureIdentity(null);
+    }
     return result;
-  }, [favoritesQuery]);
+  }, [favoritesQuery, identityKey, isIdentityCurrent]);
 
   const setFavorite = useCallback(
     async (characterId: string, isFavorite: boolean) => {
@@ -192,24 +217,42 @@ export function useFavorites(userId?: string, identityGeneration = 0) {
       const capturedQueryKey = ["favorites", capturedUserId, identityGeneration] as const;
       const capturedIdentityKey = identityKey;
       mutationLockRef.current = { identityKey: capturedIdentityKey, token };
-      setPendingCharacterId(characterId);
-      setMutationRefreshFailed(false);
+      setPendingMutation({ identityKey: capturedIdentityKey, characterId });
+      setMutationRefreshFailureIdentity(null);
+      setAmbiguousRefreshFailureIdentity(null);
       let previousFavorites: FavoriteCharacter[] | undefined;
 
       try {
         await queryClient.cancelQueries({ queryKey: capturedQueryKey });
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
         previousFavorites = queryClient.getQueryData<FavoriteCharacter[]>(capturedQueryKey);
         if (!isFavorite) {
           queryClient.setQueryData<FavoriteCharacter[]>(capturedQueryKey, (favorites) =>
             favorites?.filter((favorite) => favorite.id !== characterId),
           );
         }
-        const result = await supabase.rpc("set_character_favorite", {
-          _character_id: characterId,
-          _is_favorite: isFavorite,
-        });
-        const isCurrent = identityRef.current === capturedIdentityKey;
-        if (!isCurrent) throw new Error("stale_favorite_completion");
+        let result;
+        try {
+          result = await supabase.rpc("set_character_favorite", {
+            _character_id: characterId,
+            _is_favorite: isFavorite,
+          });
+        } catch {
+          if (!isIdentityCurrent(capturedIdentityKey)) return;
+          try {
+            const reconciledFavorites = await fetchFavorites(capturedUserId, () =>
+              isIdentityCurrent(capturedIdentityKey),
+            );
+            if (!isIdentityCurrent(capturedIdentityKey)) return;
+            queryClient.setQueryData(capturedQueryKey, reconciledFavorites);
+          } catch {
+            if (!isIdentityCurrent(capturedIdentityKey)) return;
+            queryClient.setQueryData(capturedQueryKey, previousFavorites);
+            setAmbiguousRefreshFailureIdentity(capturedIdentityKey);
+          }
+          throw new AmbiguousFavoriteResultError();
+        }
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
         if (result.error || !isFavoriteResult(result.data, characterId, isFavorite)) {
           const ambiguous =
             !result.error || isAmbiguousTransportFailure(result.error, result.status);
@@ -217,38 +260,55 @@ export function useFavorites(userId?: string, identityGeneration = 0) {
             queryClient.setQueryData(capturedQueryKey, previousFavorites);
             throw result.error;
           }
-          await queryClient.invalidateQueries({ queryKey: capturedQueryKey });
+          try {
+            const reconciledFavorites = await fetchFavorites(capturedUserId, () =>
+              isIdentityCurrent(capturedIdentityKey),
+            );
+            if (!isIdentityCurrent(capturedIdentityKey)) return;
+            queryClient.setQueryData(capturedQueryKey, reconciledFavorites);
+          } catch {
+            if (!isIdentityCurrent(capturedIdentityKey)) return;
+            queryClient.setQueryData(capturedQueryKey, previousFavorites);
+            setAmbiguousRefreshFailureIdentity(capturedIdentityKey);
+          }
           throw new AmbiguousFavoriteResultError();
         }
 
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: capturedQueryKey }),
-          queryClient.invalidateQueries({
-            queryKey: ["character-profile", capturedUserId, characterId],
-          }),
-          queryClient.invalidateQueries({ queryKey: ["discovery-card", capturedUserId] }),
-        ]);
-        if (isCurrent) {
-          setMutationRefreshFailed(queryClient.getQueryState(capturedQueryKey)?.status === "error");
-        }
+        await queryClient.invalidateQueries({ queryKey: capturedQueryKey });
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
+        setMutationRefreshFailureIdentity(
+          queryClient.getQueryState(capturedQueryKey)?.status === "error"
+            ? capturedIdentityKey
+            : null,
+        );
+        await queryClient.invalidateQueries({
+          queryKey: ["character-profile", capturedUserId, characterId],
+        });
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
+        await queryClient.invalidateQueries({ queryKey: ["discovery-card", capturedUserId] });
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
         return result.data;
       } catch (error) {
-        if (
-          identityRef.current === capturedIdentityKey &&
-          !(error instanceof AmbiguousFavoriteResultError)
-        ) {
+        if (!isIdentityCurrent(capturedIdentityKey)) return;
+        if (!(error instanceof AmbiguousFavoriteResultError)) {
           queryClient.setQueryData(capturedQueryKey, previousFavorites);
         }
         throw error;
       } finally {
         if (mutationLockRef.current?.token === token) mutationLockRef.current = null;
-        if (identityRef.current === capturedIdentityKey) setPendingCharacterId(null);
+        if (isIdentityCurrent(capturedIdentityKey)) setPendingMutation(null);
       }
     },
-    [identityKey, identityGeneration, queryClient, userId],
+    [identityKey, identityGeneration, isIdentityCurrent, queryClient, userId],
   );
 
   const favorites = userId ? (favoritesQuery.data ?? []) : [];
+  const pendingCharacterId =
+    pendingMutation && pendingMutation.identityKey === identityKey
+      ? pendingMutation.characterId
+      : null;
+  const mutationRefreshFailed = mutationRefreshFailureIdentity === identityKey;
+  const ambiguousRefreshFailed = ambiguousRefreshFailureIdentity === identityKey;
   return {
     favorites,
     isLoading: Boolean(userId) && favoritesQuery.isLoading,
@@ -262,6 +322,7 @@ export function useFavorites(userId?: string, identityGeneration = 0) {
     isFavoritePending: pendingCharacterId !== null,
     pendingCharacterId,
     mutationRefreshFailed,
+    ambiguousRefreshFailed,
     retry,
     setFavorite,
     error: favoritesQuery.error,

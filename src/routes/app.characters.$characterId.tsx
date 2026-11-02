@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, MapPin, MessageCirclePlus, RefreshCw, Star, UserRound } from "lucide-react";
@@ -60,11 +60,12 @@ function isCharacterProfile(value: unknown): value is CharacterProfile {
   );
 }
 
-function parseCharacterProfile(data: unknown): CharacterProfile | null {
+function parseCharacterProfile(data: unknown, characterId: string): CharacterProfile | null {
   if (!Array.isArray(data) || data.length > 1)
     throw new Error("invalid_character_profile_response");
   if (data.length === 0) return null;
   if (!isCharacterProfile(data[0])) throw new Error("invalid_character_profile_response");
+  if (data[0].id !== characterId) throw new Error("invalid_character_profile_response");
   return data[0];
 }
 
@@ -76,6 +77,19 @@ function isFavoriteResult(value: unknown, characterId: string, isFavorite: boole
     result.is_favorite === isFavorite &&
     typeof result.idempotent === "boolean"
   );
+}
+
+function isAmbiguousTransportFailure(error: unknown, status?: number) {
+  if (status === 0 || error instanceof TypeError) return true;
+  if (typeof error !== "object" || error === null || !("message" in error)) return false;
+  return /failed to fetch|network|transport/i.test(String(error.message));
+}
+
+class AmbiguousProfileFavoriteError extends Error {
+  constructor() {
+    super("profile_favorite_result_requires_reconciliation");
+    this.name = "AmbiguousProfileFavoriteError";
+  }
 }
 
 function CharacterProfilePage() {
@@ -90,9 +104,26 @@ function CharacterProfilePage() {
   if (authGenerationRef.current.key !== authKey) {
     authGenerationRef.current = { key: authKey, value: authGenerationRef.current.value + 1 };
   }
-  const scopeKey = `${clientId ?? "invalid"}:${authGenerationRef.current.value}:${characterId}`;
+  const scopeBase = `${clientId ?? "invalid"}:${authGenerationRef.current.value}:${characterId}`;
+  const scopeGenerationRef = useRef({ key: scopeBase, value: 0 });
+  if (scopeGenerationRef.current.key !== scopeBase) {
+    scopeGenerationRef.current = {
+      key: scopeBase,
+      value: scopeGenerationRef.current.value + 1,
+    };
+  }
+  const scopeKey = `${scopeBase}:${scopeGenerationRef.current.value}`;
   const activeScopeRef = useRef(scopeKey);
   activeScopeRef.current = scopeKey;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const isScopeCurrent = (requestScope: string) =>
+    mountedRef.current && activeScopeRef.current === requestScope;
   const favoriteLockRef = useRef<{ scope: string; token: symbol } | null>(null);
   const conversationLockRef = useRef<{ scope: string; token: symbol } | null>(null);
   const [favoritePendingScope, setFavoritePendingScope] = useState<string | null>(null);
@@ -102,6 +133,7 @@ function CharacterProfilePage() {
     clientId,
     characterId,
     authGenerationRef.current.value,
+    scopeGenerationRef.current.value,
   ] as const;
 
   const profileQuery = useQuery({
@@ -112,13 +144,12 @@ function CharacterProfilePage() {
       const { data, error } = await supabase.rpc("get_character_profile", {
         _character_id: characterId,
       });
-      if (activeScopeRef.current !== requestScope)
-        throw new Error("stale_character_profile_request");
+      if (!isScopeCurrent(requestScope)) throw new Error("stale_character_profile_request");
       if (error) {
         logSupabaseError("client character profile", error);
         throw error;
       }
-      return parseCharacterProfile(data);
+      return parseCharacterProfile(data, characterId);
     },
   });
   const character = clientId ? profileQuery.data : undefined;
@@ -133,30 +164,46 @@ function CharacterProfilePage() {
     favoriteLockRef.current = { scope: requestScope, token };
     setFavoritePendingScope(requestScope);
     try {
-      const result = await supabase.rpc("set_character_favorite", {
-        _character_id: characterId,
-        _is_favorite: requestedValue,
-      });
-      if (activeScopeRef.current !== requestScope) return;
-      if (result.error || !isFavoriteResult(result.data, characterId, requestedValue)) {
+      let result;
+      try {
+        result = await supabase.rpc("set_character_favorite", {
+          _character_id: characterId,
+          _is_favorite: requestedValue,
+        });
+      } catch {
+        if (!isScopeCurrent(requestScope)) return;
         await profileQuery.refetch();
-        throw result.error ?? new Error("invalid_favorite_response");
+        if (!isScopeCurrent(requestScope)) return;
+        throw new AmbiguousProfileFavoriteError();
+      }
+      if (!isScopeCurrent(requestScope)) return;
+      if (result.error || !isFavoriteResult(result.data, characterId, requestedValue)) {
+        const ambiguous = !result.error || isAmbiguousTransportFailure(result.error, result.status);
+        if (!ambiguous) throw result.error;
+        await profileQuery.refetch();
+        if (!isScopeCurrent(requestScope)) return;
+        throw new AmbiguousProfileFavoriteError();
       }
       queryClient.setQueryData<CharacterProfile | null>(queryKey, (current) =>
         current ? { ...current, is_favorite: requestedValue } : current,
       );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey }),
-        queryClient.invalidateQueries({ queryKey: ["favorites", clientId] }),
-        queryClient.invalidateQueries({ queryKey: ["discovery-card", clientId] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey });
+      if (!isScopeCurrent(requestScope)) return;
+      await queryClient.invalidateQueries({ queryKey: ["favorites", clientId] });
+      if (!isScopeCurrent(requestScope)) return;
+      await queryClient.invalidateQueries({ queryKey: ["discovery-card", clientId] });
+      if (!isScopeCurrent(requestScope)) return;
     } catch (error) {
-      if (activeScopeRef.current !== requestScope) return;
+      if (!isScopeCurrent(requestScope)) return;
       logSupabaseError("client character profile favorite", error);
-      toast.error("לא הצלחנו לאמת את עדכון המועדפים. אפשר לנסות שוב.");
+      toast.error(
+        error instanceof AmbiguousProfileFavoriteError
+          ? "לא ניתן היה לאשר את תוצאת העדכון. הפרופיל נבדק מחדש."
+          : "לא הצלחנו לאמת את עדכון המועדפים. אפשר לנסות שוב.",
+      );
     } finally {
       if (favoriteLockRef.current?.token === token) favoriteLockRef.current = null;
-      if (activeScopeRef.current === requestScope) setFavoritePendingScope(null);
+      if (isScopeCurrent(requestScope)) setFavoritePendingScope(null);
     }
   };
 
@@ -180,21 +227,21 @@ function CharacterProfilePage() {
         metadata: { source: "character_profile" },
         dedupeSeconds: 3600,
       });
-      if (activeScopeRef.current !== requestScope) return;
+      if (!isScopeCurrent(requestScope)) return;
       const { data, error } = await supabase.rpc("start_or_get_conversation", {
         _character_id: characterId,
       });
-      if (activeScopeRef.current !== requestScope) return;
+      if (!isScopeCurrent(requestScope)) return;
       if (error) throw error;
       if (!isUuid(data)) throw new Error("invalid_conversation_response");
       await navigate({ to: "/app/chat/$conversationId", params: { conversationId: data } });
     } catch (error) {
-      if (activeScopeRef.current !== requestScope) return;
+      if (!isScopeCurrent(requestScope)) return;
       logSupabaseError("client character profile start conversation", error);
       toast.error("לא הצלחנו לפתוח את השיחה. אפשר לנסות שוב.");
     } finally {
       if (conversationLockRef.current?.token === token) conversationLockRef.current = null;
-      if (activeScopeRef.current === requestScope) setConversationPendingScope(null);
+      if (isScopeCurrent(requestScope)) setConversationPendingScope(null);
     }
   };
 
