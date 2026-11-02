@@ -10,6 +10,94 @@ Requirements: `Product Specification and Work Plan 2026-10-06.md`, gaps D–E, R
 Approved baseline: `0107fcca6f18b5af450ed49011129197126d0bb5` (the WP03 merge).
 `origin/main` matched this baseline at preflight. Work is isolated on `codex/wp04-profile-discovery-ui` in the dedicated WP04 worktree; the WP03 branch was not reused. WP01.5 remains OPEN/PAUSED and its worktree and snapshot were not changed.
 
+## Character profile and favorites workflow — 2026-11-01
+
+This follow-up slice starts from approved `main` baseline
+`68a93f8dcd4026a5754b53af5db400da52668e36` on the isolated branch
+`codex/wp04-character-favorites-ui`. The profile editing and Discovery work described below was
+already merged before this slice; it is preserved. This slice extends only the existing client
+character profile, favorites list, favorites hook and card.
+
+### KEEP / MODIFY / EXTEND
+
+- KEEP: the existing routes, profile gallery and content, Like meaning, favorite ordering,
+  active/visible character filters, `client_hidden_at`/conversation status filters, query-key
+  prefixes and the existing `set_character_favorite` and `start_or_get_conversation` contracts.
+- MODIFY: both screens now wait for an initialized matching Client Auth/session identity. Reads,
+  cached views and actions are scoped by identity (including a logout/re-auth generation) and
+  character. Late completions cannot navigate, toast, roll back another identity or continue the
+  old favorites enrichment chain.
+- MODIFY: profile and favorites reads validate only fields consumed by these views, including
+  nullable character relations and finite numbers. Verified missing/empty results remain distinct
+  from malformed payloads and read failures. Cached data stays visible after a refresh failure with
+  one disabled-while-fetching retry path.
+- MODIFY: favorite writes use a synchronous lock and validate `character_id`, `is_favorite` and
+  `idempotent`. Explicit failure restores only the captured cache. An ambiguous transport or
+  unverifiable result triggers read reconciliation without an automatic write retry. A confirmed
+  mutation followed by refresh failure is reported separately, and retry performs only the read.
+- EXTEND: the favorite card links its image and name to the existing character profile without
+  nesting the remove/chat actions. Conversation actions retain direct navigation for a verified
+  existing profile conversation and the existing RPC elsewhere, validate UUID results, and lock
+  before profile telemetry or any other await.
+- EXTEND: focused component/hook regressions cover Auth loading/mismatch/logout, identity and route
+  switches, malformed and legal-null payloads, cached refresh recovery, idempotent/explicit/
+  ambiguous favorite outcomes, isolated rollback, post-mutation refresh failure, same-tick double
+  clicks, pending telemetry, invalid conversation IDs and suppression of late navigation/toasts.
+
+### Verification and remaining boundary
+
+- Initial RED on the approved baseline: 13 of the new regressions failed while the existing
+  Discovery suite remained green. The failures matched the missing Auth matching, response
+  validation, cached refresh warning, synchronous locks, late-completion guards and profile link.
+- Current focused result: 26/26 passed across
+  `client-character-profile`, `client-favorites-workflow` and the preserved
+  `client-discovery-states` suites. Full Vitest: 365 passed / 24 skipped (26 files passed, 6
+  skipped). Format, changed-file lint, typecheck and the client/SSR production build passed on the
+  final snapshot. The build retained the existing large-chunk and `punycode` deprecation warnings;
+  Vitest retained jsdom's existing unsupported document-navigation notice.
+- Browser RTL/mobile/desktop and live Auth/Supabase/RLS integration: **NOT VERIFIED**. The repository
+  has no isolated backend-free browser path for these authenticated routes, and no harness or live
+  environment was introduced.
+- No backend, RPC, schema, migration, RLS, generated type, dependency, workflow or runtime-service
+  change was made. This UI evidence does not prove server authorization, canonical conversation
+  history, WP04 completion or AC09–AC11.
+- Return condition: before accepting access/conversation integration, re-verify the relevant
+  WP01–WP02 contracts and run an authorized end-to-end flow. WP01.5 remains OPEN/PAUSED.
+
+### Favorites lifecycle and response-contract correction — 2026-11-02
+
+- F1: profile and favorites actions now require a currently mounted identity/character scope after
+  every awaited boundary. Unmount, logout, identity replacement, character A→B→A and StrictMode
+  cleanup invalidate old work. Pending and refresh state is keyed to the active identity, and an old
+  completion cannot navigate, toast, write cache, roll back another identity or release its lock.
+  This is client-side completion isolation only; a request already dispatched to the server is not
+  claimed to be cancelled.
+- F2: rejected promises, resolved transport failures and malformed favorite replies are treated as
+  ambiguous after dispatch. They trigger one read-only reconciliation and never an automatic second
+  write. When that read also fails, the last valid cache is restored with an explicit uncertainty
+  warning and a read retry. A proven server rejection still follows the ordinary failure/rollback
+  path, while a confirmed mutation followed by refresh failure remains a separate state.
+- F3: favorites preference and conversation reads no longer normalize `null` to a verified empty
+  array. Character availability accepts only the existing string enum without coercion, and a
+  profile response must match the requested character ID. Legal empty arrays, zero values and
+  nullable fields remain accepted according to the existing contract.
+- RED evidence: the focused regression run failed 8 of 25 cases on the reviewed snapshot, matching
+  the confirmed lifecycle, rejected-transport, null-normalization, availability and profile-ID
+  gaps. The subsequent StrictMode regression also reproduced the effect cleanup/setup defect before
+  the lifecycle setup was corrected.
+- Current focused result: 43/43 passed across `client-character-profile`,
+  `client-favorites-workflow` and the preserved `client-discovery-states` suite. Coverage includes
+  unmount/remount and StrictMode, A→B→A scopes, stale locks and reads, explicit and ambiguous write
+  outcomes, failed reconciliation with recovery, `null` versus `[]`, strict enums, wrong profile ID
+  and legal nullable payloads.
+- Final repository verification on the correction snapshot: full Vitest 382 passed / 24 skipped (26
+  files passed, 6 skipped); format, changed-file lint, typecheck and client/SSR build passed. The
+  existing jsdom navigation notice, large client chunk warning and `punycode` deprecation remained.
+- Browser RTL/mobile/desktop and live Auth/Supabase/RLS integration remain **NOT VERIFIED**. The
+  regression evidence uses real screens/hooks with mocked I/O and does not prove server-side
+  cancellation, authorization or idempotency. No backend, RPC, schema, migration, RLS, dependency,
+  workflow or runtime environment was changed.
+
 ## KEEP / EXTEND / MODIFY / NEW
 
 - KEEP: existing routes, cards, form controls, avatar upload, account summary/security, wallet and notifications. Discovery hook, RPCs, query keys, filter semantics, Swipe, favorites, recycling and canonical conversation creation remain unchanged.
