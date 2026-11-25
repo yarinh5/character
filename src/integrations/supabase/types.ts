@@ -3927,6 +3927,33 @@ export type Database = {
           version: number;
         }[];
       };
+      get_admin_operator_client_reports_page: {
+        Args: {
+          _before_created_at?: string | null;
+          _before_id?: string | null;
+          _page_size?: number;
+        };
+        Returns: {
+          client_display_name: string | null;
+          client_id: string;
+          conversation_id: string | null;
+          created_at: string;
+          global_action_note: string | null;
+          id: string;
+          notes: string | null;
+          operator_id: string;
+          operator_name: string;
+          reason: string;
+          resolution_note: string | null;
+          resolved_at: string | null;
+          resolved_by: string | null;
+          source: string;
+          status: string;
+          updated_at: string;
+          updated_by: string | null;
+          version: number;
+        }[];
+      };
       get_admin_operator_presence_overview: {
         Args: never;
         Returns: {

@@ -1,5 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useLayoutEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,13 +42,22 @@ const statuses: Record<Status, string> = {
   resolved: "טופל",
   dismissed: "נדחה",
 };
-async function readReports() {
-  const { data, error } = await supabase
+const PAGE_SIZE = 100;
+type ReportCursor = { created_at: string; id: string } | null;
+async function readReports(cursor: ReportCursor) {
+  let query = supabase
     .from("reports")
     .select(
       "id, reason, details, status, created_at, conversation_id, reporter_id, conversations(characters(name))",
     )
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (cursor) {
+    query = query.or(
+      `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
+    );
+  }
+  const { data, error } = await query.range(0, PAGE_SIZE);
   if (error) throw error;
   return data ?? [];
 }
@@ -124,29 +138,52 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     setConfirmBlock(false);
     setActionError("");
   };
-  const reports = useQuery({ queryKey: ["admin-reports", adminId], queryFn: readReports });
-  const ids = Array.from(new Set((reports.data ?? []).map((r) => r.reporter_id))).sort();
+  const reports = useInfiniteQuery({
+    queryKey: ["admin-reports", adminId],
+    initialPageParam: null as ReportCursor,
+    queryFn: ({ pageParam }) => readReports(pageParam),
+    getNextPageParam: (page) =>
+      page.length > PAGE_SIZE
+        ? { created_at: page[PAGE_SIZE - 1].created_at, id: page[PAGE_SIZE - 1].id }
+        : undefined,
+  });
+  const reportRows = reports.data?.pages.flatMap((page) => page.slice(0, PAGE_SIZE));
+  const ids = Array.from(new Set((reportRows ?? []).map((r) => r.reporter_id))).sort();
   const profiles = useQuery({
     queryKey: ["admin-report-profiles", adminId, ids],
     enabled: reports.data !== undefined,
     queryFn: async () => {
       if (!ids.length) return [];
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("user_id, display_name, email")
-        .in("user_id", ids);
-      if (error) throw error;
-      return data ?? [];
+      const batches = await Promise.all(
+        Array.from({ length: Math.ceil(ids.length / PAGE_SIZE) }, (_, index) =>
+          supabase
+            .from("profiles")
+            .select("user_id, display_name, email")
+            .in("user_id", ids.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE)),
+        ),
+      );
+      for (const batch of batches) if (batch.error) throw batch.error;
+      return batches.flatMap((batch) => batch.data ?? []);
     },
   });
-  const workers = useQuery({
+  const workers = useInfiniteQuery({
     queryKey: ["admin-operator-client-reports", adminId],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_admin_operator_client_reports");
+    initialPageParam: null as ReportCursor,
+    queryFn: async ({ pageParam }) => {
+      const { data, error } = await supabase.rpc("get_admin_operator_client_reports_page", {
+        _before_created_at: pageParam?.created_at ?? null,
+        _before_id: pageParam?.id ?? null,
+        _page_size: PAGE_SIZE + 1,
+      });
       if (error) throw error;
       return data ?? [];
     },
+    getNextPageParam: (page) =>
+      page.length > PAGE_SIZE
+        ? { created_at: page[PAGE_SIZE - 1].created_at, id: page[PAGE_SIZE - 1].id }
+        : undefined,
   });
+  const workerRows = workers.data?.pages.flatMap((page) => page.slice(0, PAGE_SIZE));
   const reporter = (id: string) => {
     const profile = profiles.data?.find((p) => p.user_id === id);
     if (profile) return profile.display_name ?? profile.email ?? id;
@@ -154,14 +191,14 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     if (profiles.isPending) return "טוען פרטי מדווח";
     return "פרופיל המדווח אינו קיים";
   };
-  const filtered = (reports.data ?? []).filter(
+  const filtered = (reportRows ?? []).filter(
     (r) =>
       (filter === "all" || r.status === filter) &&
       [r.id, r.reason, r.details, reporter(r.reporter_id), r.conversations?.characters?.name].some(
         (v) => v?.toLowerCase().includes(search.trim().toLowerCase()),
       ),
   );
-  const filteredWorkers = (workers.data ?? []).filter(
+  const filteredWorkers = (workerRows ?? []).filter(
     (r) =>
       (source === "all" || r.source === source) &&
       [r.reason, r.notes, r.operator_name, r.client_display_name, r.client_id].some((v) =>
@@ -290,8 +327,15 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
         global_action_note: globalAction,
         version: report.version + 1,
       };
-      qc.setQueryData<WorkerReport[]>(["admin-operator-client-reports", adminId], (previous) =>
-        previous?.map((item) => (item.id === report.id ? updated : item)),
+      qc.setQueryData<InfiniteData<WorkerReport[], ReportCursor>>(
+        ["admin-operator-client-reports", adminId],
+        (previous) =>
+          previous && {
+            ...previous,
+            pages: previous.pages.map((page) =>
+              page.map((item) => (item.id === report.id ? updated : item)),
+            ),
+          },
       );
       void qc.invalidateQueries({ queryKey: ["admin-operator-client-reports", adminId] });
       void qc.invalidateQueries({ queryKey: ["admin-operations-snapshot"] });
@@ -353,7 +397,7 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               איפוס מסנני לקוחות
             </Button>
             <ReadState label="דיווחי לקוחות" query={reports} retry={refreshReports} />
-            {reports.data !== undefined && (
+            {reportRows !== undefined && (
               <>
                 <ReadState
                   label="פרטי מדווחים"
@@ -361,9 +405,9 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                   retry={() => void profiles.refetch()}
                 />
                 <p className="text-sm text-muted-foreground">
-                  {filtered.length} מתוך {reports.data.length} דיווחי לקוחות שנטענו
+                  {filtered.length} מתוך {reportRows.length} דיווחי לקוחות שנטענו
                 </p>
-                {!reports.data.length ? (
+                {!reportRows.length ? (
                   <p>אין דיווחי לקוחות</p>
                 ) : !filtered.length ? (
                   <p>אין תוצאות במסנני הלקוחות</p>
@@ -399,6 +443,15 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                     ))}
                   </div>
                 )}
+                {reports.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    disabled={reports.isFetchingNextPage}
+                    onClick={() => void reports.fetchNextPage()}
+                  >
+                    {reports.isFetchingNextPage ? "טוען דיווחי לקוחות…" : "טען עוד דיווחי לקוחות"}
+                  </Button>
+                )}
               </>
             )}
           </CardContent>
@@ -420,7 +473,7 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">כל המקורות</SelectItem>
-                {Array.from(new Set((workers.data ?? []).map((r) => r.source)))
+                {Array.from(new Set((workerRows ?? []).map((r) => r.source)))
                   .filter(Boolean)
                   .map((value) => (
                     <SelectItem key={value} value={value}>
@@ -439,12 +492,12 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               איפוס מסנני עובדים
             </Button>
             <ReadState label="דיווחי עובדים" query={workers} retry={() => void workers.refetch()} />
-            {workers.data !== undefined && (
+            {workerRows !== undefined && (
               <>
                 <p className="text-sm">
-                  {filteredWorkers.length} מתוך {workers.data.length} דיווחי עובדים שנטענו
+                  {filteredWorkers.length} מתוך {workerRows.length} דיווחי עובדים שנטענו
                 </p>
-                {!workers.data.length ? (
+                {!workerRows.length ? (
                   <p>אין דיווחי עובדים</p>
                 ) : !filteredWorkers.length ? (
                   <p>אין תוצאות במסנני העובדים</p>
@@ -478,6 +531,15 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                       </article>
                     ))}
                   </div>
+                )}
+                {workers.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    disabled={workers.isFetchingNextPage}
+                    onClick={() => void workers.fetchNextPage()}
+                  >
+                    {workers.isFetchingNextPage ? "טוען דיווחי עובדים…" : "טען עוד דיווחי עובדים"}
+                  </Button>
                 )}
               </>
             )}

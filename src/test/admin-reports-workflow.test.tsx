@@ -19,9 +19,9 @@ const io = vi.hoisted(() => ({
   userId: "admin-a" as string | null,
   role: "admin",
   loading: false,
-  reports: vi.fn<() => Promise<Reply>>(),
+  reports: vi.fn<(args: { filter: string | null; start: number; end: number }) => Promise<Reply>>(),
   profiles: vi.fn<() => Promise<Reply>>(),
-  workers: vi.fn<() => Promise<Reply>>(),
+  workers: vi.fn<(args: unknown) => Promise<Reply>>(),
   update: vi.fn<(args: { _report_id: string; _status: string }) => Promise<Reply>>(),
   workerUpdate:
     vi.fn<
@@ -64,16 +64,29 @@ vi.mock("sonner", () => ({ toast: { success: io.success, error: io.error } }));
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     from: (table: string) => ({
-      select: () => ({
-        order: () => io.reports(),
-        in: () => {
-          if (table !== "profiles") throw new Error("unexpected read");
-          return io.profiles();
-        },
-      }),
+      select: () => {
+        if (table === "reports") {
+          let filter: string | null = null;
+          const builder = {
+            order: () => builder,
+            or: (value: string) => {
+              filter = value;
+              return builder;
+            },
+            range: (start: number, end: number) => io.reports({ filter, start, end }),
+          };
+          return builder;
+        }
+        return {
+          in: () => {
+            if (table !== "profiles") throw new Error("unexpected read");
+            return io.profiles();
+          },
+        };
+      },
     }),
     rpc: (name: string, args: { _report_id: string; _status: string }) => {
-      if (name === "get_admin_operator_client_reports") return io.workers();
+      if (name === "get_admin_operator_client_reports_page") return io.workers(args);
       if (name === "admin_update_report_status") return io.update(args);
       if (name === "admin_update_operator_client_report")
         return io.workerUpdate(args as Parameters<typeof io.workerUpdate>[0]);
@@ -213,6 +226,71 @@ beforeEach(() => {
 });
 
 describe("reports workspace", () => {
+  it("offers a continuation for client and operator reports beyond the first page", async () => {
+    const clientPage = Array.from({ length: 101 }, (_, index) => ({
+      ...a,
+      id: `00000000-0000-4000-8000-${String(101 - index).padStart(12, "0")}`,
+      reason: `דיווח לקוח ${index}`,
+    }));
+    const workerPage = Array.from({ length: 101 }, (_, index) => ({
+      ...worker,
+      id: `00000000-0000-4000-8001-${String(101 - index).padStart(12, "0")}`,
+      reason: `דיווח עובד ${index}`,
+    }));
+    io.reports
+      .mockResolvedValueOnce({ data: clientPage, error: null })
+      .mockResolvedValueOnce({ data: [clientPage[100]], error: null });
+    io.workers
+      .mockResolvedValueOnce({ data: workerPage, error: null })
+      .mockResolvedValueOnce({ data: [workerPage[100]], error: null });
+
+    mount();
+    const clients = await screen.findByRole("region", { name: "דיווחי לקוחות" });
+    const operators = screen.getByRole("region", { name: "דיווחי עובדים" });
+    expect(await within(clients).findByText("דיווח לקוח 0")).toBeInTheDocument();
+    expect(await within(operators).findByText("דיווח עובד 0")).toBeInTheDocument();
+    expect(within(clients).queryByText("דיווח לקוח 100")).not.toBeInTheDocument();
+    expect(within(operators).queryByText("דיווח עובד 100")).not.toBeInTheDocument();
+    await userEvent.click(within(clients).getByRole("button", { name: "טען עוד דיווחי לקוחות" }));
+    await userEvent.click(within(operators).getByRole("button", { name: "טען עוד דיווחי עובדים" }));
+    expect(await within(clients).findByText("דיווח לקוח 100")).toBeInTheDocument();
+    expect(await within(operators).findByText("דיווח עובד 100")).toBeInTheDocument();
+    expect(io.reports.mock.calls[1][0]).toEqual({
+      filter: `created_at.lt.${a.created_at},and(created_at.eq.${a.created_at},id.lt.${clientPage[99].id})`,
+      start: 0,
+      end: 100,
+    });
+    expect(io.workers.mock.calls[1][0]).toEqual({
+      _before_created_at: a.created_at,
+      _before_id: workerPage[99].id,
+      _page_size: 101,
+    });
+    expect(within(clients).getAllByText("דיווח לקוח 100")).toHaveLength(1);
+    expect(within(operators).getAllByText("דיווח עובד 100")).toHaveLength(1);
+  });
+
+  it("keeps loaded reports and retries the same cursor after a later page fails", async () => {
+    const firstPage = Array.from({ length: 101 }, (_, index) => ({
+      ...a,
+      id: `00000000-0000-4000-8000-${String(101 - index).padStart(12, "0")}`,
+      reason: `דיווח לקוח ${index}`,
+    }));
+    io.reports
+      .mockResolvedValueOnce({ data: firstPage, error: null })
+      .mockRejectedValueOnce(new Error("page unavailable"))
+      .mockResolvedValueOnce({ data: [firstPage[100]], error: null });
+    mount();
+    const clients = await screen.findByRole("region", { name: "דיווחי לקוחות" });
+    expect(await within(clients).findByText("דיווח לקוח 0")).toBeInTheDocument();
+    await userEvent.click(within(clients).getByRole("button", { name: "טען עוד דיווחי לקוחות" }));
+    expect(await within(clients).findByRole("alert")).toHaveTextContent("רענון דיווחי לקוחות נכשל");
+    expect(within(clients).getByText("דיווח לקוח 0")).toBeInTheDocument();
+    expect(within(clients).queryByText("דיווח לקוח 100")).not.toBeInTheDocument();
+    await userEvent.click(within(clients).getByRole("button", { name: "טען עוד דיווחי לקוחות" }));
+    expect(await within(clients).findByText("דיווח לקוח 100")).toBeInTheDocument();
+    expect(io.reports.mock.calls[1][0].filter).toBe(io.reports.mock.calls[2][0].filter);
+  });
+
   it("supports keyboard cancellation and restores focus to the detail trigger", async () => {
     mount();
     await open();

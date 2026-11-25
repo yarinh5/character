@@ -240,7 +240,9 @@ targeted within one business day; this does not create automatic 24/7 technical 
   contains a report ID and generic text, not the client's notes or identity. This is covered by a
   structural regression and a written pgTAP case, but live delivery remains **NOT RUN**.
 
-## 2026-11-25 remaining WP11 report-history gap
+## 2026-11-25 WP11 report-history pagination
 
-- The admin reports workspace makes one unpaged client-report read and one unpaged operator-report RPC read. Its counts and search describe only loaded rows, and there is no continuation control. The audit-log workspace already has cursor pagination, but that does not expose older reports here.
-- A future fix must page both report sources with stable ordering, preserve admin-only reads and status-update invalidation, and distinguish a page failure from an empty history. This is a verified code gap, not evidence of a live row cap or of Product acceptance.
+- Cause: the admin reports workspace made one unpaged read per report source and had no continuation control. Older rows could be unreachable when a response is capped. The audit-log workspace's cursor pagination did not cover reports.
+- Both report sources now use bounded 100-row pages with a one-row lookahead and stable descending `(created_at, id)` cursors. Client reports keep table RLS; a new forward-only operator-report RPC keeps the old row shape, requires admin authorization, rejects partial cursors and invalid page sizes, and caps output at 101. The old RPC remains available. Profile enrichment is batched rather than sent as one growing ID list.
+- The UI keeps loaded rows after a later page fails, offers an explicit continuation retry, and updates/invalidate the paged cache after moderation. Search and counts explicitly describe loaded rows rather than claiming a global total.
+- RED reproduced the missing continuation. Final focused UI tests passed 32/32; full UI tests 676/676; DB Offline tests 101/101; typecheck, scoped lint and client/SSR build passed. The written pgTAP case and the PostgREST keyset filter still require live verification. No migration was applied; Product acceptance remains open.
