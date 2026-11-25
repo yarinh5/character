@@ -116,6 +116,48 @@ SELECT is((SELECT count(*)::integer FROM public.audit_logs
   4, 'Every successful transition writes its actor, target and role audit');
 
 RESET ROLE;
+UPDATE public.operators
+SET deleted_at = clock_timestamp(), is_active = false,
+  availability_status = 'offline'
+WHERE user_id = '00000000-0000-4000-8000-000000119302';
+SET LOCAL ROLE authenticated;
+SELECT throws_like($$SELECT public.admin_set_user_role(
+  '00000000-0000-4000-8000-000000119302', 'operator')$$,
+  'archived_operator_role_change_forbidden',
+  'Archived operator cannot be reactivated through role assignment');
+SELECT results_eq(
+  $$SELECT role FROM public.user_roles
+    WHERE user_id = '00000000-0000-4000-8000-000000119302'$$,
+  $$VALUES ('client'::public.app_role)$$,
+  'Rejected archived-operator transition keeps the client role');
+SELECT ok(EXISTS (SELECT 1 FROM public.operators
+  WHERE user_id = '00000000-0000-4000-8000-000000119302'
+    AND deleted_at IS NOT NULL AND NOT is_active),
+  'Rejected transition leaves the archived operator inactive');
+
+RESET ROLE;
+UPDATE public.operators SET deleted_at = NULL
+WHERE user_id = '00000000-0000-4000-8000-000000119302';
+UPDATE public.profiles SET deleted_at = clock_timestamp(), status = 'archived'
+WHERE user_id = '00000000-0000-4000-8000-000000119302';
+SET LOCAL ROLE authenticated;
+SELECT throws_like($$SELECT public.admin_set_user_role(
+  '00000000-0000-4000-8000-000000119302', 'operator')$$,
+  'archived_profile_role_change_forbidden',
+  'Archived profile cannot receive a new role');
+SELECT results_eq(
+  $$SELECT role FROM public.user_roles
+    WHERE user_id = '00000000-0000-4000-8000-000000119302'$$,
+  $$VALUES ('client'::public.app_role)$$,
+  'Rejected archived-profile transition keeps the client role');
+SELECT is((SELECT count(*)::integer FROM public.audit_logs
+  WHERE action = 'user.role_changed'
+    AND entity_id = '00000000-0000-4000-8000-000000119302'),
+  4, 'Neither archived transition writes an audit entry');
+
+RESET ROLE;
+UPDATE public.profiles SET deleted_at = NULL, status = 'active'
+WHERE user_id = '00000000-0000-4000-8000-000000119302';
 CREATE FUNCTION pg_temp.wp11_reject_role_audit()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
