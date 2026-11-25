@@ -229,6 +229,8 @@ describe("admin user directory server boundary", () => {
   );
 
   it("bans a user in Auth before reporting a blocked profile", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     const writes: string[] = [];
     io.authUpdate.mockImplementation(async () => {
       writes.push("auth-ban");
@@ -269,6 +271,8 @@ describe("admin user directory server boundary", () => {
   });
 
   it("does not claim a status change if Auth rejects the ban", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     io.authUpdate.mockResolvedValueOnce({ error: { message: "auth unavailable" } });
     await expect(
       setStatus({
@@ -276,11 +280,15 @@ describe("admin user directory server boundary", () => {
         context: context(),
       }),
     ).rejects.toThrow("auth unavailable");
-    expect(io.from).toHaveBeenCalledExactlyOnceWith("user_roles");
+    expect(io.from).toHaveBeenCalledTimes(2);
+    expect(io.from).toHaveBeenNthCalledWith(1, "user_roles");
+    expect(io.from).toHaveBeenNthCalledWith(2, "user_roles");
     expect(io.audit).not.toHaveBeenCalled();
   });
 
   it("uses the Auth ban for blocked status in the edit form", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     io.from.mockImplementation((table: string) => {
       if (table === "user_roles")
         return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
@@ -311,6 +319,8 @@ describe("admin user directory server boundary", () => {
   });
 
   it("unbans only after an active profile write succeeds", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     const writes: string[] = [];
     io.from.mockImplementation((table: string) => {
       if (table === "user_roles")
@@ -402,8 +412,25 @@ describe("admin user directory server boundary", () => {
   });
 
   it.each([setStatus, update])(
+    "rejects generic status changes for another admin before mutation",
+    async (action) => {
+      await expect(
+        action({
+          data: { user_id: "00000000-0000-4000-8000-000000000002", status: "blocked" },
+          context: context(),
+        }),
+      ).rejects.toThrow("admin");
+      expect(io.authUpdate).not.toHaveBeenCalled();
+      expect(io.from).not.toHaveBeenCalledWith("profiles");
+      expect(io.audit).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([setStatus, update])(
     "never reactivates an archived account through a generic user action",
     async (action) => {
+      io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+      io.role.mockResolvedValueOnce({ data: null, error: null });
       io.from.mockImplementation((table: string) => {
         if (table === "user_roles")
           return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
@@ -434,6 +461,8 @@ describe("admin user directory server boundary", () => {
   it.each([setStatus, update])(
     "never reactivates an account with a confirmed deletion request",
     async (action) => {
+      io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+      io.role.mockResolvedValueOnce({ data: null, error: null });
       const cancelledFilter = vi.fn(() => ({
         limit: () => ({ maybeSingle: async () => ({ data: { id: "request-a" }, error: null }) }),
       }));

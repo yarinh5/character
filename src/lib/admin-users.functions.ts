@@ -19,6 +19,17 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
+async function ensureNotAdminTarget(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) throw new Error("admin_account_requires_separate_deprovisioning");
+}
+
 async function setSingleRole(supabase: SupabaseClient<Database>, userId: string, role: AppRole) {
   const { data, error } = await supabase.rpc("admin_set_user_role", {
     _user_id: userId,
@@ -157,6 +168,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.status && data.user_id === context.userId) {
       throw new Error("לא ניתן לשנות את הסטטוס של עצמך מכאן");
     }
+    if (data.status) await ensureNotAdminTarget(data.user_id);
     if (data.status === "active") await ensureReactivatable(data.user_id);
 
     if (data.status === "blocked") await setAuthBan(data.user_id, true);
@@ -217,6 +229,7 @@ export const adminSetStatus = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן לשנות את הסטטוס של עצמך מכאן");
     }
+    await ensureNotAdminTarget(data.user_id);
     if (data.status === "active") await ensureReactivatable(data.user_id);
     if (data.status === "blocked") await setAuthBan(data.user_id, true);
     const { error } = await supabaseAdmin
@@ -239,14 +252,7 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן למחוק את עצמך");
     }
-    const { data: adminRole, error: roleError } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", data.user_id)
-      .eq("role", "admin")
-      .maybeSingle();
-    if (roleError) throw new Error(roleError.message);
-    if (adminRole) throw new Error("admin_account_requires_separate_deprovisioning");
+    await ensureNotAdminTarget(data.user_id);
     const { data: profile, error: lookupError } = await supabaseAdmin
       .from("profiles")
       .select("email")
