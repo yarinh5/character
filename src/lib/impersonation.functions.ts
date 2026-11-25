@@ -14,6 +14,21 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
+async function getActiveTarget(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("email, display_name, status, deleted_at, pii_archived_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const email = data?.email;
+  if (!email) throw new Error("המשתמש לא נמצא");
+  if (data.status !== "active" || data.deleted_at || data.pii_archived_at) {
+    throw new Error("החשבון אינו פעיל");
+  }
+  return { ...data, email };
+}
+
 export const adminImpersonate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ user_id: z.string().uuid() }).parse(d))
@@ -22,12 +37,7 @@ export const adminImpersonate = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן להתחזות לעצמך");
     }
-    const { data: target } = await supabaseAdmin
-      .from("profiles")
-      .select("email, display_name")
-      .eq("user_id", data.user_id)
-      .maybeSingle();
-    if (!target?.email) throw new Error("המשתמש לא נמצא");
+    const target = await getActiveTarget(data.user_id);
 
     const { data: link, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
@@ -53,12 +63,7 @@ export const adminSendPasswordReset = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ user_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
-    const { data: target } = await supabaseAdmin
-      .from("profiles")
-      .select("email")
-      .eq("user_id", data.user_id)
-      .maybeSingle();
-    if (!target?.email) throw new Error("המשתמש לא נמצא");
+    const target = await getActiveTarget(data.user_id);
 
     const { data: link, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
