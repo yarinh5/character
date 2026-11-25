@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { Json } from "@/integrations/supabase/types";
 
 type Notif = {
   id: string;
@@ -15,12 +16,36 @@ type Notif = {
   link: string | null;
   is_read: boolean;
   created_at: string;
+  metadata: Json | null;
 };
+
+function operationalWaitState(notification: Notif) {
+  if (notification.type !== "operational_wait_alert") return null;
+  const metadata = notification.metadata;
+  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") return null;
+  const state = metadata.state;
+  const waitSeconds = metadata.wait_seconds_at_alert;
+  if (
+    (state !== "active" && state !== "resolved") ||
+    typeof waitSeconds !== "number" ||
+    !Number.isSafeInteger(waitSeconds) ||
+    waitSeconds < 0
+  ) {
+    return null;
+  }
+  return { state, waitSeconds };
+}
+
+function isExactCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
 
 export function NotificationBell() {
   const { loading, session, user } = useAuth();
   const identityId = !loading && user && session?.user.id === user.id ? user.id : null;
   const [items, setItems] = useState<Notif[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [stateIdentity, setStateIdentity] = useState<string | null>(null);
   const [hasVerifiedRead, setHasVerifiedRead] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
@@ -47,17 +72,35 @@ export function NotificationBell() {
       else setInitialLoading(true);
 
       try {
-        const { data, error } = await supabase
-          .from("notifications")
-          .select("id, type, title, body, link, is_read, created_at")
-          .eq("user_id", identityId)
-          .order("created_at", { ascending: false })
-          .limit(20);
+        const [listResult, unreadResult] = await Promise.all([
+          supabase
+            .from("notifications")
+            .select("id, type, title, body, link, is_read, created_at, metadata", {
+              count: "exact",
+            })
+            .eq("user_id", identityId)
+            .order("created_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("notifications")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", identityId)
+            .eq("is_read", false),
+        ]);
 
         if (generation !== generationRef.current || request !== requestRef.current) return false;
-        if (error) throw error;
+        if (
+          listResult.error ||
+          unreadResult.error ||
+          !isExactCount(listResult.count) ||
+          !isExactCount(unreadResult.count)
+        ) {
+          throw listResult.error ?? unreadResult.error ?? new Error("Invalid notification count");
+        }
 
-        setItems(data ?? []);
+        setItems(listResult.data ?? []);
+        setTotalCount(listResult.count);
+        setUnreadCount(unreadResult.count);
         setStateIdentity(identityId);
         verifiedReadRef.current = true;
         setHasVerifiedRead(true);
@@ -86,6 +129,8 @@ export function NotificationBell() {
     verifiedReadRef.current = false;
     markPendingRef.current = false;
     setItems([]);
+    setTotalCount(0);
+    setUnreadCount(0);
     setStateIdentity(identityId);
     setHasVerifiedRead(false);
     setInitialLoading(Boolean(identityId));
@@ -138,7 +183,8 @@ export function NotificationBell() {
 
   const currentItems = stateIdentity === identityId ? items : [];
   const currentHasVerifiedRead = stateIdentity === identityId && hasVerifiedRead;
-  const unread = currentItems.filter((item) => !item.is_read).length;
+  const currentTotalCount = stateIdentity === identityId ? totalCount : 0;
+  const unread = stateIdentity === identityId ? unreadCount : 0;
 
   const markAllRead = async () => {
     if (!identityId || unread === 0 || markPendingRef.current) return;
@@ -236,6 +282,7 @@ export function NotificationBell() {
             <div className="p-6 text-sm text-center text-muted-foreground">אין התראות</div>
           )}
           {currentItems.map((notification) => {
+            const waitState = operationalWaitState(notification);
             const content = (
               <div
                 className={cn(
@@ -254,6 +301,23 @@ export function NotificationBell() {
                         {notification.body}
                       </div>
                     )}
+                    {waitState && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 font-medium",
+                            waitState.state === "active"
+                              ? "bg-amber-100 text-amber-900"
+                              : "bg-emerald-100 text-emerald-900",
+                          )}
+                        >
+                          {waitState.state === "active" ? "פעילה" : "נפתרה"}
+                        </span>
+                        <span className="text-muted-foreground">
+                          המתנה בעת ההתראה: {Math.floor(waitState.waitSeconds / 60)} דק׳
+                        </span>
+                      </div>
+                    )}
                     <div className="text-[10px] text-muted-foreground mt-1">
                       {new Date(notification.created_at).toLocaleString("he-IL")}
                     </div>
@@ -269,6 +333,11 @@ export function NotificationBell() {
               <div key={notification.id}>{content}</div>
             );
           })}
+          {currentHasVerifiedRead && currentTotalCount > currentItems.length && (
+            <div className="border-t p-3 text-center text-xs text-muted-foreground">
+              מוצגות {currentItems.length} ההתראות האחרונות מתוך {currentTotalCount}.
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

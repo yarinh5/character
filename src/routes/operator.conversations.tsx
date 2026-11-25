@@ -47,16 +47,24 @@ function formatTime(iso: string | null) {
   return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" });
 }
 
-function OperatorConversationsPage() {
+export function OperatorConversationsPage() {
   const { operator, isAdmin, walletBalance } = useOperator();
   const { user } = useAuth();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
   const [characterFilter, setCharacterFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [accessGeneration, setAccessGeneration] = useState(0);
+  const [accessChannelState, setAccessChannelState] = useState<"checking" | "ready" | "error">(
+    "checking",
+  );
+  const conversationQueryPrefix = useMemo(
+    () => ["operator-conversations", user?.id ?? "anonymous"] as const,
+    [user?.id],
+  );
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ["operator-conversations", operator?.id ?? "admin"],
+    queryKey: [...conversationQueryPrefix, operator?.id ?? "admin", isAdmin, accessGeneration],
     queryFn: async () => {
       let characterIds: string[] | null = null;
       if (operator && !isAdmin) {
@@ -118,17 +126,31 @@ function OperatorConversationsPage() {
         profiles: profileMap.get(c.client_id) ?? null,
       })) as Row[];
     },
+    enabled: Boolean(user?.id) && accessChannelState === "ready",
     refetchInterval: 30000,
   });
 
   useEffect(() => {
+    if (!user?.id) {
+      qc.removeQueries({ queryKey: ["operator-conversations"] });
+      setAccessChannelState("checking");
+      return;
+    }
+    const userQueryPrefix = ["operator-conversations", user.id] as const;
+    let disposed = false;
+    setAccessChannelState("checking");
+    qc.removeQueries({ queryKey: userQueryPrefix });
+    const invalidateCurrentUser = () => {
+      qc.removeQueries({ queryKey: userQueryPrefix });
+      setAccessGeneration((current) => current + 1);
+    };
     const ch = supabase
       .channel("operator-conversations-list")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
       .on(
         "postgres_changes",
@@ -138,11 +160,36 @@ function OperatorConversationsPage() {
           table: "conversation_read_states",
           filter: user?.id ? `user_id=eq.${user.id}` : undefined,
         },
-        () => qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        () => qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_conversation_access_versions",
+          filter: user?.id ? `user_id=eq.${user.id}` : undefined,
+        },
+        () => {
+          invalidateCurrentUser();
+        },
+      )
+      .subscribe((status) => {
+        if (disposed) return;
+        if (status === "SUBSCRIBED") {
+          invalidateCurrentUser();
+          setAccessChannelState("ready");
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
+          qc.removeQueries({ queryKey: userQueryPrefix });
+          setAccessChannelState("error");
+        }
+      });
     return () => {
+      disposed = true;
       supabase.removeChannel(ch);
+      qc.removeQueries({ queryKey: userQueryPrefix });
     };
   }, [qc, user?.id]);
 
@@ -243,7 +290,7 @@ function OperatorConversationsPage() {
         )}
       </div>
 
-      {isLoading && (
+      {(accessChannelState === "checking" || isLoading) && (
         <div className="space-y-2" role="status" aria-label="טוען שיחות">
           <span className="sr-only">טוען שיחות</span>
           {Array.from({ length: 5 }).map((_, i) => (
@@ -252,15 +299,19 @@ function OperatorConversationsPage() {
         </div>
       )}
 
-      {!isLoading && error && (
+      {accessChannelState !== "checking" && (accessChannelState === "error" || error) && (
         <div className="py-12 text-center" role="alert">
           <p className="font-medium text-destructive">לא ניתן לטעון את השיחות כרגע</p>
-          <p className="mt-2 text-sm text-muted-foreground">אפשר לנסות שוב בעוד רגע.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {accessChannelState === "error"
+              ? "החיבור המאובטח נותק. הרשימה הוסתרה עד לחיבור מחדש."
+              : "אפשר לנסות שוב בעוד רגע."}
+          </p>
           <Button
             variant="outline"
             className="mt-4"
             onClick={() => void refetch()}
-            disabled={isFetching}
+            disabled={isFetching || accessChannelState !== "ready"}
           >
             <RefreshCw className={`ml-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             {isFetching ? "מנסה שוב" : "נסה שוב"}
@@ -268,25 +319,30 @@ function OperatorConversationsPage() {
         </div>
       )}
 
-      {!isLoading && !error && !hasConversations && (
+      {accessChannelState === "ready" && !isLoading && !error && !hasConversations && (
         <div className="text-center py-16">
           <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
           <p className="text-muted-foreground">אין שיחות</p>
         </div>
       )}
 
-      {!isLoading && !error && hasConversations && filtered.length === 0 && (
-        <div className="text-center py-16">
-          <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
-          <Button variant="outline" className="mt-4" onClick={resetFilters}>
-            איפוס מסננים
-          </Button>
-        </div>
-      )}
+      {accessChannelState === "ready" &&
+        !isLoading &&
+        !error &&
+        hasConversations &&
+        filtered.length === 0 && (
+          <div className="text-center py-16">
+            <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
+            <Button variant="outline" className="mt-4" onClick={resetFilters}>
+              איפוס מסננים
+            </Button>
+          </div>
+        )}
 
       <div className="space-y-2">
-        {!isLoading &&
+        {accessChannelState === "ready" &&
+          !isLoading &&
           !error &&
           filtered.map((c) => (
             <Link key={c.id} to="/operator/chat/$conversationId" params={{ conversationId: c.id }}>

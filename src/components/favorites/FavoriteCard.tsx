@@ -70,6 +70,9 @@ export function FavoriteCard({
                   .filter(Boolean)
                   .join(" · ")}
               </p>
+              <p className="text-xs text-muted-foreground">
+                {character.availability_status === "available" ? "זמינה עכשיו" : "לא זמינה כרגע"}
+              </p>
             </div>
             <Tooltip>
               <TooltipTrigger asChild>

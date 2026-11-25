@@ -130,8 +130,8 @@ function OperatorSettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>סטטוס זמינות</Label>
-                <div className="flex gap-2">
+                <span id="operator-availability-label" className="text-sm font-medium leading-none">סטטוס זמינות</span>
+                <div className="flex gap-2" role="group" aria-labelledby="operator-availability-label">
                   {STATUS_OPTIONS.map((s) => (
                     <button
                       key={s.value}

@@ -180,16 +180,34 @@ function UsersPage() {
                     <StatusBadge status={u.status} />
                   </div>
                   <div className="flex gap-1 flex-wrap">
-                    <Button size="sm" variant="ghost" title="עריכה" onClick={() => setEditing(u)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="עריכה"
+                      aria-label={`עריכת ${u.display_name ?? u.email ?? "משתמש"}`}
+                      onClick={() => setEditing(u)}
+                    >
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" title="איפוס סיסמה" onClick={() => setResetting(u)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="איפוס סיסמה"
+                      aria-label={`איפוס סיסמה עבור ${u.display_name ?? u.email ?? "משתמש"}`}
+                      onClick={() => setResetting(u)}
+                    >
                       <KeyRound className="h-4 w-4" />
                     </Button>
                     <SendResetButton user={u} />
                     <ImpersonateButton user={u} />
                     <ToggleStatusButton user={u} onDone={invalidate} />
-                    <Button size="sm" variant="ghost" title="מחיקה" onClick={() => setDeleting(u)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="מחיקה"
+                      aria-label={`מחיקת ${u.display_name ?? u.email ?? "משתמש"}`}
+                      onClick={() => setDeleting(u)}
+                    >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
@@ -248,7 +266,14 @@ function ToggleStatusButton({ user, onDone }: { user: Row; onDone: () => void })
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title={blocked ? "שחרור חסימה" : "חסימה"}>
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title={blocked ? "שחרור חסימה" : "חסימה"}
+      aria-label={`${blocked ? "שחרור חסימה" : "חסימה"} עבור ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
       {blocked ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Ban className="h-4 w-4 text-warning" />}
     </Button>
   );
@@ -274,7 +299,14 @@ function SendResetButton({ user }: { user: Row }) {
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title="שלח קישור איפוס סיסמה">
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title="שלח קישור איפוס סיסמה"
+      aria-label={`שליחת קישור איפוס סיסמה עבור ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
       <Mail className="h-4 w-4" />
     </Button>
   );
@@ -308,7 +340,14 @@ function ImpersonateButton({ user }: { user: Row }) {
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title="התחזה למשתמש">
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title="התחזה למשתמש"
+      aria-label={`התחזות אל ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
       <UserCog className="h-4 w-4" />
     </Button>
   );
@@ -346,21 +385,21 @@ function CreateUserDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם מלא</Label>
-            <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            <Label htmlFor="admin-user-create-full-name">שם מלא</Label>
+            <Input id="admin-user-create-full-name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           </div>
           <div>
-            <Label>אימייל</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="admin-user-create-email">אימייל</Label>
+            <Input id="admin-user-create-email" type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div>
-            <Label>סיסמה (לפחות 8 תווים)</Label>
-            <Input type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Label htmlFor="admin-user-create-password">סיסמה (לפחות 8 תווים)</Label>
+            <Input id="admin-user-create-password" type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
           <div>
-            <Label>תפקיד</Label>
+            <Label htmlFor="admin-user-create-role">תפקיד</Label>
             <Select value={role} onValueChange={(v) => setRole(v as Row["role"])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="admin-user-create-role"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="client">לקוח</SelectItem>
                 <SelectItem value="operator">עובד</SelectItem>
@@ -429,17 +468,17 @@ function EditUserDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם תצוגה</Label>
-            <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            <Label htmlFor="admin-user-edit-display-name">שם תצוגה</Label>
+            <Input id="admin-user-edit-display-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </div>
           <div>
-            <Label>אימייל</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="admin-user-edit-email">אימייל</Label>
+            <Input id="admin-user-edit-email" type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div>
-            <Label>תפקיד</Label>
+            <Label htmlFor="admin-user-edit-role">תפקיד</Label>
             <Select value={role} onValueChange={(v) => setRole(v as Row["role"])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="admin-user-edit-role"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="client">לקוח</SelectItem>
                 <SelectItem value="operator">עובד</SelectItem>
@@ -448,9 +487,9 @@ function EditUserDialog({
             </Select>
           </div>
           <div>
-            <Label>סטטוס</Label>
+            <Label htmlFor="admin-user-edit-status">סטטוס</Label>
             <Select value={status} onValueChange={(v) => setStatus(v as "active" | "blocked")}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="admin-user-edit-status"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">פעיל</SelectItem>
                 <SelectItem value="blocked">חסום</SelectItem>
@@ -502,8 +541,8 @@ function ResetPasswordDialog({
           <DialogDescription>{user.email}</DialogDescription>
         </DialogHeader>
         <div>
-          <Label>סיסמה חדשה</Label>
-          <Input type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Label htmlFor="admin-user-reset-password">סיסמה חדשה</Label>
+          <Input id="admin-user-reset-password" type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         <DialogFooter>
           <Button onClick={submit} disabled={busy}>אפס</Button>

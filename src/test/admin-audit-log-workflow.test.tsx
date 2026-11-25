@@ -48,7 +48,16 @@ const log = {
   entity_id: "report-a",
   metadata: { previous_status: "open", status: "resolved" },
   actor: { display_name: "מנהל א", email: "a@example.test" },
-  created_at: "2026-10-01T10:00:00Z",
+  // PostgREST may serialize timestamptz values with an explicit numeric offset.
+  created_at: "2026-10-01T10:00:00+00:00",
+};
+const firstPage = {
+  items: [log],
+  nextCursor: { createdAt: log.created_at, id: log.id },
+};
+const finalPage = {
+  items: [{ ...log, id: "log-b", created_at: "2026-09-30T10:00:00+00:00" }],
+  nextCursor: null,
 };
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -96,18 +105,23 @@ beforeAll(() => {
 beforeEach(() => {
   io.sessionId = io.userId = "admin-a";
   io.role = "admin";
-  io.list.mockReset().mockResolvedValue([log]);
+  io.list.mockReset().mockResolvedValue({ items: [log], nextCursor: null });
 });
 
 describe("audit workflow", () => {
   it("shows loading, limited loaded count, explicit status metadata and unknown-action fallback", async () => {
-    const pending = deferred<(typeof log)[]>();
+    const pending = deferred<{ items: (typeof log)[]; nextCursor: null }>();
     io.list.mockReturnValueOnce(pending.promise);
     mount();
     expect(await screen.findByRole("status", { name: "טוען יומן" })).toBeInTheDocument();
-    await act(async () => pending.resolve([log, { ...log, id: "other", action: "legacy.event" }]));
+    await act(async () =>
+      pending.resolve({
+        items: [log, { ...log, id: "other", action: "legacy.event" }],
+        nextCursor: null,
+      }),
+    );
     expect(await screen.findByText("legacy.event")).toBeInTheDocument();
-    expect(screen.getByText("2 מתוך 2 רשומות שנטענו (מגבלה: 200)")).toBeInTheDocument();
+    expect(screen.getByText("2 מתוך 2 רשומות שנטענו")).toBeInTheDocument();
     expect(screen.getByText(/היעדר תוצאה אינו מעיד/)).toBeInTheDocument();
     expect(screen.getAllByText("סטטוס קודם")).toHaveLength(2);
     expect(io.list).toHaveBeenCalledWith({ data: { limit: 200 } });
@@ -116,7 +130,10 @@ describe("audit workflow", () => {
     mount();
     await screen.findByText("מנהל א");
     const user = userEvent.setup();
-    io.list.mockResolvedValueOnce([{ ...log, action: "client.status_changed" }]);
+    io.list.mockResolvedValueOnce({
+      items: [{ ...log, action: "client.status_changed" }],
+      nextCursor: null,
+    });
     await user.click(screen.getByRole("combobox", { name: "סוג פעולה" }));
     await user.click(await screen.findByRole("option", { name: "שינוי סטטוס לקוח" }));
     await waitFor(() =>
@@ -133,7 +150,9 @@ describe("audit workflow", () => {
     expect(await screen.findByText("מנהל א")).toBeInTheDocument();
   });
   it("distinguishes initial failure from empty and retries", async () => {
-    io.list.mockRejectedValueOnce(new Error("private backend")).mockResolvedValueOnce([]);
+    io.list
+      .mockRejectedValueOnce(new Error("private backend"))
+      .mockResolvedValueOnce({ items: [], nextCursor: null });
     mount();
     expect(await screen.findByRole("alert")).not.toHaveTextContent("private backend");
     expect(screen.queryByText("לא הוחזרו אירועים בקריאה זו.")).not.toBeInTheDocument();
@@ -141,8 +160,10 @@ describe("audit workflow", () => {
     expect(await screen.findByText("לא הוחזרו אירועים בקריאה זו.")).toBeInTheDocument();
   });
   it("keeps cached rows through refresh and failure, then allows recovery", async () => {
-    const refresh = deferred<(typeof log)[]>();
-    io.list.mockResolvedValueOnce([log]).mockReturnValueOnce(refresh.promise);
+    const refresh = deferred<{ items: (typeof log)[]; nextCursor: null }>();
+    io.list
+      .mockResolvedValueOnce({ items: [log], nextCursor: null })
+      .mockReturnValueOnce(refresh.promise);
     mount();
     await screen.findByText("מנהל א");
     fireEvent.click(screen.getByRole("button", { name: "רענון יומן" }));
@@ -172,22 +193,76 @@ describe("audit workflow", () => {
       expect(io.list).toHaveBeenCalledTimes(count);
       io.sessionId = io.userId = "admin-b";
       io.role = "admin";
-      io.list.mockResolvedValue([]);
+      io.list.mockResolvedValue({ items: [], nextCursor: null });
       view.rerenderAuth();
       expect(await screen.findByRole("textbox")).toHaveValue("");
       expect(await screen.findByText("לא הוחזרו אירועים בקריאה זו.")).toBeInTheDocument();
     },
   );
   it("ignores a late A read after B becomes current", async () => {
-    const pending = deferred<(typeof log)[]>();
+    const pending = deferred<{ items: (typeof log)[]; nextCursor: null }>();
     io.list.mockReturnValueOnce(pending.promise);
     const view = mount();
     await screen.findByRole("status", { name: "טוען יומן" });
     io.sessionId = io.userId = "admin-b";
-    io.list.mockResolvedValue([]);
+    io.list.mockResolvedValue({ items: [], nextCursor: null });
     view.rerenderAuth();
     await screen.findByText("לא הוחזרו אירועים בקריאה זו.");
-    await act(async () => pending.resolve([log]));
+    await act(async () => pending.resolve({ items: [log], nextCursor: null }));
     expect(screen.queryByText("מנהל א")).not.toBeInTheDocument();
+  });
+
+  it("loads the next audit page with the server cursor and appends it once", async () => {
+    io.list.mockResolvedValueOnce(firstPage).mockResolvedValueOnce(finalPage);
+    mount();
+    await screen.findByText("מנהל א");
+    expect(screen.getByText("1 מתוך 1 רשומות שנטענו; קיימות רשומות נוספות")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "טעינת רשומות נוספות" }));
+
+    await waitFor(() =>
+      expect(io.list).toHaveBeenLastCalledWith({
+        data: { limit: 200, cursor: { createdAt: log.created_at, id: log.id } },
+      }),
+    );
+    expect(await screen.findByText("2 מתוך 2 רשומות שנטענו")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "טעינת רשומות נוספות" })).not.toBeInTheDocument();
+  });
+
+  it("keeps loaded pages when the next page fails and retries only that cursor", async () => {
+    io.list
+      .mockResolvedValueOnce(firstPage)
+      .mockRejectedValueOnce(new Error("private page failure"))
+      .mockResolvedValueOnce(finalPage);
+    mount();
+    await screen.findByText("מנהל א");
+
+    fireEvent.click(screen.getByRole("button", { name: "טעינת רשומות נוספות" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "טעינת הרשומות הנוספות נכשלה. הרשומות שכבר נטענו נשמרו.",
+    );
+    expect(screen.getByText("מנהל א")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "נסה לטעון רשומות נוספות שוב" }));
+    expect(await screen.findByText("2 מתוך 2 רשומות שנטענו")).toBeInTheDocument();
+    expect(io.list).toHaveBeenLastCalledWith({
+      data: { limit: 200, cursor: { createdAt: log.created_at, id: log.id } },
+    });
+  });
+
+  it("starts filtered history from its first page instead of reusing the old cursor", async () => {
+    io.list.mockResolvedValueOnce(firstPage).mockResolvedValueOnce({ items: [], nextCursor: null });
+    mount();
+    await screen.findByText("מנהל א");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("combobox", { name: "סוג פעולה" }));
+    await user.click(await screen.findByRole("option", { name: "שינוי סטטוס לקוח" }));
+
+    await waitFor(() =>
+      expect(io.list).toHaveBeenLastCalledWith({
+        data: { limit: 200, action: "client.status_changed" },
+      }),
+    );
   });
 });

@@ -424,8 +424,7 @@ function AdminAnalyticsWorkspace({ adminId }: { adminId: string }) {
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        הכיסוי מבוסס על עד 10,000 רשומות לכל מקור, והשרת עשוי לקצר את הטווח המבוקש; הטווח שהוחזר
-        בפועל הוא הקובע. זהו חלון תפעולי ולא דוח מלא.
+        הדוח מחושב באגרגציה מלאה בצד השרת עבור הטווח שהוחזר, עד 180 ימים.
       </p>
     </div>
   );

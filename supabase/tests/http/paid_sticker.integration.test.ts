@@ -19,7 +19,8 @@ import {
   runCleanupSteps,
 } from "./v4_3_http_fixtures";
 
-const suite = describe.skipIf(!localHttpReady || !localStickersEnabled);
+const paidStickerRequired = process.env.SUPABASE_LOCAL_PAID_STICKER_REQUIRED === "1";
+const suite = describe.skipIf(!paidStickerRequired && (!localHttpReady || !localStickersEnabled));
 const ids = {
   character: "00000000-0000-4000-8000-000000020301",
   conversation: "00000000-0000-4000-8000-000000020401",
@@ -43,6 +44,9 @@ suite("V4-3-C HTTP paid sticker authorization and idempotency", () => {
   let otherClient: Awaited<ReturnType<typeof signInSyntheticUser>>;
 
   beforeAll(async () => {
+    if (paidStickerRequired && (!localHttpReady || !localStickersEnabled)) {
+      throw new Error("Paid-sticker HTTP requires local auth and the verified sticker flag window");
+    }
     admin = createServiceClient();
     const owner = await createSyntheticUser(admin, emails.owner, (user) => users.push(user.id));
     const other = await createSyntheticUser(admin, emails.other, (user) => users.push(user.id));

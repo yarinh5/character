@@ -45,3 +45,53 @@
 - WP08 as a whole and AC21–AC23 are not closed by this slice. Broader readiness still depends on WP02 presence work and WP07 purchase-event integration.
 - Database, migrations, Security/RLS, dependencies, feature flags, and route structure: **None changed**.
 - Local application, QA, Production, merge, and deploy: **NOT EXECUTED**.
+
+## Canonical Operator Points and Gift Pool — offline draft, 2026-11-05
+
+- Operator Points now use a dedicated decimal wallet and immutable transaction ledger. New eligible
+  score events credit this ledger once and no longer mirror a monetary-looking payout into Client
+  Credits. Admin correction requires an explicit reason and cannot create a negative balance.
+- The existing response scorer remains the source for text and media. The established operator
+  Sticker/Gift path now emits into that same score-event stream, so it participates in the shared
+  conversation streak instead of a browser-side calculation. Admin messages do not earn points.
+- Each successful Gift purchase emits one private reward event. Eligible operators are snapshotted
+  from active, online, fresh-heartbeat rows and deduplicated by operator ID. The ten-percent pool is
+  divided in six-decimal micro-units with deterministic UUID-order remainder assignment.
+- A zero-eligible snapshot records zero distributed points and the full pool as unallocated; it does
+  not create later allocations. For non-empty snapshots the allocation sum equals the original
+  pool. Purchase/event and per-operator uniqueness prevent duplicate reward under retry.
+- Operator and Admin performance screens now read the Operator Point wallet/transactions rather
+  than Client Credit wallets, preserving session isolation and the existing error/cache states.
+
+Focused component tests pass on the draft. The DB/concurrency suite covers the 100-credit/two-worker
+case, exact Gift purchase/open, canonical Sticker score event and zero-eligible evidence, but is
+written only and **NOT RUN**. P03 is now decided and implemented Offline: only completed text,
+image and Gift messages count once; the bounded historical backfill accepts only confidently
+classified events and creates no financial/reward entries or historical notifications. Live
+DB/RLS/concurrency/Realtime and browser integration remain
+**NOT VERIFIED**; AC21–AC23 are not closed.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- Performance reads remain server-sourced and identity-scoped; the browser does not recompute the
+  points ledger. Valid cached metrics stay visible during refresh failure, old identity results are
+  rejected, and Realtime channels are removed when the effective operator changes or unmounts.
+  Point-history access uses the concrete operator/created-at index added by the draft migration.
+- Offline component regressions cover cached refresh/retry, identity mismatch, late results,
+  subscription cleanup and genuine zero values. DB reward/concurrency cases are written but **NOT
+  RUN**.
+- Live aggregation cost, Realtime delivery rate, chart rendering on target devices and production
+  query plans remain **NOT VERIFIED**; no comparative performance statement is made.
+
+## Client level projection — offline implementation, 2026-11-11
+
+- Client levels are projected server-side from deduplicated qualifying message events, with the
+  approved ranges L1 0–4, L2 5–24, L3 25–68, L4 69–250 and L5 251+. The browser is not a scoring
+  source of truth.
+- Text, completed client attachments, completed Gifts and explicit legacy Sticker events share one
+  message identity. The Gift trigger now covers `started` to `purchased` even when the canonical
+  message link was stored earlier. Gift open/replay and legacy promotion do not increment twice.
+  Each upward transition is unique and emits one transition notification.
+- Admin backfill is bounded, resumable and idempotent and intentionally emits no historical
+  transition notifications. Boundary and schema cases are written for pgTAP and **NOT RUN**; live
+  trigger ordering, concurrency, RLS and backfill volume remain **NOT VERIFIED**.

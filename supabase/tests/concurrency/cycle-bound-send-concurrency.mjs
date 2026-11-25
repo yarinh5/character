@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { assertConcurrencyMigrationVersions } from "./migration-inventory.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const projectId = "qmgkmsarzfjnqltljkjl";
@@ -173,8 +174,7 @@ class Session {
   }
 }
 const baselineSql = `SELECT json_build_object(
-  'migrations',(SELECT count(*) FROM supabase_migrations.schema_migrations),
-  'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
+  'migrations',(SELECT json_agg(version ORDER BY version) FROM supabase_migrations.schema_migrations),
   'users',(SELECT count(*) FROM auth.users),
   'operators',(SELECT count(*) FROM public.operators),
   'characters',(SELECT count(*) FROM public.characters),
@@ -344,24 +344,26 @@ async function scenario(observer, label, reverse) {
 }
 let observer;
 let baseline;
+function baselineCounts({ migrations, ...counts }) {
+  return JSON.stringify({ migrations: migrations.length, latest: migrations.at(-1), ...counts });
+}
 try {
   const target = assertLocalTarget();
   observer = new Session("observer");
   await observer.initialize();
   baseline = await observer.json(baselineSql);
-  console.log(`Baseline counts: ${JSON.stringify(baseline)}`);
-  assert.equal(baseline.migrations, 117);
-  assert.equal(baseline.latest, "20261013113744");
+  assertConcurrencyMigrationVersions(baseline.migrations);
+  console.log(`Baseline counts: ${baselineCounts(baseline)}`);
   console.log(
-    `Local stack verified: API ${target.apiPort}, DB ${target.dbPort}, migrations 117/latest 20261013113744.`,
+    `Local stack verified: API ${target.apiPort}, DB ${target.dbPort}, migrations ${baseline.migrations.length}/latest ${baseline.migrations.at(-1)}.`,
   );
   await scenario(observer, "forward", false);
   const afterForward = await observer.json(baselineSql);
-  console.log(`forward: post-cleanup=${JSON.stringify(afterForward)}`);
+  console.log(`forward: post-cleanup=${baselineCounts(afterForward)}`);
   assert.deepEqual(afterForward, baseline, "forward scenario restores baseline");
   await scenario(observer, "reverse", true);
   const afterReverse = await observer.json(baselineSql);
-  console.log(`reverse: post-cleanup=${JSON.stringify(afterReverse)}`);
+  console.log(`reverse: post-cleanup=${baselineCounts(afterReverse)}`);
   assert.deepEqual(afterReverse, baseline, "reverse scenario restores baseline");
   console.log(
     "PASS: deterministic two-session atomic claim-and-send exclusivity in both actor orders.",

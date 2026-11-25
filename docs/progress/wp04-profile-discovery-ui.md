@@ -12,6 +12,13 @@ Approved baseline: `0107fcca6f18b5af450ed49011129197126d0bb5` (the WP03 merge).
 
 ## Character profile and favorites workflow — 2026-11-01
 
+### P05 authoritative availability — implemented Offline
+
+- Discovery already used `private.character_live_availability`; profile, favorites and client chat now use the same server contract.
+- A character is available only when its configured state permits it and at least one assigned operator is active, connected (`presence_status=online`) and inside the existing heartbeat TTL.
+- Conversation assignment or a Realtime participant alone does not establish availability. Client chat polls the authoritative RPC every 30 seconds and exposes loading, error and explicit retry states.
+- The RPC only reports active, visible requested characters and does not grant conversation read/send access. Live expiry and multi-operator behavior remain DB/HTTP acceptance work.
+
 This follow-up slice starts from approved `main` baseline
 `68a93f8dcd4026a5754b53af5db400da52668e36` on the isolated branch
 `codex/wp04-character-favorites-ui`. The profile editing and Discovery work described below was
@@ -150,3 +157,128 @@ This is the documentation snapshot before Git delivery; the final report records
 This slice does not close full WP04 or AC09–AC11. Server gate/rollout, Leads and deduplication/visibility, distance/presence, multiple profile images and continuous canonical conversation/history remain separate work. No claim, ownership, capacity, timeout, pricing, permissions, backend retirement, HTTP-2 investigation or WP01.6 work was performed.
 
 Database/migration/security/RLS changes: None. Application in Local, QA and Production: NOT EXECUTED. Merge and product acceptance remain with Team Lead review.
+
+## Connected server contracts — offline draft, 2026-11-05
+
+- A forward-only migration extends the existing active-client guard so the approved mandatory
+  onboarding flag is enforced by server RPCs, not only by the profile screen. Existing users remain
+  on the current rollout behavior while the flag is disabled.
+- Discovery distance is calculated from the stored client and character city coordinates with a
+  server-side maximum-distance predicate. Missing coordinates remain unknown; they are not rendered
+  as a false zero distance.
+- A successful Like creates or refreshes one canonical client/character Lead. Retry does not create
+  a duplicate, and Lead reads are limited to admins and operators assigned to the character. It does
+  not create a chat message, NEW item or outreach action.
+- The existing conversation entry RPC now opens or returns the canonical client/character
+  conversation without assigning an operator. Historical hidden conversations remain the same
+  canonical conversation rather than being replaced by a parallel history.
+- Existing profile, Discovery, favorites and conversation component regressions pass on the local
+  draft. The new DB contract suite is written for an authorized future environment and is **NOT
+  RUN** here.
+
+P07 is now decided and implemented Offline: the canonical row keeps `new`/`in_progress`/`closed`,
+Unlike closes without deleting audit history, and a later Like marks renewed interest without
+reopening the closed Lead. An assigned operator or Admin must explicitly resume treatment through
+the existing authorized RPC. Live migrations, RLS, distance data, Auth and end-to-end conversation
+integration are **NOT VERIFIED**; WP04 and AC09–AC11 remain open pending those gates.
+
+## Existing profile completion slice — 2026-11-04
+
+- Baseline: merged `main` at `652047682250f3f2bcbf7a921ba843cbde721d44`, isolated on
+  `codex/product-completion`. WP01.5 remains paused on its separate unchanged snapshot.
+- KEEP: the current profile route, two-write save contract, returned-row verification, avatar
+  queue/retry behavior, identity lifetime guards, onboarding values and Discovery contracts.
+- EXTEND: the same profile form now exposes the already-approved stored fields `first_name`,
+  `last_name`, `date_of_birth`, `city_id`, preferred age range and distance, plus content and
+  character preferences. Active cities come from the existing `discovery_cities` read; no parallel
+  profile screen or new data contract was introduced.
+- Changed extended fields are sent through the existing user-scoped `client_profiles` update.
+  Untouched null/legacy values are not normalized or resent. Date-of-birth changes keep the existing
+  legacy `age` and `computed_age` values aligned; local validation rejects invalid adult age,
+  preference range and distance before either write starts.
+- RED: five new component expectations failed on the baseline because the fields were absent. The
+  final focused profile suite passes 34/34. Typecheck passes after representing the city-list mock
+  as the array response used by the real query.
+- Consolidated final gates on this local snapshot: full Vitest 393 passed / 24 existing skipped;
+  format, changed-file lint, typecheck, client build and SSR build passed. The existing jsdom
+  navigation notice, `punycode` deprecation and large client-chunk advisory remain non-failing.
+- Browser RTL/mobile/desktop and live Auth/Supabase/RLS integration remain **NOT VERIFIED**. No
+  schema, migration, grant, RLS, dependency, runtime service or environment was changed or applied.
+- This slice does not resolve the server gate, Lead lifecycle, presence/distance semantics, multiple
+  profile images or continuous conversation acceptance. WP04 and AC09–AC11 therefore remain open.
+- Focused completion review: the direct profile update remains within the existing authenticated
+  active-owner `UPDATE` policy and the database constraints for age, preference range and distance;
+  the onboarding-completion RPC is therefore not substituted for this edit path. The review did
+  find that the newly added active-city query trusted an unchecked array cast. City rows are now
+  accepted only when every consumed `id` and Hebrew display name is a string. A malformed response
+  keeps the form non-writable and exposes the existing generic retryable load state. The focused
+  profile and audit suites pass 46/46 after this correction. Live PostgREST/RLS behavior and browser
+  layout remain **NOT VERIFIED**.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- Profile bootstrap requests only consumed fields and runs independent reads together. Discovery
+  remains a server-filtered single-card read keyed by identity and filters; Lead access is a bounded
+  server read rather than a browser-side scan. Existing profile data and drafts remain visible during
+  same-identity writes/refreshes, with local pending controls and stale-identity guards.
+- Offline regressions cover conditional payloads, double-submit protection, pending avatar
+  completion, retained drafts, late responses, identity replacement, Discovery filters and the
+  bounded Lead request.
+- Browser RTL/responsive/focus behavior, live query plans and whether Lead history needs a cursor
+  beyond the current bounded 100-row contract remain **NOT VERIFIED**. No latency benchmark or
+  comparative performance claim was made.
+
+## Lead lifecycle completion — offline implementation, 2026-11-11
+
+- A true Like creates one canonical Lead. Unlike closes the active interest but retains the same
+  historical row. A later Like updates interest/timestamps without resetting status or `closed_at`;
+  retry of the same transition does not duplicate the Lead.
+- Assigned operators and admins can move an active Lead through `new`, `in_progress` and `closed`.
+  The RPC verifies authorization and returns the updated row; the existing workspace validates that
+  response and blocks duplicate status submissions.
+- Component regressions cover the status update contract, duplicate-submit protection, a closed
+  unlike result and explicit staff resume after re-like. The pgTAP lifecycle cases for authorization,
+  close, preserved audit and explicit resume are written and
+  **NOT RUN**. Live RLS, DB triggers, Realtime and browser behavior remain **NOT VERIFIED**.
+
+## Connected completion gaps — offline draft, 2026-11-05
+
+- Discovery availability now derives its online signal from an active assigned operator with an
+  `online` presence and a heartbeat inside the existing stale window. The configured character
+  state is retained only while that server-side condition holds; otherwise the returned state is
+  `offline`. No client-side presence inference was introduced.
+- The existing ONLINE list keeps its currently authorized display-name search. R03 city/age search,
+  real client presence and server-side cursor pagination require a read contract that exposes those
+  fields without undoing the existing operator PII boundary. The later RLS migration explicitly
+  removes direct operator access to `client_profiles`; the attempted direct enrichment was therefore
+  rejected before delivery. These fields remain dependent on the accepted WP01.5 read-access
+  integration and were not replaced with a parallel authority surface.
+- A versioned consent document/acceptance contract and onboarding UI are present but disabled by
+  default. Enabling the flag without at least one active required document fails closed. The UI
+  loads the configured title/link, requires each required document and records its exact document
+  ID before completing onboarding. No legal text, version or production URL was invented by the
+  migration; activation requires separately approved content and configuration.
+- Focused UI regressions pass 22/22 for ONLINE routing/list, Discovery states and onboarding consent
+  sequencing, including disabled rollout and fail-closed requirement loading. The consolidated
+  Offline Vitest snapshot passes 444 tests with 27 existing skips. The pgTAP cases for
+  default-disabled rollout, fail-closed configuration,
+  idempotent version acceptance, server gating and heartbeat-derived availability are written and
+  **NOT RUN**. Browser RTL/responsive behavior and live Auth/PostgREST/RLS/Realtime behavior remain
+  **NOT VERIFIED**.
+
+## Profile-image management — offline implementation, 2026-11-11
+
+- Profile and onboarding now share one RTL/responsive image manager for up to six images, explicit
+  primary selection, keyboard-operable ordering and removal. Removing the primary selects the next
+  image in order; an empty list renders an explicit empty state.
+- Legacy profiles above six retain every image and may reorder or remove them, but cannot add. The
+  server RPC locks the profile row, validates newly added objects against the authenticated owner's
+  Storage folder, MIME and five-megabyte limit, and commits ordered images plus the public avatar
+  projection in one transaction.
+- Removed owned paths enter a private `pending_reference_check` queue. Browser code does not delete
+  Storage objects from URLs, and no worker may delete until it proves that no profile still refers
+  to the object; uncertain objects are retained.
+- Focused component and Offline migration regressions cover the cap, legacy behavior, next-primary,
+  ordering, atomic returned-row verification and retained cleanup. pgTAP Storage/RLS/concurrency
+  cases are written and **NOT RUN**. Live Storage, Auth and RLS behavior remains **NOT VERIFIED**;
+  no migration was applied.

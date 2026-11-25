@@ -68,11 +68,25 @@ type CatalogTag = {
   name: string;
 };
 
-function getCatalogTag(asset: CatalogAsset): CatalogTag | null {
-  if (!("media_tag_id" in asset) || !("media_tag_name" in asset)) return null;
-  if (typeof asset.media_tag_id !== "string" || typeof asset.media_tag_name !== "string")
-    return null;
-  return { id: asset.media_tag_id, name: asset.media_tag_name };
+type GiftOption = {
+  gift_id: string;
+  name: string;
+  price_credits: number;
+};
+
+function getCatalogTags(asset: CatalogAsset): CatalogTag[] {
+  if (Array.isArray(asset.media_tags)) {
+    return asset.media_tags.filter(
+      (tag): tag is CatalogTag =>
+        typeof tag === "object" &&
+        tag !== null &&
+        typeof (tag as Record<string, unknown>).id === "string" &&
+        typeof (tag as Record<string, unknown>).name === "string",
+    );
+  }
+  return typeof asset.media_tag_id === "string" && typeof asset.media_tag_name === "string"
+    ? [{ id: asset.media_tag_id, name: asset.media_tag_name }]
+    : [];
 }
 
 function toDeliveryMode(value: unknown): DeliveryMode {
@@ -112,6 +126,10 @@ function showReservationError(message: string) {
   }
   if (message.includes("media_asset_not_reservable") || message.includes("media_asset_not_ready")) {
     toast.error("המדיה כבר אינה זמינה לבחירה");
+    return;
+  }
+  if (message.includes("media_asset_already_delivered_to_client")) {
+    toast.error("המדיה כבר נמסרה ללקוח הזה");
     return;
   }
   toast.error("שמירת המדיה נכשלה");
@@ -186,6 +204,9 @@ export function OperatorMediaPicker({
   const [reservation, setReservation] = useState<SelectedReservation | null>(null);
   const [caption, setCaption] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("permanent");
+  const [gifts, setGifts] = useState<GiftOption[]>([]);
+  const [giftState, setGiftState] = useState<"idle" | "loading" | "error" | "ready">("idle");
+  const [selectedGiftId, setSelectedGiftId] = useState<string | null>(null);
   const [pendingReservation, setPendingReservation] = useState<ReservationRequest | null>(null);
   const [sending, setSending] = useState(false);
   const [clock, setClock] = useState(Date.now());
@@ -223,25 +244,26 @@ export function OperatorMediaPicker({
     setReservation(null);
     setCaption("");
     setViewMode("permanent");
+    setSelectedGiftId(null);
     return true;
   }, []);
 
   const loadCatalog = useCallback(async () => {
     const requestVersion = ++catalogRequestRef.current;
     setCatalogState("loading");
-    const { data, error } =
+    const catalogResult =
       actor === "admin"
         ? await supabase.rpc("get_admin_media_catalog", { _conversation_id: conversationId })
         : await supabase.rpc("get_operator_media_catalog", { _conversation_id: conversationId });
     if (requestVersion !== catalogRequestRef.current) return;
 
-    if (error) {
+    if (catalogResult.error) {
       setCatalogState("error");
-      showCatalogError(getErrorMessage(error));
+      showCatalogError(getErrorMessage(catalogResult.error));
       return;
     }
 
-    const nextCatalog = data ?? [];
+    const nextCatalog = catalogResult.data ?? [];
     setCatalog(nextCatalog);
     setCatalogState("ready");
     if (actor === "operator" && readOnlyRef.current) return;
@@ -264,6 +286,29 @@ export function OperatorMediaPicker({
     }
     if (!ownReservation && reservationRef.current) clearReservation();
   }, [actor, clearReservation, conversationId]);
+
+  const loadGifts = useCallback(async () => {
+    if (actor !== "operator" || giftState === "loading") return;
+    setGiftState("loading");
+    try {
+      const { data, error } = await supabase.rpc("get_conversation_gifts", {
+        _conversation_id: conversationId,
+      });
+      if (error) throw error;
+      const nextGifts = (data ?? []).filter(
+        (gift): gift is GiftOption =>
+          typeof gift.gift_id === "string" &&
+          typeof gift.name === "string" &&
+          typeof gift.price_credits === "number" &&
+          gift.price_credits > 0,
+      );
+      setGifts(nextGifts);
+      setGiftState("ready");
+    } catch {
+      setGifts([]);
+      setGiftState("error");
+    }
+  }, [actor, conversationId, giftState]);
 
   const releaseReservation = useCallback(
     async (reservationId: string, notify: boolean, detached = false) => {
@@ -307,13 +352,35 @@ export function OperatorMediaPicker({
   }, [onOpenChange, releaseReservation, sending]);
 
   useEffect(() => {
+    catalogRequestRef.current += 1;
+    setCatalog([]);
+    setGifts([]);
+    setGiftState("idle");
+    setCatalogState("idle");
+    setSelectedTagId("all");
+    clearReservation();
     setSending(false);
-  }, [actor, conversationId, operatorSendGeneration]);
+  }, [actor, clearReservation, conversationId, operatorSendGeneration]);
 
   useEffect(() => {
     if (!open) return;
     void loadCatalog();
   }, [loadCatalog, open]);
+
+  useEffect(() => {
+    if (!open || typeof supabase.channel !== "function") return;
+    const channel = supabase
+      .channel(`media-catalog:${actor}:${conversationId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "media_catalog_versions" },
+        () => void loadCatalog(),
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [actor, conversationId, loadCatalog, open]);
 
   useEffect(() => {
     return () => {
@@ -339,8 +406,7 @@ export function OperatorMediaPicker({
     const tags = new Map<string, CatalogTag>();
     for (const asset of catalog) {
       if (!asset.is_reservable && !asset.is_locked_reservable && !asset.is_reserved_by_me) continue;
-      const tag = getCatalogTag(asset);
-      if (tag) tags.set(tag.id, tag);
+      for (const tag of getCatalogTags(asset)) tags.set(tag.id, tag);
     }
     return [...tags.values()].sort((left, right) => left.name.localeCompare(right.name, "he"));
   }, [actor, catalog]);
@@ -349,7 +415,7 @@ export function OperatorMediaPicker({
     () =>
       selectedTagId === "all"
         ? catalog
-        : catalog.filter((asset) => getCatalogTag(asset)?.id === selectedTagId),
+        : catalog.filter((asset) => getCatalogTags(asset).some((tag) => tag.id === selectedTagId)),
     [catalog, selectedTagId],
   );
 
@@ -495,6 +561,10 @@ export function OperatorMediaPicker({
       toast.error("אי אפשר לשלוח לפני שהתצוגה המקדימה נטענת בהצלחה");
       return;
     }
+    if (viewMode === "paid_open" && !selectedGiftId) {
+      toast.error("יש לבחור מתנה מדויקת לפתיחת התמונה");
+      return;
+    }
 
     const ticket = createOperatorSendTicket(
       requestScopeRef.current,
@@ -520,16 +590,23 @@ export function OperatorMediaPicker({
                 viewMode,
               }),
             )
-          : await supabase.rpc(
-              "send_operator_media_message",
-              buildOperatorMediaSendArgs({
-                accessMode: reservation.accessMode,
-                caption,
-                expectedCycleId,
-                reservationId: reservation.reservationId,
-                viewMode,
-              }),
-            );
+          : viewMode === "paid_open"
+            ? await supabase.rpc("send_operator_gift_media_message", {
+                _reservation_id: reservation.reservationId,
+                _gift_id: selectedGiftId ?? "",
+                _caption: caption.trim(),
+                _expected_cycle_id: expectedCycleId ?? null,
+              })
+            : await supabase.rpc(
+                "send_operator_media_message",
+                buildOperatorMediaSendArgs({
+                  accessMode: reservation.accessMode,
+                  caption,
+                  expectedCycleId,
+                  reservationId: reservation.reservationId,
+                  viewMode,
+                }),
+              );
     if (actor === "operator" && readOnlyRef.current) {
       if (
         activeSendRequestRef.current === ticket.requestId &&
@@ -617,15 +694,7 @@ export function OperatorMediaPicker({
           {actor === "operator" && reservation.accessMode === "standard" && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">אופן צפייה</p>
-              <div
-                className={
-                  reservation.paidOpenPriceCredits === null
-                    ? "grid grid-cols-2 gap-2"
-                    : "grid grid-cols-3 gap-2"
-                }
-                role="group"
-                aria-label="אופן צפייה במדיה"
-              >
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="אופן צפייה במדיה">
                 <Button
                   type="button"
                   variant={viewMode === "permanent" ? "default" : "outline"}
@@ -645,26 +714,68 @@ export function OperatorMediaPicker({
                   <Eye className="h-4 w-4" />
                   צפייה חד-פעמית
                 </Button>
-                {reservation.paidOpenPriceCredits !== null && (
-                  <Button
-                    type="button"
-                    variant={viewMode === "paid_open" ? "default" : "outline"}
-                    className="shrink-0"
-                    onClick={() => setViewMode("paid_open")}
-                    disabled={sending || operatorReadOnly}
-                  >
-                    <LockKeyhole className="h-4 w-4" />
-                    בתשלום
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant={viewMode === "paid_open" ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => {
+                    setViewMode("paid_open");
+                    if (giftState === "idle" || giftState === "error") void loadGifts();
+                  }}
+                  disabled={sending || operatorReadOnly}
+                >
+                  <LockKeyhole className="h-4 w-4" />
+                  במתנה
+                </Button>
               </div>
               {viewMode === "view_once" && (
                 <p className="text-xs text-muted-foreground">התמונה זמינה ללקוח לפתיחה אחת בלבד.</p>
               )}
-              {viewMode === "paid_open" && reservation.paidOpenPriceCredits !== null && (
-                <p className="text-xs text-muted-foreground">
-                  הלקוח ישלם {reservation.paidOpenPriceCredits} קרדיטים עבור כל פתיחה קצרה.
-                </p>
+              {viewMode === "paid_open" && giftState === "loading" && (
+                <p className="text-xs text-muted-foreground">טוען קטלוג מתנות…</p>
+              )}
+              {viewMode === "paid_open" && giftState === "error" && (
+                <div className="flex items-center justify-between gap-2 text-xs text-destructive">
+                  <span>קטלוג המתנות אינו זמין כרגע.</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void loadGifts()}
+                  >
+                    נסה שוב
+                  </Button>
+                </div>
+              )}
+              {viewMode === "paid_open" && giftState === "ready" && gifts.length === 0 && (
+                <p className="text-xs text-muted-foreground">אין מתנות פעילות הזמינות לשיחה.</p>
+              )}
+              {viewMode === "paid_open" && giftState === "ready" && gifts.length > 0 && (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="required-gift"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    מתנה נדרשת לפתיחה
+                  </label>
+                  <select
+                    id="required-gift"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={selectedGiftId ?? ""}
+                    onChange={(event) => setSelectedGiftId(event.target.value || null)}
+                    disabled={sending || operatorReadOnly}
+                  >
+                    <option value="">בחר מתנה</option>
+                    {gifts.map((gift) => (
+                      <option key={gift.gift_id} value={gift.gift_id}>
+                        {gift.name} — {gift.price_credits} קרדיטים
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    רק המתנה שנבחרה תאפשר רכישה ופתיחה של התמונה ל-60 שניות.
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -696,7 +807,8 @@ export function OperatorMediaPicker({
                 sending ||
                 remainingMilliseconds <= 0 ||
                 preview.status !== "ready" ||
-                !preview.url
+                !preview.url ||
+                (viewMode === "paid_open" && !selectedGiftId)
               }
             >
               {sending ? (
@@ -710,14 +822,26 @@ export function OperatorMediaPicker({
         </section>
       ) : (
         <section className="min-h-0 flex-1 overflow-y-auto" aria-live="polite">
-          {catalogState === "loading" && (
+          {catalogState === "loading" && catalog.length === 0 && (
             <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="me-2 h-4 w-4 animate-spin" /> טוען מאגר מדיה
             </div>
           )}
+          {catalogState === "loading" && catalog.length > 0 && (
+            <div role="status" className="mb-3 flex items-center text-sm text-muted-foreground">
+              <LoaderCircle className="me-2 h-4 w-4 animate-spin" /> מרענן את מאגר המדיה
+            </div>
+          )}
           {catalogState === "error" && (
-            <div className="flex h-32 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-              <span>לא ניתן לטעון את מאגר המדיה כרגע.</span>
+            <div
+              role="alert"
+              className="mb-3 flex flex-col items-center justify-center gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-center text-sm text-muted-foreground"
+            >
+              <span>
+                {catalog.length > 0
+                  ? "רענון מאגר המדיה נכשל. הרשימה הקודמת נשארה זמינה."
+                  : "לא ניתן לטעון את מאגר המדיה כרגע."}
+              </span>
               <Button type="button" variant="outline" size="sm" onClick={() => void loadCatalog()}>
                 <RefreshCw className="h-4 w-4" /> נסה שוב
               </Button>
@@ -728,7 +852,7 @@ export function OperatorMediaPicker({
               אין מדיה זמינה עבור הדמות בשלב זה.
             </div>
           )}
-          {catalogState === "ready" && catalog.length > 0 && (
+          {catalog.length > 0 && (
             <div className="space-y-3">
               {availableTags.length > 1 && (
                 <div className="flex gap-2 overflow-x-auto pb-1" aria-label="סינון מדיה לפי תגית">

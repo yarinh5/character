@@ -25,6 +25,20 @@ container only. Test files are copied to a run-scoped `/tmp` directory inside
 that container and removed in `finally`; validation failure happens before any
 copy, extension installation, or SQL. The runner never accepts `--linked`, a
 remote endpoint, or a database URL override.
+Published Docker ports use the port read from the active `config.toml` and the
+exact internal protocol key (`8000/tcp` for Kong and `5432/tcp` for Postgres).
+At least one binding is required. Every returned binding must use that same
+configured host port and one of the existing authorized Docker address forms:
+`127.0.0.1`, `::1`, `0.0.0.0`, or `::`; an unauthorized address or port beside
+an otherwise valid binding rejects the target. Exact duplicate bindings are
+also rejected. Before applying this contract, the DB and supported WP01 upgrade
+runners preserve only the container ID, config source, expected port, filtered
+`HostIp`/`HostPort` entries, and the Docker query result under
+`$RUN_EVIDENCE/port-bindings`; full inspect data and container environment are
+not written. Each runner process generates one invocation UUID and includes it
+in every evidence filename and record from that process. The local sequence is
+retained after that UUID, so planned `db.1` and `db.2` processes cannot reuse a
+filename; exclusive `wx` creation still rejects an actual collision.
 The current batch covers RLS ownership, the canonical NEW queue and sequential
 claim behavior, Admin-only operations snapshots, and paid-sticker idempotency.
 Sequential pgTAP claim coverage is not a true two-session concurrency test.

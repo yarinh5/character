@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchCharacterLiveAvailability } from "@/lib/characterAvailability";
 
 type Character = {
   id: string;
@@ -140,18 +141,23 @@ async function fetchFavorites(
   const characterIds = preferences.map((preference) => preference.character_id);
   if (characterIds.length === 0) return [];
 
-  const { data: conversationData, error: conversationError } = await supabase
-    .from("conversations")
-    .select("id, character_id")
-    .in("character_id", characterIds)
-    .is("client_hidden_at", null)
-    .neq("status", "closed");
+  const [conversationResult, liveAvailability] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("id, character_id")
+      .in("character_id", characterIds)
+      .is("client_hidden_at", null)
+      .neq("status", "closed"),
+    fetchCharacterLiveAvailability(characterIds),
+  ]);
   if (!isCurrent()) throw new Error("stale_favorites_request");
+  const { data: conversationData, error: conversationError } = conversationResult;
   if (conversationError) throw conversationError;
 
   const conversationIds = parseConversationMap(conversationData, new Set(characterIds));
   return preferences.map((preference) => ({
     ...preference.characters,
+    availability_status: liveAvailability.get(preference.character_id)!,
     favorited_at: preference.favorited_at,
     is_liked: preference.liked_at !== null,
     conversation_id: conversationIds.get(preference.character_id) ?? null,

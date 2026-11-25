@@ -173,17 +173,20 @@ beforeEach(() => {
     error: null,
   }));
   io.block.mockReset().mockResolvedValue({ ok: true });
-  io.audit.mockReset().mockResolvedValue([
-    {
-      id: "event-a",
-      action: "report.status_changed",
-      entity_type: "report",
-      entity_id: a.id,
-      actor: null,
-      metadata: { previous_status: "open", status: "resolved" },
-      created_at: a.created_at,
-    },
-  ]);
+  io.audit.mockReset().mockResolvedValue({
+    items: [
+      {
+        id: "event-a",
+        action: "report.status_changed",
+        entity_type: "report",
+        entity_id: a.id,
+        actor: null,
+        metadata: { previous_status: "open", status: "resolved" },
+        created_at: a.created_at,
+      },
+    ],
+    nextCursor: null,
+  });
 });
 
 describe("reports workspace", () => {

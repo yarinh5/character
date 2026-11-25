@@ -72,6 +72,7 @@ function mediaAsset(
     height: 512,
     id,
     ingest_status: "ready",
+    is_global: false,
     locked_derivative_error_code: null,
     locked_derivative_status: "ready",
     locked_derivatives_generated_at: "2026-01-01T00:00:00Z",
@@ -79,6 +80,14 @@ function mediaAsset(
     locked_price_credits: null,
     media_tag_id: mediaTagId,
     media_tag_name: mediaTagId === "tag-two" ? tagTwo.name : tagOne.name,
+    media_tags: [
+      {
+        character_id: "character-a",
+        id: mediaTagId,
+        name: mediaTagId === "tag-two" ? tagTwo.name : tagOne.name,
+      },
+    ],
+    character_ids: ["character-a"],
     paid_open_price_credits: null,
     preview_available: true,
     processing_attempts: 1,
@@ -383,5 +392,58 @@ describe("admin character media read states", () => {
         _asset_id: "asset-alpha",
       }),
     );
+  });
+
+  it("filters by every canonical tag assigned to an asset", async () => {
+    const multiTagged = mediaAsset("asset-multi", "Multi Tagged", "tag-one", {
+      media_tags: [
+        { character_id: "character-a", id: "tag-one", name: tagOne.name },
+        { character_id: "character-a", id: "tag-two", name: tagTwo.name },
+      ],
+    });
+    setDefaultReads([multiTagged], [tagOne, tagTwo]);
+    renderMedia();
+    await loadedAsset("Multi Tagged");
+    const tagFilter = screen.getByRole("combobox", { name: "סינון לפי תגית" });
+    fireEvent.keyDown(tagFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "תגית שתיים" }));
+    expect(screen.getByText("Multi Tagged")).toBeInTheDocument();
+  });
+
+  it("removes the current character and only its tags, while preserving the draft after refresh failure", async () => {
+    const otherTag = { character_id: "character-b", id: "tag-b", name: "תגית ב" };
+    const sharedAsset = mediaAsset("asset-shared", "Shared Asset", "tag-one", {
+      character_ids: ["character-a", "character-b"],
+      is_global: true,
+      media_tags: [{ character_id: "character-a", id: "tag-one", name: tagOne.name }, otherTag],
+    });
+    let assetReads = 0;
+    io.rpc.mockImplementation(async (name) => {
+      if (name === "get_admin_character_media_assets") {
+        assetReads += 1;
+        return assetReads === 1
+          ? { data: [sharedAsset], error: null }
+          : { data: null, error: { message: "refresh failed" } };
+      }
+      if (name === "get_admin_media_tags") return { data: [tagOne], error: null };
+      return { data: null, error: null };
+    });
+    renderMedia();
+    await loadedAsset("Shared Asset");
+    fireEvent.click(screen.getByRole("button", { name: "הסר מהדמות" }));
+
+    await waitFor(() =>
+      expect(io.rpc).toHaveBeenCalledWith("set_admin_media_asset_assignments", {
+        _asset_id: "asset-shared",
+        _character_ids: ["character-b"],
+        _is_global: true,
+        _media_tag_ids: ["tag-b"],
+      }),
+    );
+    expect(await screen.findByRole("alert", { name: "שגיאת טעינת מדיה" })).toHaveTextContent(
+      "עשויים להיות לא מעודכנים",
+    );
+    expect(screen.getByText("Shared Asset")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "הסר מהדמות" })).toBeEnabled();
   });
 });

@@ -117,6 +117,7 @@ export const adminCreateUser = createServerFn({ method: "POST" })
       password: data.password,
       email_confirm: true,
       user_metadata: { display_name: data.full_name },
+      app_metadata: { registration_origin: "admin_provisioned" },
     });
     if (error || !created.user) throw new Error(error?.message ?? "יצירת משתמש נכשלה");
 

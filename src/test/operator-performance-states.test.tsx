@@ -222,7 +222,7 @@ describe("operator performance read states", () => {
         .mockReturnValueOnce(refreshA.promise)
         .mockResolvedValueOnce(makeSummary(operatorB, { availablePoints: 73 }));
       const view = renderPage();
-      await screen.findByText("קרדיטים זמינים");
+      await screen.findByText("נקודות זמינות");
       act(() => {
         void view.queryClient.invalidateQueries({
           queryKey: ["operator-performance", operatorA.id],
@@ -233,7 +233,7 @@ describe("operator performance read states", () => {
 
       io.sessionUserId = sessionUserId;
       view.rerender();
-      expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+      expect(screen.queryByText("נקודות זמינות")).not.toBeInTheDocument();
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
       expect(io.removeChannel).toHaveBeenCalledWith(oldChannel);
       expect(io.channels).toHaveLength(1);
@@ -261,7 +261,7 @@ describe("operator performance read states", () => {
       renderPage();
       expect(io.fetchPerformance).not.toHaveBeenCalled();
       expect(io.channels).toHaveLength(0);
-      expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+      expect(screen.queryByText("נקודות זמינות")).not.toBeInTheDocument();
     },
   );
 
@@ -283,7 +283,7 @@ describe("operator performance read states", () => {
     expect(screen.getByRole("status", { name: "טוען נתוני ביצועים" })).toBeInTheDocument();
     expect(screen.queryByText("אין עדיין נתוני ביצועים")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+    expect(screen.queryByText("נקודות זמינות")).not.toBeInTheDocument();
   });
 
   it("shows a filtered initial error and retries the existing read successfully", async () => {
@@ -297,7 +297,7 @@ describe("operator performance read states", () => {
     expect(alert).not.toHaveTextContent("permission denied");
     fireEvent.click(screen.getByRole("button", { name: "נסה לטעון שוב" }));
 
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(io.fetchPerformance).toHaveBeenCalledTimes(2);
   });
 
@@ -326,7 +326,7 @@ describe("operator performance read states", () => {
       .mockResolvedValueOnce(makeSummary(operatorA))
       .mockReturnValueOnce(refresh.promise);
     const { queryClient } = renderPage();
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(screen.getAllByText("37").length).toBeGreaterThan(0);
 
     act(() => {
@@ -346,7 +346,7 @@ describe("operator performance read states", () => {
       .mockRejectedValueOnce(new Error("refresh private detail"))
       .mockResolvedValueOnce(makeSummary(operatorA, { availablePoints: 52 }));
     const { queryClient } = renderPage();
-    await screen.findByText("קרדיטים זמינים");
+    await screen.findByText("נקודות זמינות");
     expect(screen.getAllByText("37").length).toBeGreaterThan(0);
 
     await act(async () => {
@@ -377,7 +377,7 @@ describe("operator performance read states", () => {
     );
     renderPage();
 
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(screen.getAllByText("0").length).toBeGreaterThan(0);
     expect(screen.getAllByText("אין עדיין נתוני ביצועים")).toHaveLength(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -388,7 +388,7 @@ describe("operator performance read states", () => {
     renderPage();
 
     expect(screen.getByText("אין חשבון עובד פעיל להצגת נתוני ביצועים.")).toBeInTheDocument();
-    expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+    expect(screen.queryByText("נקודות זמינות")).not.toBeInTheDocument();
     expect(io.fetchPerformance).not.toHaveBeenCalled();
   });
 
@@ -397,7 +397,7 @@ describe("operator performance read states", () => {
     renderPage();
 
     expect(await screen.findByText("לא נמצאו נתוני עובד עבור החשבון הפעיל.")).toBeInTheDocument();
-    expect(screen.queryByText("קרדיטים זמינים")).not.toBeInTheDocument();
+    expect(screen.queryByText("נקודות זמינות")).not.toBeInTheDocument();
   });
 
   it("isolates A to B identity changes from a late response and cleans the old channel", async () => {
@@ -425,7 +425,7 @@ describe("operator performance read states", () => {
 
   it("clears current data and subscription on logout", async () => {
     const view = renderPage();
-    await screen.findByText("קרדיטים זמינים");
+    await screen.findByText("נקודות זמינות");
     expect(screen.getAllByText("37").length).toBeGreaterThan(0);
     const channelA = io.channels[0];
 
@@ -439,20 +439,26 @@ describe("operator performance read states", () => {
 
   it("preserves the realtime filters and removes the channel on unmount", async () => {
     const view = renderPage();
-    await screen.findByText("קרדיטים זמינים");
+    await screen.findByText("נקודות זמינות");
     const channel = io.channels[0];
 
     expect(channel.name).toBe("operator-performance-operator-a");
     expect(channel.on).toHaveBeenNthCalledWith(
       1,
       "postgres_changes",
-      expect.objectContaining({ table: "credit_wallets", filter: "user_id=eq.user-a" }),
+      expect.objectContaining({
+        table: "operator_point_wallets",
+        filter: "operator_id=eq.operator-a",
+      }),
       expect.any(Function),
     );
     expect(channel.on).toHaveBeenNthCalledWith(
       2,
       "postgres_changes",
-      expect.objectContaining({ table: "credit_transactions", filter: "user_id=eq.user-a" }),
+      expect.objectContaining({
+        table: "operator_point_transactions",
+        filter: "operator_id=eq.operator-a",
+      }),
       expect.any(Function),
     );
     view.unmount();
@@ -463,7 +469,7 @@ describe("operator performance read states", () => {
     const { queryClient } = renderPage();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("2 דקות")).toBeInTheDocument();
     expect(screen.getByText("אוק׳ 26׳")).toBeInTheDocument();

@@ -16,6 +16,7 @@ type DiscoveryCardProps = {
   startingChat: boolean;
   onPass: () => void;
   onLike: () => void;
+  onRemoveLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
   onViewProfile: () => void;
@@ -31,6 +32,7 @@ export function DiscoveryCard({
   startingChat,
   onPass,
   onLike,
+  onRemoveLike,
   onFavorite,
   onStartChat,
   onViewProfile,
@@ -116,6 +118,7 @@ export function DiscoveryCard({
           startingChat={startingChat}
           onPass={onPass}
           onLike={onLike}
+          onRemoveLike={onRemoveLike}
           onFavorite={onFavorite}
           onStartChat={onStartChat}
           onViewProfile={onViewProfile}

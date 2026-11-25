@@ -40,6 +40,7 @@ const io = vi.hoisted(() => ({
   read: vi.fn<(table: string, operations: Operation[]) => Promise<Reply>>(),
   favoriteWrite: vi.fn<() => Promise<Reply>>(),
   conversationWrite: vi.fn<() => Promise<Reply>>(),
+  availabilityRead: vi.fn<() => Promise<Reply>>(),
   navigate: vi.fn(),
   error: vi.fn(),
 }));
@@ -116,6 +117,7 @@ vi.mock("@/integrations/supabase/client", () => ({
     rpc: (name: string) => {
       if (name === "set_character_favorite") return io.favoriteWrite();
       if (name === "start_or_get_conversation") return io.conversationWrite();
+      if (name === "get_character_live_availability") return io.availabilityRead();
       throw new Error(`Unexpected RPC: ${name}`);
     },
   },
@@ -201,11 +203,25 @@ beforeEach(() => {
     error: null,
   });
   io.conversationWrite.mockReset().mockResolvedValue({ data: ids.conversation, error: null });
+  io.availabilityRead.mockReset().mockResolvedValue({
+    data: [{ character_id: ids.characterA, availability_status: "available" }],
+    error: null,
+  });
   io.navigate.mockReset().mockResolvedValue(undefined);
   io.error.mockReset();
 });
 
 describe("client favorites workflow", () => {
+  it("uses server-authoritative live availability instead of the raw character column", async () => {
+    io.availabilityRead.mockResolvedValueOnce({
+      data: [{ character_id: ids.characterA, availability_status: "offline" }],
+      error: null,
+    });
+    mount();
+    await screen.findByRole("heading", { name: "מאיה" });
+    expect(io.availabilityRead).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("לא זמינה כרגע")).toBeInTheDocument();
+  });
   it("waits for matching client identity and does not show another identity's cache", async () => {
     io.auth.loading = true;
     const client = makeClient();
@@ -515,6 +531,13 @@ describe("client favorites workflow", () => {
         });
       }
       return defaultRead(table, operations);
+    });
+    io.availabilityRead.mockResolvedValue({
+      data: [
+        { character_id: ids.characterA, availability_status: "available" },
+        { character_id: ids.characterB, availability_status: "offline" },
+      ],
+      error: null,
     });
     io.favoriteWrite.mockReturnValueOnce(actionA.promise).mockReturnValueOnce(actionB.promise);
     const view = mount();

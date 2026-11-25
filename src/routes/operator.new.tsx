@@ -6,14 +6,24 @@ import { useOperator } from "@/components/operator/OperatorLayout";
 import { OperatorNewQueueList } from "@/components/operator/OperatorNewQueueList";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { operatorNewQueueClaimError, type OperatorNewQueueItem, useOperatorNewQueue } from "@/hooks/useOperatorNewQueue";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  operatorNewQueueClaimError,
+  type OperatorNewQueueItem,
+  useOperatorNewQueue,
+} from "@/hooks/useOperatorNewQueue";
 
 export const Route = createFileRoute("/operator/new")({
   component: OperatorNewQueuePage,
 });
 
-type QueueFilter = "all" | "new" | "returned" | "waiting";
+type QueueFilter = "all" | "new" | "returned" | "assigned" | "waiting";
 type QueueSort = "newest" | "oldest";
 
 function OperatorNewQueuePage() {
@@ -22,14 +32,16 @@ function OperatorNewQueuePage() {
   const [characterFilter, setCharacterFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<QueueFilter>("all");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<QueueSort>("newest");
+  const [sort, setSort] = useState<QueueSort>("oldest");
 
   const queue = useOperatorNewQueue(operator?.id);
 
   const characters = useMemo(() => {
     const byId = new Map<string, string>();
     for (const item of queue.data ?? []) byId.set(item.character_id, item.character_name);
-    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "he"));
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
   }, [queue.data]);
 
   const filteredQueue = useMemo(() => {
@@ -38,6 +50,7 @@ function OperatorNewQueuePage() {
       if (characterFilter !== "all" && item.character_id !== characterFilter) return false;
       if (statusFilter === "new" && item.queue_state !== "new") return false;
       if (statusFilter === "returned" && item.queue_state !== "returned") return false;
+      if (statusFilter === "assigned" && item.queue_state !== "assigned") return false;
       if (statusFilter === "waiting" && item.sla_state === "normal") return false;
       if (!normalizedSearch) return true;
 
@@ -47,7 +60,8 @@ function OperatorNewQueuePage() {
     });
 
     return items.sort((left, right) => {
-      const order = new Date(right.last_activity_at).getTime() - new Date(left.last_activity_at).getTime();
+      const order =
+        new Date(right.last_activity_at).getTime() - new Date(left.last_activity_at).getTime();
       return sort === "newest" ? order : -order;
     });
   }, [characterFilter, queue.data, search, sort, statusFilter]);
@@ -65,7 +79,8 @@ function OperatorNewQueuePage() {
     });
   };
 
-  const hasActiveFilters = characterFilter !== "all" || statusFilter !== "all" || Boolean(search.trim());
+  const hasActiveFilters =
+    characterFilter !== "all" || statusFilter !== "all" || Boolean(search.trim());
 
   return (
     <div className="mx-auto max-w-5xl p-4 md:p-8" dir="rtl">
@@ -74,9 +89,15 @@ function OperatorNewQueuePage() {
           <h1 className="text-2xl font-bold md:text-3xl">פניות חדשות</h1>
           <p className="mt-1 text-sm text-muted-foreground">פניות לדמויות שאליהן את/ה משויך/ת.</p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-muted px-2 py-1">{queue.slaSummary.total_new} בתור</span>
-            <span className="rounded-full bg-warning/15 px-2 py-1 font-medium text-warning">{queue.slaSummary.warning_count} ממתינות</span>
-            <span className="rounded-full bg-destructive/10 px-2 py-1 font-medium text-destructive">{queue.slaSummary.critical_count} קריטיות</span>
+            <span className="rounded-full bg-muted px-2 py-1">
+              {queue.slaSummary.total_new} בתור
+            </span>
+            <span className="rounded-full bg-warning/15 px-2 py-1 font-medium text-warning">
+              {queue.slaSummary.warning_count} ממתינות
+            </span>
+            <span className="rounded-full bg-destructive/10 px-2 py-1 font-medium text-destructive">
+              {queue.slaSummary.critical_count} קריטיות
+            </span>
           </div>
         </div>
         <Button
@@ -114,7 +135,10 @@ function OperatorNewQueuePage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as QueueFilter)}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as QueueFilter)}
+        >
           <SelectTrigger aria-label="סינון לפי מצב">
             <SelectValue />
           </SelectTrigger>
@@ -122,6 +146,7 @@ function OperatorNewQueuePage() {
             <SelectItem value="all">כל המצבים</SelectItem>
             <SelectItem value="new">חדשות</SelectItem>
             <SelectItem value="returned">חזרו לתור</SelectItem>
+            <SelectItem value="assigned">הוקצו לי</SelectItem>
             <SelectItem value="waiting">ממתינות SLA</SelectItem>
           </SelectContent>
         </Select>
@@ -146,7 +171,11 @@ function OperatorNewQueuePage() {
         onRetry={() => void queue.refetch()}
         queueUpdatedAt={queue.dataUpdatedAt}
         emptyTitle={hasActiveFilters ? "לא נמצאו פניות תואמות" : "אין פניות חדשות"}
-        emptyDescription={hasActiveFilters ? "נסו לשנות את החיפוש או את הסינון." : "פניות חדשות לדמויות שלך יופיעו כאן."}
+        emptyDescription={
+          hasActiveFilters
+            ? "נסו לשנות את החיפוש או את הסינון."
+            : "פניות חדשות לדמויות שלך יופיעו כאן."
+        }
       />
     </div>
   );

@@ -57,3 +57,107 @@ This record is written before the authorized Git delivery. The final implementat
 This slice does not implement the WP05 target media model or close WP05, AC12, AC13 or AC33. Many-to-many asset-to-character/tag relationships, global catalog behavior, delivery uniqueness by `asset + client`, reservation conversion, Realtime catalog synchronization, legacy migration/backfill and the P01 regular-image viewing policy remain separate backend/product work.
 
 Database, migrations, Security and RLS changes: None. Local DB, QA, Production, merge and deploy: NOT EXECUTED.
+
+## Consolidated-plan delta — 2026-11-04
+
+- The current merged model was checked only at its direct WP05 boundaries. It still stores one
+  `character_id` and one `media_tag_id` on each asset and reserves the asset itself, while the target
+  contract requires reusable asset↔character/tag relationships plus delivery uniqueness by
+  `asset + client` across characters.
+- The existing picker, reservation, attachment, secure-view, admin ingest/tag/delete and historical
+  rights paths are interdependent. A safe change therefore requires one coordinated forward-only
+  schema/RPC/backfill package with DB/HTTP/concurrency evidence; a UI-only or partial table change
+  would introduce a competing source of truth and was not made.
+- P01 still blocks only the regular-image viewing-window policy. It does not redefine the approved
+  locked-image 60-second window, but that independent rule was not altered here.
+- Return condition: approve the coordinated WP05 migration package and its offline contract tests,
+  then run the separate authorized live DB/HTTP/concurrency gate. Current UI tests do not establish
+  AC12, AC13 or AC33. WP01.5 remains paused and untouched.
+
+## Canonical media delivery offline package — 2026-11-05
+
+The coordinated WP05 draft now extends the existing paths instead of introducing a parallel media
+model:
+
+- Canonical join tables represent asset-to-character and asset-to-tag assignments, while the legacy
+  primary fields remain a coherent compatibility pair. Duplicate inputs are normalized, invalid
+  cross-character tags are rejected, and a global asset may intentionally have empty canonical
+  assignments.
+- A durable delivery ledger and active-reservation uniqueness use `asset + client`. Asset status is
+  no longer consumed globally. Historical attachments are backfilled deterministically; later
+  duplicate historical deliveries are retained as explicit private conflict evidence rather than
+  deleted or invented.
+- Reserve, standard send, locked send and release follow the same conversation → expiry → asset
+  (when needed) → reservation lock order. Message, attachment, delivery and reservation consumption
+  remain inside the existing transactional send RPC. Retry of a consumed reservation returns the
+  existing message.
+- Admin tag counts/deletion use canonical tag assignments. Assignment changes and legacy tag
+  assignment remain audited. Hard delete remains blocked by reservations, deliveries, historical
+  attachments, global visibility or shared character assignments.
+- The existing admin dialog can add or remove the current character, preserve tags belonging to
+  other characters, toggle the general catalog and filter by any canonical tag. A successful write
+  followed by failed refresh is reported separately and cached data/draft controls remain usable.
+- The existing operator picker filters every canonical tag, keeps cached catalog data with a retry
+  warning after refresh failure, removes delivered assets after a successful refresh, and clears old
+  conversation data before accepting a new conversation result. No direct Realtime/RLS exposure was
+  added for the canonical tables.
+
+Offline component evidence covers multi-tag filtering, shared tags, add/remove assignment behavior,
+failed refresh with cache, retry recovery, catalog removal after delivery, stale conversation
+completion and already-delivered errors. The DB and HTTP suites were extended with behavioral cases
+for two clients, cross-character duplicate delivery, idempotent/concurrent sends from separate
+sessions, release/expiry, canonical assignment normalization, permissions and historical backfill
+contracts. Those DB/HTTP cases are **NOT RUN** in this no-runtime package.
+
+Final offline verification on this revision: WP05 focused component/lifecycle suites **71/71**;
+preserved profile/audit regression suites **61/61**; full Vitest **415 passed / 27 skipped**; format,
+lint, typecheck and client/SSR build **PASS**. The skipped suites include the intentionally disabled
+live-service paths and are not counted as evidence for the migration, RLS, HTTP, Storage or Realtime
+contracts.
+
+P01 remains open, so the regular-image viewing-window policy was not changed. Locked-image behavior,
+legacy attachment rights, upload/processing and paid-open contracts are preserved. Live migration,
+RLS, Storage, HTTP, Realtime, browser RTL/mobile/desktop, QA and Production remain **NOT VERIFIED / NOT
+EXECUTED**. This is an offline implementation package and does not close WP05, AC12, AC13 or AC33.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- Catalog and tag reads request the fields consumed by the existing dialogs, keep verified cached
+  rows during refresh failure, and scope late completions to the active character/conversation.
+  Gift data is loaded only when the paid-open mode is selected. Reservation/send controls expose
+  local pending states and prevent duplicate reservation/send work.
+- Offline regressions cover read call boundaries, cached refresh/retry, late conversation results,
+  selection preservation and pending actions. Canonical assignment/delivery indexes were added only
+  for the concrete join, client-delivery and active-reservation access paths; migrations are **NOT
+  APPLIED**.
+- Live query plans, catalog size behavior, image loading/layout in a browser and the need for a
+  future server cursor for very large per-character catalogs remain **NOT VERIFIED**. No measured
+  speed improvement is claimed.
+
+## Ownership binding, catalog invalidation and P01 proposal — offline draft, 2026-11-05
+
+- New reservations are bound to the active handling-cycle authority and cannot be sent after that
+  cycle ends or ownership changes. Existing active reservations are backfilled only when an active
+  matching cycle exists; expired-cycle cleanup remains server-side.
+- A bounded per-character/global catalog version feed invalidates the open picker without exposing
+  private delivery history. The picker removes its Realtime channel on close, conversation change
+  and unmount; live publication/RLS delivery is **NOT VERIFIED**.
+- The proposed regular-image 60-second contract is present behind a disabled server flag. New rows
+  can be version-bound only after signed activation, while legacy attachments retain the seven-second
+  contract. Locked, client-upload and Gift access paths are unchanged. No flag was enabled and no
+  migration was applied.
+- Offline component coverage verifies the server-authorized 60-second rendering path and existing
+  picker lifecycle. The DB policy/default tests are written and **NOT RUN**; P01 approval and live
+  signed-media verification are still required before activation.
+
+## P01 policy decision — offline activation draft, 2026-11-10
+
+- P01 now adopts the documented recommendation: a new regular `view_once` attachment receives a
+  60-second window from the first authorized open recorded by the server. Failed opens, refreshes,
+  retries and signed-URL issuance do not restart or extend the window.
+- The migration enables this policy for new rows and retains the `legacy` policy version and
+  seven-second behavior for existing rows. Gift/locked-image sessions and the separate 24-hour
+  client-upload contract are unchanged.
+- Direct Node regressions cover the setting, trigger binding, server-clock start and absence of a
+  legacy rewrite. The pgTAP expectation is updated but remains **NOT RUN**; live DB/Edge/signed-URL
+  acceptance is still required before Product acceptance.

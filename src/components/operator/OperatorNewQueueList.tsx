@@ -32,7 +32,8 @@ function currentWaitSeconds(item: OperatorNewQueueItem, now: number, queueUpdate
 }
 
 function QueueBadges({ item }: { item: OperatorNewQueueItem }) {
-  const label = item.sla_state === "critical" ? "חריגה קריטית" : item.sla_state === "warning" ? "ממתינה" : null;
+  const label =
+    item.sla_state === "critical" ? "חריגה קריטית" : item.sla_state === "warning" ? "ממתינה" : null;
   const className =
     item.sla_state === "critical"
       ? "bg-destructive/10 text-destructive"
@@ -41,10 +42,16 @@ function QueueBadges({ item }: { item: OperatorNewQueueItem }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-        {item.queue_state === "returned" ? "חזרה לתור" : "חדשה"}
+        {item.queue_state === "assigned"
+          ? "הוקצתה לך"
+          : item.queue_state === "returned"
+            ? "חזרה לתור"
+            : "חדשה"}
       </span>
       {label && (
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${className}`}
+        >
           <AlertTriangle className="h-3 w-3" />
           {label}
         </span>
@@ -100,7 +107,9 @@ export function OperatorNewQueueList({
       <Card className={compact ? "m-3 p-5 text-center" : "p-10 text-center"}>
         <Inbox className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
         <p className="text-sm font-medium">{emptyTitle}</p>
-        {emptyDescription && <p className="mt-1 text-xs text-muted-foreground">{emptyDescription}</p>}
+        {emptyDescription && (
+          <p className="mt-1 text-xs text-muted-foreground">{emptyDescription}</p>
+        )}
       </Card>
     );
   }
@@ -109,10 +118,18 @@ export function OperatorNewQueueList({
     <div className={compact ? "space-y-2 p-3" : "space-y-3"}>
       {items.map((item) => (
         <Card key={item.work_item_id} className={compact ? "p-3" : "p-4"}>
-          <div className={compact ? "flex items-start gap-3" : "flex flex-col gap-4 sm:flex-row sm:items-center"}>
+          <div
+            className={
+              compact ? "flex items-start gap-3" : "flex flex-col gap-4 sm:flex-row sm:items-center"
+            }
+          >
             <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-muted">
               {item.character_avatar_url ? (
-                <img src={item.character_avatar_url} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={item.character_avatar_url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center font-semibold">
                   {item.character_name[0] ?? "?"}
@@ -123,10 +140,16 @@ export function OperatorNewQueueList({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{item.character_name}</span>
-                {!compact && <span className="text-xs text-muted-foreground">מול {item.client_display_name ?? "לקוח"}</span>}
+                {!compact && (
+                  <span className="text-xs text-muted-foreground">
+                    מול {item.client_display_name ?? "לקוח"}
+                  </span>
+                )}
                 <QueueBadges item={item} />
               </div>
-              <p className="mt-1 truncate text-sm text-muted-foreground">{item.last_client_preview || "הודעה חדשה"}</p>
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {item.last_client_preview || "הודעה חדשה"}
+              </p>
               <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock3 className="h-3.5 w-3.5" />
                 {relativeWait(currentWaitSeconds(item, now, queueUpdatedAt))}
@@ -140,7 +163,13 @@ export function OperatorNewQueueList({
               disabled={Boolean(claimingId)}
             >
               <MessageCircle className="h-4 w-4" />
-              {claimingId === item.work_item_id ? "לוקח..." : "קח שיחה"}
+              {claimingId === item.work_item_id
+                ? item.queue_state === "assigned"
+                  ? "פותח..."
+                  : "לוקח..."
+                : item.queue_state === "assigned"
+                  ? "פתח שיחה"
+                  : "קח שיחה"}
             </Button>
           </div>
         </Card>

@@ -5,12 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  SUPABASE_CLI_EXECUTABLE,
   acquireStableLocalTarget,
   assertCleanM117Evidence,
   assertCleanResidue,
   assertCurrentMigrationBaseline,
   assertPostM117ObjectCatalog,
   assertPreM117ObjectCatalog,
+  buildStrictResetArgs,
   cleanupStrictBarrierResources,
   createStrictBarrierCleanupAdapters,
   expectedMigrationVersionsFromSource,
@@ -23,6 +25,21 @@ import {
   withDeadline,
   withStrictBarrierCleanup,
 } from "./wp01-strict-send-116-to-117.mjs";
+
+test("uses the PATH-bound Supabase CLI for the Linux-capable rehearsal", () => {
+  assert.equal(SUPABASE_CLI_EXECUTABLE, "supabase");
+});
+
+test("uses a bounded version only for scenario reset and restores the full approved baseline", () => {
+  const base = ["db", "reset", "--local", "--no-seed"];
+  assert.deepEqual(buildStrictResetArgs(), base);
+  assert.deepEqual(buildStrictResetArgs("20261006211102"), [
+    ...base,
+    "--version",
+    "20261006211102",
+  ]);
+  assert.throws(() => buildStrictResetArgs("latest"), /migration version/);
+});
 
 const target = {
   projectId: "qmgkmsarzfjnqltljkjl",
@@ -739,9 +756,10 @@ function exactCleanupMigrationState() {
   const versions = expectedMigrationVersionsFromSource();
   return {
     migrations: versions.length,
-    latest: "20261013113744",
+    latest: versions.at(-1),
     versions,
     includes117: true,
+    includes118: true,
   };
 }
 
@@ -765,12 +783,13 @@ function exactCleanResidue() {
   };
 }
 
-test("requires the exact M117 migration history during cleanup", () => {
+test("requires the exact approved current migration history during cleanup", () => {
   const exact = exactCleanupMigrationState();
   assert.doesNotThrow(() => assertCurrentMigrationBaseline(exact, exact.versions));
 
   const cases = [
     { name: "missing M117", state: { ...exact, includes117: false } },
+    { name: "missing M118", state: { ...exact, includes118: false } },
     { name: "missing version", state: { ...exact, versions: exact.versions.slice(1) } },
     {
       name: "additional version",

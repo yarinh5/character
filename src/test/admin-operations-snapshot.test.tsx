@@ -32,6 +32,24 @@ const snapshotRow = {
   active_media_tag_count: 3,
 };
 
+const waitSummaryRow = {
+  waiting_count: 3,
+  over_target_count: 1,
+  oldest_wait_seconds: 480,
+  target_seconds: 420,
+};
+
+const exceptionsRow = {
+  allocation_issue_count: 1,
+  gift_reward_failure_count: 2,
+  gift_unallocated_event_count: 3,
+  media_cleanup_failure_count: 4,
+  account_deletion_blocked_count: 5,
+  account_deletion_failure_count: 1,
+  conversation_deletion_blocked_count: 6,
+  conversation_deletion_failure_count: 2,
+};
+
 const io = vi.hoisted(() => ({
   auth: {
     loading: false,
@@ -40,6 +58,8 @@ const io = vi.hoisted(() => ({
     sessionUserId: "admin-a" as string | null,
   },
   snapshot: vi.fn(),
+  waitSummary: vi.fn(),
+  exceptions: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -58,8 +78,10 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     rpc: (name: string) => {
-      if (name !== "get_admin_operations_snapshot") throw new Error(`Unexpected RPC: ${name}`);
-      return io.snapshot();
+      if (name === "get_admin_operations_snapshot") return io.snapshot();
+      if (name === "get_admin_operational_wait_summary") return io.waitSummary();
+      if (name === "get_admin_completion_exceptions") return io.exceptions();
+      throw new Error(`Unexpected RPC: ${name}`);
     },
   },
 }));
@@ -109,6 +131,8 @@ beforeEach(() => {
   io.auth.userId = "admin-a";
   io.auth.sessionUserId = "admin-a";
   io.snapshot.mockReset().mockResolvedValue({ data: [snapshotRow], error: null });
+  io.waitSummary.mockReset().mockResolvedValue({ data: [waitSummaryRow], error: null });
+  io.exceptions.mockReset().mockResolvedValue({ data: [exceptionsRow], error: null });
 });
 
 describe("admin operations snapshot read states", () => {
@@ -152,6 +176,34 @@ describe("admin operations snapshot read states", () => {
       "href",
       "/admin/characters",
     );
+  });
+
+  it("shows the independent seven-minute operational metric from the server summary", async () => {
+    mount();
+    expect(await screen.findByText("זמן תגובה תפעולי")).toBeInTheDocument();
+    expectMetric("ממתינות למענה", "3");
+    expectMetric("עברו את היעד", "1");
+    expectMetric("המתנה תפעולית ותיקה", "8 דק׳");
+    expectMetric("יעד תפעולי", "7 דק׳");
+  });
+
+  it("keeps the main snapshot available when the independent wait metric fails", async () => {
+    io.waitSummary.mockResolvedValue({ data: null, error: new Error("private wait detail") });
+    mount();
+    expect(await screen.findByText("סה״כ NEW")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert", { name: "שגיאת טעינת מדד זמן תגובה" });
+    expect(alert).not.toHaveTextContent("private wait detail");
+    expect(screen.getByText("המדד אינו זמין כרגע.")).toBeInTheDocument();
+  });
+
+  it("renders server-owned exception counts without treating client credits as revenue", async () => {
+    mount();
+    expect(await screen.findByText("חריגים פתוחים")).toBeInTheDocument();
+    expectMetric("שיוך/הקצאה", "1");
+    expectMetric("חלוקת Gift נכשלה", "2");
+    expectMetric("ניקוי מדיה נכשל", "4");
+    expectMetric("מחיקות חסומות", "11");
+    expectMetric("מחיקות שנכשלו", "3");
   });
 
   it("keeps valid metrics visible when generated_at is malformed", async () => {

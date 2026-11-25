@@ -512,7 +512,7 @@ describe("admin operator workspace", () => {
     const alert = await screen.findByRole("alert", { name: "שגיאת טעינת ביצועי עובד" });
     expect(alert).not.toHaveTextContent("private performance failure");
     fireEvent.click(within(alert).getByRole("button", { name: "נסה לטעון שוב" }));
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(screen.getAllByText("אין עדיין נתוני ביצועים")).toHaveLength(2);
   });
 
@@ -557,7 +557,7 @@ describe("admin operator workspace", () => {
         name: `ביצועי עובד: ${operatorA.full_name}`,
       }),
     );
-    expect(await screen.findByText("קרדיטים זמינים")).toBeInTheDocument();
+    expect(await screen.findByText("נקודות זמינות")).toBeInTheDocument();
     expect(screen.getAllByText("25").length).toBeGreaterThan(0);
 
     await act(async () => {
@@ -701,7 +701,7 @@ describe("admin operator workspace", () => {
 
     expect(channel.on).toHaveBeenCalledWith(
       "postgres_changes",
-      expect.objectContaining({ event: "*", schema: "public", table: "credit_wallets" }),
+      expect.objectContaining({ event: "*", schema: "public", table: "operator_point_wallets" }),
       expect.any(Function),
     );
     expect(channel.on).toHaveBeenCalledWith(
@@ -730,5 +730,28 @@ describe("admin operator workspace", () => {
         },
       }),
     );
+  });
+
+  it("exposes contextual accessible names for every operator action", async () => {
+    renderPage();
+    await screen.findByText(operatorA.full_name);
+
+    const card = operatorCard(operatorA.full_name);
+    for (const name of [
+      `ניהול נקודות עבור ${operatorA.full_name}`,
+      `שיוך דמויות עבור ${operatorA.full_name}`,
+      `עריכת ${operatorA.full_name}`,
+      `שליחת איפוס סיסמה עבור ${operatorA.full_name}`,
+      `השבתת ${operatorA.full_name}`,
+      `הפיכת ${operatorA.full_name} ללקוח`,
+    ]) {
+      expect(within(card).getByRole("button", { name })).toBeInTheDocument();
+    }
+
+    const actions = within(card)
+      .getByRole("button", { name: `ניהול נקודות עבור ${operatorA.full_name}` })
+      .parentElement;
+    expect(actions).toHaveClass("min-w-0", "max-w-full");
+    expect(actions).not.toHaveClass("shrink-0", "whitespace-nowrap");
   });
 });

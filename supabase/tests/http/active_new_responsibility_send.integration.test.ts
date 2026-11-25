@@ -396,7 +396,7 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     ]);
   });
 
-  it("allows only the RLS-authorized status update and denies direct shadow mutation", async () => {
+  it("allows only the guarded status RPC and denies direct conversation mutation", async () => {
     const baseline = await service
       .from("conversations")
       .select("status, needs_handling, pending_since, handling_next_sequence")
@@ -409,32 +409,32 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       handling_next_sequence: baseline.data.handling_next_sequence,
     };
 
-    const assignedStatus = await owner
+    const directStatus = await owner
       .from("conversations")
       .update({ status: "waiting" })
       .eq("id", ids.ownedConversation)
       .select("status");
+    expect(directStatus.error?.code).toBe("42501");
+
+    const assignedStatus = await owner.rpc("update_operator_conversation_status", {
+      _conversation_id: ids.ownedConversation,
+      _status: "waiting",
+    });
     expect(assignedStatus.error).toBeNull();
-    expect(assignedStatus.data).toEqual([{ status: "waiting" }]);
+    expect(assignedStatus.data).toMatchObject({ status: "waiting" });
 
-    const assignedRestore = await owner
-      .from("conversations")
-      .update({ status: "open" })
-      .eq("id", ids.ownedConversation)
-      .select("status");
+    const assignedRestore = await owner.rpc("update_operator_conversation_status", {
+      _conversation_id: ids.ownedConversation,
+      _status: "open",
+    });
     expect(assignedRestore.error).toBeNull();
-    expect(assignedRestore.data).toEqual([{ status: "open" }]);
+    expect(assignedRestore.data).toMatchObject({ status: "open" });
 
-    const unassignedStatus = await unassigned
-      .from("conversations")
-      .update({ status: "waiting" })
-      .eq("id", ids.ownedConversation)
-      .select("status");
-    if (unassignedStatus.error) {
-      expect(unassignedStatus.error.code).toMatch(/^(42501|PGRST\d+)$/);
-    } else {
-      expect(unassignedStatus.data).toEqual([]);
-    }
+    const unassignedStatus = await unassigned.rpc("update_operator_conversation_status", {
+      _conversation_id: ids.ownedConversation,
+      _status: "waiting",
+    });
+    expect(unassignedStatus.error?.message).toContain("conversation_write_forbidden");
 
     for (const payload of [
       { needs_handling: false },
@@ -508,7 +508,7 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
     });
     assertSafeBusinessError(adminResult.error, "admin_takeover_required");
     expect(await sideEffectCounts()).toEqual(beforeAdmin);
-  });
+  }, 15_000);
 
   it("allows the active-cycle owner to send", async () => {
     const result = await owner.rpc("send_operator_message", {

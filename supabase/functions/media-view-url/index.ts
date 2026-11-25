@@ -21,9 +21,17 @@ type StickerConversationTarget = {
   ttlSeconds: 60;
 };
 
-type AdminStickerTarget = { targetKind: "admin_sticker_preview"; stickerId: string; ttlSeconds: 60 };
+type AdminStickerTarget = {
+  targetKind: "admin_sticker_preview";
+  stickerId: string;
+  ttlSeconds: 60;
+};
 
-type Target = CharacterMediaTarget | StickerMessageTarget | StickerConversationTarget | AdminStickerTarget;
+type Target =
+  | CharacterMediaTarget
+  | StickerMessageTarget
+  | StickerConversationTarget
+  | AdminStickerTarget;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -63,7 +71,11 @@ function parseTarget(body: unknown): Target | null {
     typeof value.message_sticker_id === "string" &&
     UUID_PATTERN.test(value.message_sticker_id)
   ) {
-    return { targetKind: "message_sticker", messageStickerId: value.message_sticker_id, ttlSeconds: 60 };
+    return {
+      targetKind: "message_sticker",
+      messageStickerId: value.message_sticker_id,
+      ttlSeconds: 60,
+    };
   }
 
   if (
@@ -81,7 +93,11 @@ function parseTarget(body: unknown): Target | null {
     };
   }
 
-  if (value.kind === "admin_sticker_preview" && typeof value.sticker_id === "string" && UUID_PATTERN.test(value.sticker_id)) {
+  if (
+    value.kind === "admin_sticker_preview" &&
+    typeof value.sticker_id === "string" &&
+    UUID_PATTERN.test(value.sticker_id)
+  ) {
     return { targetKind: "admin_sticker_preview", stickerId: value.sticker_id, ttlSeconds: 60 };
   }
 
@@ -114,7 +130,11 @@ function parseTarget(body: unknown): Target | null {
     typeof value.asset_id === "string" &&
     UUID_PATTERN.test(value.asset_id)
   ) {
-    return { targetKind: "admin_locked_delivery_preview", targetId: value.asset_id, ttlSeconds: 60 };
+    return {
+      targetKind: "admin_locked_delivery_preview",
+      targetId: value.asset_id,
+      ttlSeconds: 60,
+    };
   }
 
   return null;
@@ -169,6 +189,44 @@ Deno.serve(async (request) => {
   const trusted = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  if (target.targetKind === "message_attachment") {
+    const { data: resolution, error: resolveError } = await trusted.rpc(
+      "resolve_message_attachment_media_for_server",
+      {
+        _actor_user_id: userData.user.id,
+        _attachment_id: target.targetId,
+      },
+    );
+    const resolved =
+      resolution && typeof resolution === "object" ? (resolution as Record<string, unknown>) : null;
+    if (
+      resolveError ||
+      !resolved ||
+      typeof resolved.bucket !== "string" ||
+      typeof resolved.path !== "string" ||
+      typeof resolved.ttl_seconds !== "number" ||
+      resolved.ttl_seconds < 1
+    ) {
+      return errorResponse(404, "media_not_available", origin);
+    }
+
+    const { data: signedUrl, error: signError } = await trusted.storage
+      .from(resolved.bucket)
+      .createSignedUrl(resolved.path, resolved.ttl_seconds);
+    if (signError || !signedUrl?.signedUrl) {
+      console.error("media_view_url_sign_failed");
+      return errorResponse(404, "media_not_available", origin);
+    }
+
+    return new Response(
+      JSON.stringify({
+        url: signedUrl.signedUrl,
+        expires_at: new Date(Date.now() + resolved.ttl_seconds * 1000).toISOString(),
+      }),
+      { status: 200, headers: responseHeaders(origin) },
+    );
+  }
+
   const { data: previewPath, error: resolveError } =
     target.targetKind === "message_sticker"
       ? await trusted.rpc("resolve_sticker_object_path_for_server", {
@@ -179,45 +237,32 @@ Deno.serve(async (request) => {
         ? await trusted.rpc("resolve_conversation_sticker_object_path_for_server", {
             _actor_user_id: userData.user.id,
             _conversation_id: target.conversationId,
-          _sticker_id: target.stickerId,
-        })
+            _sticker_id: target.stickerId,
+          })
         : target.targetKind === "admin_sticker_preview"
           ? await trusted.rpc("resolve_admin_sticker_object_path_for_server", {
               _actor_user_id: userData.user.id,
               _sticker_id: target.stickerId,
             })
           : await trusted.rpc("resolve_character_media_preview_path_for_server", {
-            _actor_user_id: userData.user.id,
-            _target_kind: target.targetKind,
-            _target_id: target.targetId,
-          });
+              _actor_user_id: userData.user.id,
+              _target_kind: target.targetKind,
+              _target_id: target.targetId,
+            });
 
   if (resolveError || typeof previewPath !== "string" || !previewPath) {
     return errorResponse(404, "media_not_available", origin);
   }
 
-  let ttlSeconds = target.ttlSeconds;
-  if (target.targetKind === "message_attachment") {
-    const { data: messageAttachmentTtl, error: ttlError } = await trusted.rpc(
-      "get_message_attachment_view_url_ttl_for_server",
-      {
-        _actor_user_id: userData.user.id,
-        _attachment_id: target.targetId,
-      },
-    );
-    if (ttlError || typeof messageAttachmentTtl !== "number" || messageAttachmentTtl < 1) {
-      return errorResponse(404, "media_not_available", origin);
-    }
-    ttlSeconds = messageAttachmentTtl;
-  }
-
   const bucket =
-    target.targetKind === "message_sticker" || target.targetKind === "conversation_sticker" || target.targetKind === "admin_sticker_preview"
+    target.targetKind === "message_sticker" ||
+    target.targetKind === "conversation_sticker" ||
+    target.targetKind === "admin_sticker_preview"
       ? "sticker-media"
       : "character-media";
   const { data: signedUrl, error: signError } = await trusted.storage
     .from(bucket)
-    .createSignedUrl(previewPath, ttlSeconds);
+    .createSignedUrl(previewPath, target.ttlSeconds);
   if (signError || !signedUrl?.signedUrl) {
     console.error("media_view_url_sign_failed");
     return errorResponse(404, "media_not_available", origin);
@@ -226,7 +271,7 @@ Deno.serve(async (request) => {
   return new Response(
     JSON.stringify({
       url: signedUrl.signedUrl,
-      expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+      expires_at: new Date(Date.now() + target.ttlSeconds * 1000).toISOString(),
     }),
     { status: 200, headers: responseHeaders(origin) },
   );

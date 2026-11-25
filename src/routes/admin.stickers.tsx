@@ -34,7 +34,10 @@ export const Route = createFileRoute("/admin/stickers")({
   component: AdminStickersPage,
 });
 
-type StickerRow = Database["public"]["Functions"]["get_admin_sticker_catalog"]["Returns"][number];
+type StickerRow =
+  Database["public"]["Functions"]["get_admin_sticker_catalog"]["Returns"][number] & {
+    is_gift: boolean;
+  };
 type UploadIntent = { sticker_id?: unknown; upload_url?: unknown };
 
 const SOURCE_LIMIT_BYTES = 10 * 1024 * 1024;
@@ -56,15 +59,24 @@ function isSupportedStickerSource(file: File) {
   }
 
   const name = file.name.toLowerCase();
-  return name.endsWith(".webp") || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg");
+  return (
+    name.endsWith(".webp") ||
+    name.endsWith(".png") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg")
+  );
 }
 
 function canvasToWebp(canvas: HTMLCanvasElement, quality: number) {
   return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("render_conversion_failed"));
-    }, "image/webp", quality);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("render_conversion_failed"));
+      },
+      "image/webp",
+      quality,
+    );
   });
 }
 
@@ -98,7 +110,10 @@ async function functionErrorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("context" in error)) return null;
   const context = (error as { context?: unknown }).context;
   if (!(context instanceof Response)) return null;
-  const body = await context.clone().json().catch(() => null);
+  const body = await context
+    .clone()
+    .json()
+    .catch(() => null);
   return body && typeof body.code === "string" ? body.code : null;
 }
 
@@ -136,9 +151,19 @@ function AdminStickersPage() {
   const catalog = useQuery({
     queryKey: ["admin-stickers"],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_admin_sticker_catalog");
-      if (error) throw error;
-      return data as StickerRow[];
+      const [catalogResult, giftResult] = await Promise.all([
+        supabase.rpc("get_admin_sticker_catalog"),
+        supabase.rpc("get_admin_gift_statuses"),
+      ]);
+      if (catalogResult.error) throw catalogResult.error;
+      if (giftResult.error) throw giftResult.error;
+      const giftByStickerId = new Map(
+        (giftResult.data ?? []).map((gift) => [gift.sticker_id, gift.is_gift]),
+      );
+      return (catalogResult.data ?? []).map((row) => ({
+        ...row,
+        is_gift: giftByStickerId.get(row.id) ?? false,
+      })) as StickerRow[];
     },
   });
   const characters = useQuery({
@@ -247,6 +272,25 @@ function AdminStickersPage() {
     toast.success("Sticker price updated.");
   };
 
+  const toggleGift = async (row: StickerRow) => {
+    if (!row.is_gift && Number(priceDrafts[row.id] ?? row.price_credits) <= 0) {
+      toast.error("יש לשמור מחיר חיובי לפני סימון כמתנה.");
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.rpc("set_sticker_gift_status", {
+      _sticker_id: row.id,
+      _is_gift: !row.is_gift,
+    });
+    setBusy(false);
+    if (error) {
+      toast.error("לא ניתן לעדכן את מצב המתנה.");
+      return;
+    }
+    await refresh();
+    toast.success(row.is_gift ? "הפריט הוסר מקטלוג המתנות" : "הפריט נוסף לקטלוג המתנות");
+  };
+
   const retry = async (row: StickerRow) => {
     setBusy(true);
     try {
@@ -259,7 +303,11 @@ function AdminStickersPage() {
       }
       toast.success("Sticker processing restarted.");
     } catch (error) {
-      toast.error(error instanceof Error && error.message === "sticker_processing_in_progress" ? "Sticker is still processing." : "Sticker retry failed.");
+      toast.error(
+        error instanceof Error && error.message === "sticker_processing_in_progress"
+          ? "Sticker is still processing."
+          : "Sticker retry failed.",
+      );
     } finally {
       setBusy(false);
       await refresh();
@@ -302,17 +350,21 @@ function AdminStickersPage() {
       <Card className="mb-6">
         <CardContent className="grid gap-3 p-4 md:grid-cols-4">
           <div>
-            <Label>Collection</Label>
-            <Input value={collectionName} onChange={(event) => setCollectionName(event.target.value)} />
+            <Label htmlFor="sticker-collection">Collection</Label>
+            <Input
+              id="sticker-collection"
+              value={collectionName}
+              onChange={(event) => setCollectionName(event.target.value)}
+            />
           </div>
           <div>
-            <Label>Sticker</Label>
-            <Input value={stickerName} onChange={(event) => setStickerName(event.target.value)} />
+            <Label htmlFor="sticker-name">Sticker</Label>
+            <Input id="sticker-name" value={stickerName} onChange={(event) => setStickerName(event.target.value)} />
           </div>
           <div>
-            <Label>Scope</Label>
+            <Label htmlFor="sticker-scope">Scope</Label>
             <Select value={characterId} onValueChange={setCharacterId}>
-              <SelectTrigger>
+              <SelectTrigger id="sticker-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -337,7 +389,11 @@ function AdminStickersPage() {
               }}
             />
             <Button className="w-full" disabled={busy} onClick={() => inputRef.current?.click()}>
-              {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+              {busy ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <ImagePlus className="h-4 w-4" />
+              )}
               Upload Sticker
             </Button>
           </div>
@@ -364,6 +420,15 @@ function AdminStickersPage() {
               </div>
               <div className="space-y-2 border-t pt-2">
                 <div className="flex items-center justify-between gap-2 text-xs">
+                  <Label htmlFor={`sticker-gift-${row.id}`}>Gift</Label>
+                  <Switch
+                    id={`sticker-gift-${row.id}`}
+                    checked={row.is_gift}
+                    disabled={busy}
+                    onCheckedChange={() => void toggleGift(row)}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <Label htmlFor={`sticker-paid-${row.id}`}>Paid</Label>
                   <Switch
                     id={`sticker-paid-${row.id}`}
@@ -389,7 +454,12 @@ function AdminStickersPage() {
                       setPriceDrafts((current) => ({ ...current, [row.id]: event.target.value }))
                     }
                   />
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void savePrice(row)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void savePrice(row)}
+                  >
                     Save
                   </Button>
                 </div>
@@ -399,9 +469,15 @@ function AdminStickersPage() {
                     : "Free for clients"}
                 </p>
               </div>
-              {row.is_processing_stuck && <div className="text-xs text-destructive">Processing stuck</div>}
-              {row.deletion_started_at && <div className="text-xs text-destructive">Delete cleanup pending</div>}
-              {row.failure_code && <div className="text-xs text-destructive">{row.failure_code}</div>}
+              {row.is_processing_stuck && (
+                <div className="text-xs text-destructive">Processing stuck</div>
+              )}
+              {row.deletion_started_at && (
+                <div className="text-xs text-destructive">Delete cleanup pending</div>
+              )}
+              {row.failure_code && (
+                <div className="text-xs text-destructive">{row.failure_code}</div>
+              )}
               {(row.ingest_status === "failed" || row.is_processing_stuck) && (
                 <Button
                   size="sm"
@@ -446,12 +522,16 @@ function AdminStickersPage() {
         </div>
       )}
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete sticker permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the sticker record and its private source and render files. This cannot be undone.
+              This removes the sticker record and its private source and render files. This cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -461,7 +541,11 @@ function AdminStickersPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => void remove()}
             >
-              {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {busy ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

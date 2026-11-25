@@ -51,7 +51,9 @@ export type OperatorPerformanceSummary = {
   }>;
 };
 
-export async function fetchOperatorPerformance(operatorId: string): Promise<OperatorPerformanceSummary> {
+export async function fetchOperatorPerformance(
+  operatorId: string,
+): Promise<OperatorPerformanceSummary> {
   const currentMonth = getMonthStart(new Date());
   const previousMonth = addMonths(currentMonth, -1);
   const currentMonthKey = toMonthKey(currentMonth);
@@ -76,10 +78,9 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
 
   const transactionsResult = operatorResult.data
     ? await supabase
-        .from("credit_transactions")
+        .from("operator_point_transactions")
         .select("amount, created_at")
-        .eq("user_id", operatorResult.data.user_id)
-        .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
+        .eq("operator_id", operatorResult.data.id)
         .gte("created_at", historyStartIso)
         .order("created_at", { ascending: false })
     : { data: [] as PointTransaction[], error: null };
@@ -87,9 +88,9 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
 
   const walletResult = operatorResult.data
     ? await supabase
-        .from("credit_wallets")
+        .from("operator_point_wallets")
         .select("balance")
-        .eq("user_id", operatorResult.data.user_id)
+        .eq("operator_id", operatorResult.data.id)
         .maybeSingle()
     : { data: null, error: null };
   if (walletResult.error) throw walletResult.error;
@@ -130,7 +131,11 @@ export async function fetchOperatorPerformance(operatorId: string): Promise<Oper
     previousMonthPoints: previousScore?.points ?? 0,
     monthlyPointChange: (currentScore?.points ?? 0) - (previousScore?.points ?? 0),
     monthlyMessageChange: (currentScore?.count ?? 0) - (previousScore?.count ?? 0),
-    avgResponseSec: await fetchAverageResponseSeconds(operatorId, assignedCharacters, currentMonthIso),
+    avgResponseSec: await fetchAverageResponseSeconds(
+      operatorId,
+      assignedCharacters,
+      currentMonthIso,
+    ),
     assignedCharacters,
     monthlyHistory: [...monthlyPoints.entries()]
       .sort(([a], [b]) => b.localeCompare(a))
@@ -173,7 +178,10 @@ async function fetchAverageResponseSeconds(
   return calculateAverageResponseSeconds((messages ?? []) as PerformanceMessage[], operatorId);
 }
 
-export function calculateAverageResponseSeconds(messages: PerformanceMessage[], operatorId: string) {
+export function calculateAverageResponseSeconds(
+  messages: PerformanceMessage[],
+  operatorId: string,
+) {
   const byConversation = new Map<string, PerformanceMessage[]>();
   messages.forEach((message) => {
     const list = byConversation.get(message.conversation_id) ?? [];

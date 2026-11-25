@@ -1,6 +1,15 @@
 ﻿import { ReactNode, useEffect, useState, createContext, useContext } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { BarChart3, Coins, Inbox, LayoutDashboard, Settings, LogOut, Radio } from "lucide-react";
+import {
+  BarChart3,
+  Coins,
+  HeartHandshake,
+  Inbox,
+  LayoutDashboard,
+  Settings,
+  LogOut,
+  Radio,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -21,6 +30,7 @@ type Ctx = {
   operator: OperatorRecord | null;
   isAdmin: boolean;
   walletBalance: number | null;
+  refreshFailed: boolean;
   refresh: () => Promise<void>;
 };
 const OperatorCtx = createContext<Ctx | null>(null);
@@ -35,6 +45,7 @@ type NavItem = {
     | "/operator"
     | "/operator/new"
     | "/operator/conversations"
+    | "/operator/leads"
     | "/operator/analytics"
     | "/operator/settings";
   label: string;
@@ -45,6 +56,7 @@ const NAV: NavItem[] = [
   { to: "/operator", label: "דשבורד", icon: LayoutDashboard, exact: true },
   { to: "/operator/new", label: "NEW", icon: Inbox },
   { to: "/operator/conversations", label: "ONLINE", icon: Radio },
+  { to: "/operator/leads", label: "Leads", icon: HeartHandshake },
   { to: "/operator/analytics", label: "ביצועים", icon: BarChart3 },
   { to: "/operator/settings", label: "הגדרות", icon: Settings },
 ];
@@ -76,25 +88,36 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   const [operator, setOperator] = useState<OperatorRecord | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [opLoading, setOpLoading] = useState(true);
+  const [refreshFailed, setRefreshFailed] = useState(false);
 
   const isAdmin = role === "admin";
 
   const refresh = async () => {
     if (!session?.user) return;
-    const [{ data: operatorData }, { data: walletData }] = await Promise.all([
-      supabase
+    try {
+      const operatorResult = await supabase
         .from("operators")
         .select("id, user_id, full_name, is_active, availability_status")
         .eq("user_id", session.user.id)
-        .maybeSingle(),
-      supabase
-        .from("credit_wallets")
-        .select("balance")
-        .eq("user_id", session.user.id)
-        .maybeSingle(),
-    ]);
-    setOperator((operatorData as OperatorRecord | null) ?? null);
-    setWalletBalance(walletData?.balance ?? 0);
+        .maybeSingle();
+      if (operatorResult.error) throw operatorResult.error;
+
+      const operatorData = operatorResult.data as OperatorRecord | null;
+      const walletResult = operatorData
+        ? await supabase
+            .from("operator_point_wallets")
+            .select("balance")
+            .eq("operator_id", operatorData.id)
+            .maybeSingle()
+        : { data: null, error: null };
+      if (walletResult.error) throw walletResult.error;
+
+      setOperator(operatorData ?? null);
+      setWalletBalance(walletResult.data?.balance ?? 0);
+      setRefreshFailed(false);
+    } catch {
+      setRefreshFailed(true);
+    }
   };
 
   useEffect(() => {
@@ -117,14 +140,14 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!session?.user || role === "client") return;
     const channel = supabase
-      .channel(`operator-wallet-${session.user.id}`)
+      .channel(`operator-points-${session.user.id}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "credit_wallets",
-          filter: `user_id=eq.${session.user.id}`,
+          table: "operator_point_wallets",
+          filter: operator?.id ? `operator_id=eq.${operator.id}` : undefined,
         },
         () => {
           void refresh();
@@ -135,8 +158,8 @@ export function RequireOperator({ children }: { children: ReactNode }) {
         {
           event: "*",
           schema: "public",
-          table: "credit_transactions",
-          filter: `user_id=eq.${session.user.id}`,
+          table: "operator_point_transactions",
+          filter: operator?.id ? `operator_id=eq.${operator.id}` : undefined,
         },
         () => {
           void refresh();
@@ -148,17 +171,17 @@ export function RequireOperator({ children }: { children: ReactNode }) {
       void supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id, role]);
+  }, [session?.user?.id, role, operator?.id]);
 
   useEffect(() => {
     if (role !== "operator" || !operator?.id) return;
 
-    const heartbeat = () => {
-      void supabase.rpc("operator_heartbeat");
+    const heartbeat = async () => {
+      await supabase.rpc("operator_heartbeat");
     };
 
-    heartbeat();
-    const interval = window.setInterval(heartbeat, 45_000);
+    void heartbeat();
+    const interval = window.setInterval(() => void heartbeat(), 45_000);
     return () => window.clearInterval(interval);
   }, [operator?.id, role]);
 
@@ -166,6 +189,27 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   if (!session) return null;
   if (role !== "operator" && role !== "admin") {
     return <Forbidden title="אין הרשאה" message="גישה לפאנל העובד מותרת לעובדים בלבד." />;
+  }
+  if (refreshFailed && !operator) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4" dir="rtl">
+        <div role="alert" className="max-w-md space-y-4 text-center">
+          <p className="text-lg font-semibold">טעינת חשבון העובד נכשלה</p>
+          <p className="text-sm text-muted-foreground">
+            לא ניתן לאמת כרגע את פרטי העובד. אפשר לנסות שוב בלי לעקוף את בדיקת ההרשאה.
+          </p>
+          <Button
+            type="button"
+            onClick={() => {
+              setOpLoading(true);
+              void refresh().finally(() => setOpLoading(false));
+            }}
+          >
+            נסה שוב
+          </Button>
+        </div>
+      </div>
+    );
   }
   if (role === "operator" && !operator) {
     return (
@@ -180,7 +224,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   }
 
   return (
-    <OperatorCtx.Provider value={{ operator, isAdmin, walletBalance, refresh }}>
+    <OperatorCtx.Provider value={{ operator, isAdmin, walletBalance, refreshFailed, refresh }}>
       <OperatorShell signOut={signOut}>{children}</OperatorShell>
     </OperatorCtx.Provider>
   );
@@ -195,7 +239,7 @@ function OperatorShell({
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const { operator, isAdmin, walletBalance } = useOperator();
+  const { operator, isAdmin, walletBalance, refreshFailed, refresh } = useOperator();
   const newSla = useOperatorNewSlaSummary(operator?.id);
 
   const isActive = (to: string, exact?: boolean) =>
@@ -241,7 +285,7 @@ function OperatorShell({
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Coins className="h-3.5 w-3.5" />
-                  <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
+                  <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
                 </div>
               </div>
             )}
@@ -287,16 +331,27 @@ function OperatorShell({
             {operator && (
               <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground">
                 <Coins className="h-3.5 w-3.5" />
-                <span>{(walletBalance ?? 0).toLocaleString("he-IL")} קרדיטים</span>
+                <span>{(walletBalance ?? 0).toLocaleString("he-IL")} נקודות</span>
               </div>
             )}
             <NotificationBell />
           </header>
+          {refreshFailed && (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2 text-sm"
+            >
+              <span>רענון נתוני העובד נכשל. מוצגים הנתונים האחרונים שהתקבלו.</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
+                רענון נתוני עובד
+              </Button>
+            </div>
+          )}
           <div className="flex-1 min-h-0">{children}</div>
         </main>
 
         <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-          <div className="grid grid-cols-5">
+          <div className="grid grid-cols-6">
             {NAV.map(({ to, label, icon: Icon, exact }) => (
               <Link
                 key={to}

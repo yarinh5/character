@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, rolePath } from "@/lib/auth";
 
@@ -18,6 +18,7 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [publicSupportContact, setPublicSupportContact] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user, role, loading } = useAuth();
 
@@ -25,13 +26,27 @@ function LoginPage() {
     if (!loading && user && role) navigate({ to: rolePath(role) });
   }, [user, role, loading, navigate]);
 
+  useEffect(() => {
+    let alive = true;
+    void supabase.rpc("get_public_support_contact").then(({ data, error }) => {
+      if (!alive || error) return;
+      const contact = typeof data === "string" ? data.trim() : "";
+      setPublicSupportContact(contact || null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
     if (error) {
-      toast.error(error.message === "Invalid login credentials" ? "פרטי התחברות שגויים" : error.message);
+      toast.error(
+        error.message === "Invalid login credentials" ? "פרטי התחברות שגויים" : error.message,
+      );
       return;
     }
     toast.success("ברוך הבא!");
@@ -48,14 +63,23 @@ function LoginPage() {
         </Link>
         <Card className="shadow-elegant">
           <CardHeader>
-            <CardTitle className="text-2xl">התחברות</CardTitle>
+            <h1 className="text-2xl font-semibold leading-none tracking-tight">התחברות</h1>
             <CardDescription>ברוכים השבים. הזינו את פרטיכם.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">אימייל</Label>
-                <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} dir="ltr" />
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  dir="ltr"
+                />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -64,7 +88,15 @@ function LoginPage() {
                     שכחת סיסמה?
                   </Link>
                 </div>
-                <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
               </div>
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting ? "מתחבר..." : "התחבר"}
@@ -76,6 +108,11 @@ function LoginPage() {
                 הרשמה
               </Link>
             </p>
+            {publicSupportContact && (
+              <p className="mt-3 text-center text-sm text-muted-foreground">
+                לא ניתן להתחבר? ערוץ התמיכה שהוגדר: <span dir="ltr">{publicSupportContact}</span>
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

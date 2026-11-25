@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
+import { resolvePublicPasswordResetRedirect } from "@/lib/authRedirects";
 
 export const Route = createFileRoute("/forgot-password")({
   head: () => ({ meta: [{ title: "שחזור סיסמה" }] }),
@@ -20,8 +21,14 @@ function ForgotPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    const redirectTo = resolvePublicPasswordResetRedirect(import.meta.env);
+    if (!redirectTo) {
+      setSubmitting(false);
+      toast.error("שחזור הסיסמה אינו מוגדר כעת");
+      return;
+    }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo,
     });
     setSubmitting(false);
     if (error) return toast.error(error.message);

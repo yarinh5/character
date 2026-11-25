@@ -1178,9 +1178,9 @@ function CreditsDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>פעולה</Label>
+            <Label htmlFor="client-credit-mode">פעולה</Label>
             <Select value={mode} onValueChange={(value) => setMode(value as "add" | "remove")}>
-              <SelectTrigger>
+              <SelectTrigger id="client-credit-mode">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1190,8 +1190,9 @@ function CreditsDialog({
             </Select>
           </div>
           <div>
-            <Label>כמות</Label>
+            <Label htmlFor="client-credit-amount">כמות</Label>
             <Input
+              id="client-credit-amount"
               type="number"
               min={1}
               value={amount}
@@ -1199,8 +1200,8 @@ function CreditsDialog({
             />
           </div>
           <div>
-            <Label>Reason</Label>
-            <Textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
+            <Label htmlFor="client-credit-reason">Reason</Label>
+            <Textarea id="client-credit-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
           </div>
         </div>
         <DialogFooter>

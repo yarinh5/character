@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VerifyAccountDeletionRouteImport } from './routes/verify-account-deletion'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as ServiceRouteImport } from './routes/service'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -17,6 +18,7 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as OperatorRouteImport } from './routes/operator'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as CancelAccountDeletionRouteImport } from './routes/cancel-account-deletion'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -26,8 +28,10 @@ import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as OperatorSettingsRouteImport } from './routes/operator.settings'
 import { Route as OperatorOnlineRouteImport } from './routes/operator.online'
 import { Route as OperatorNewRouteImport } from './routes/operator.new'
+import { Route as OperatorLeadsRouteImport } from './routes/operator.leads'
 import { Route as OperatorConversationsRouteImport } from './routes/operator.conversations'
 import { Route as OperatorAnalyticsRouteImport } from './routes/operator.analytics'
+import { Route as AppSupportRouteImport } from './routes/app.support'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppPackagesRouteImport } from './routes/app.packages'
 import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
@@ -35,10 +39,12 @@ import { Route as AppFavoritesRouteImport } from './routes/app.favorites'
 import { Route as AppConversationsRouteImport } from './routes/app.conversations'
 import { Route as AppCharactersRouteImport } from './routes/app.characters'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as AdminStickersRouteImport } from './routes/admin.stickers'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
+import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
 import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
 import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
@@ -53,6 +59,11 @@ import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$co
 import { Route as AppCharactersCharacterIdRouteImport } from './routes/app.characters.$characterId'
 import { Route as AdminConversationsConversationIdRouteImport } from './routes/admin.conversations.$conversationId'
 
+const VerifyAccountDeletionRoute = VerifyAccountDeletionRouteImport.update({
+  id: '/verify-account-deletion',
+  path: '/verify-account-deletion',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
   path: '/terms',
@@ -91,6 +102,11 @@ const LoginRoute = LoginRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CancelAccountDeletionRoute = CancelAccountDeletionRouteImport.update({
+  id: '/cancel-account-deletion',
+  path: '/cancel-account-deletion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
@@ -138,6 +154,11 @@ const OperatorNewRoute = OperatorNewRouteImport.update({
   path: '/new',
   getParentRoute: () => OperatorRoute,
 } as any)
+const OperatorLeadsRoute = OperatorLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => OperatorRoute,
+} as any)
 const OperatorConversationsRoute = OperatorConversationsRouteImport.update({
   id: '/conversations',
   path: '/conversations',
@@ -147,6 +168,11 @@ const OperatorAnalyticsRoute = OperatorAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
   getParentRoute: () => OperatorRoute,
+} as any)
+const AppSupportRoute = AppSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
@@ -183,6 +209,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminSupportRoute = AdminSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminStickersRoute = AdminStickersRouteImport.update({
   id: '/stickers',
   path: '/stickers',
@@ -201,6 +232,11 @@ const AdminReportsRoute = AdminReportsRouteImport.update({
 const AdminOperatorsRoute = AdminOperatorsRouteImport.update({
   id: '/operators',
   path: '/operators',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLeadsRoute = AdminLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminInvitesRoute = AdminInvitesRouteImport.update({
@@ -276,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
+  '/cancel-account-deletion': typeof CancelAccountDeletionRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/operator': typeof OperatorRouteWithChildren
@@ -284,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
+  '/verify-account-deletion': typeof VerifyAccountDeletionRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
@@ -292,10 +330,12 @@ export interface FileRoutesByFullPath {
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
+  '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
+  '/admin/support': typeof AdminSupportRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
@@ -303,8 +343,10 @@ export interface FileRoutesByFullPath {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/support': typeof AppSupportRoute
   '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
+  '/operator/leads': typeof OperatorLeadsRoute
   '/operator/new': typeof OperatorNewRoute
   '/operator/online': typeof OperatorOnlineRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -319,6 +361,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cancel-account-deletion': typeof CancelAccountDeletionRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/privacy': typeof PrivacyRoute
@@ -326,6 +369,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
+  '/verify-account-deletion': typeof VerifyAccountDeletionRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
@@ -333,10 +377,12 @@ export interface FileRoutesByTo {
   '/admin/clients': typeof AdminClientsRoute
   '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
+  '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
+  '/admin/support': typeof AdminSupportRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
@@ -344,8 +390,10 @@ export interface FileRoutesByTo {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/support': typeof AppSupportRoute
   '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
+  '/operator/leads': typeof OperatorLeadsRoute
   '/operator/new': typeof OperatorNewRoute
   '/operator/online': typeof OperatorOnlineRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -363,6 +411,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
+  '/cancel-account-deletion': typeof CancelAccountDeletionRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/operator': typeof OperatorRouteWithChildren
@@ -371,6 +420,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/service': typeof ServiceRoute
   '/terms': typeof TermsRoute
+  '/verify-account-deletion': typeof VerifyAccountDeletionRoute
   '/accept-invite/$token': typeof AcceptInviteTokenRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
@@ -379,10 +429,12 @@ export interface FileRoutesById {
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
   '/admin/invites': typeof AdminInvitesRoute
+  '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/stickers': typeof AdminStickersRoute
+  '/admin/support': typeof AdminSupportRoute
   '/admin/users': typeof AdminUsersRoute
   '/app/characters': typeof AppCharactersRouteWithChildren
   '/app/conversations': typeof AppConversationsRoute
@@ -390,8 +442,10 @@ export interface FileRoutesById {
   '/app/onboarding': typeof AppOnboardingRoute
   '/app/packages': typeof AppPackagesRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/support': typeof AppSupportRoute
   '/operator/analytics': typeof OperatorAnalyticsRoute
   '/operator/conversations': typeof OperatorConversationsRoute
+  '/operator/leads': typeof OperatorLeadsRoute
   '/operator/new': typeof OperatorNewRoute
   '/operator/online': typeof OperatorOnlineRoute
   '/operator/settings': typeof OperatorSettingsRoute
@@ -410,6 +464,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/cancel-account-deletion'
     | '/forgot-password'
     | '/login'
     | '/operator'
@@ -418,6 +473,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/service'
     | '/terms'
+    | '/verify-account-deletion'
     | '/accept-invite/$token'
     | '/admin/analytics'
     | '/admin/audit-logs'
@@ -426,10 +482,12 @@ export interface FileRouteTypes {
     | '/admin/conversations'
     | '/admin/credits'
     | '/admin/invites'
+    | '/admin/leads'
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/stickers'
+    | '/admin/support'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -437,8 +495,10 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/app/support'
     | '/operator/analytics'
     | '/operator/conversations'
+    | '/operator/leads'
     | '/operator/new'
     | '/operator/online'
     | '/operator/settings'
@@ -453,6 +513,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/cancel-account-deletion'
     | '/forgot-password'
     | '/login'
     | '/privacy'
@@ -460,6 +521,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/service'
     | '/terms'
+    | '/verify-account-deletion'
     | '/accept-invite/$token'
     | '/admin/analytics'
     | '/admin/audit-logs'
@@ -467,10 +529,12 @@ export interface FileRouteTypes {
     | '/admin/clients'
     | '/admin/credits'
     | '/admin/invites'
+    | '/admin/leads'
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/stickers'
+    | '/admin/support'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -478,8 +542,10 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/app/support'
     | '/operator/analytics'
     | '/operator/conversations'
+    | '/operator/leads'
     | '/operator/new'
     | '/operator/online'
     | '/operator/settings'
@@ -496,6 +562,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/cancel-account-deletion'
     | '/forgot-password'
     | '/login'
     | '/operator'
@@ -504,6 +571,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/service'
     | '/terms'
+    | '/verify-account-deletion'
     | '/accept-invite/$token'
     | '/admin/analytics'
     | '/admin/audit-logs'
@@ -512,10 +580,12 @@ export interface FileRouteTypes {
     | '/admin/conversations'
     | '/admin/credits'
     | '/admin/invites'
+    | '/admin/leads'
     | '/admin/operators'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/stickers'
+    | '/admin/support'
     | '/admin/users'
     | '/app/characters'
     | '/app/conversations'
@@ -523,8 +593,10 @@ export interface FileRouteTypes {
     | '/app/onboarding'
     | '/app/packages'
     | '/app/profile'
+    | '/app/support'
     | '/operator/analytics'
     | '/operator/conversations'
+    | '/operator/leads'
     | '/operator/new'
     | '/operator/online'
     | '/operator/settings'
@@ -542,6 +614,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
+  CancelAccountDeletionRoute: typeof CancelAccountDeletionRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   OperatorRoute: typeof OperatorRouteWithChildren
@@ -550,11 +623,19 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   ServiceRoute: typeof ServiceRoute
   TermsRoute: typeof TermsRoute
+  VerifyAccountDeletionRoute: typeof VerifyAccountDeletionRoute
   AcceptInviteTokenRoute: typeof AcceptInviteTokenRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/verify-account-deletion': {
+      id: '/verify-account-deletion'
+      path: '/verify-account-deletion'
+      fullPath: '/verify-account-deletion'
+      preLoaderRoute: typeof VerifyAccountDeletionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/terms': {
       id: '/terms'
       path: '/terms'
@@ -609,6 +690,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cancel-account-deletion': {
+      id: '/cancel-account-deletion'
+      path: '/cancel-account-deletion'
+      fullPath: '/cancel-account-deletion'
+      preLoaderRoute: typeof CancelAccountDeletionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -674,6 +762,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OperatorNewRouteImport
       parentRoute: typeof OperatorRoute
     }
+    '/operator/leads': {
+      id: '/operator/leads'
+      path: '/leads'
+      fullPath: '/operator/leads'
+      preLoaderRoute: typeof OperatorLeadsRouteImport
+      parentRoute: typeof OperatorRoute
+    }
     '/operator/conversations': {
       id: '/operator/conversations'
       path: '/conversations'
@@ -687,6 +782,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/operator/analytics'
       preLoaderRoute: typeof OperatorAnalyticsRouteImport
       parentRoute: typeof OperatorRoute
+    }
+    '/app/support': {
+      id: '/app/support'
+      path: '/support'
+      fullPath: '/app/support'
+      preLoaderRoute: typeof AppSupportRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/profile': {
       id: '/app/profile'
@@ -737,6 +839,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/support': {
+      id: '/admin/support'
+      path: '/support'
+      fullPath: '/admin/support'
+      preLoaderRoute: typeof AdminSupportRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/stickers': {
       id: '/admin/stickers'
       path: '/stickers'
@@ -763,6 +872,13 @@ declare module '@tanstack/react-router' {
       path: '/operators'
       fullPath: '/admin/operators'
       preLoaderRoute: typeof AdminOperatorsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/leads': {
+      id: '/admin/leads'
+      path: '/leads'
+      fullPath: '/admin/leads'
+      preLoaderRoute: typeof AdminLeadsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/invites': {
@@ -880,10 +996,12 @@ interface AdminRouteChildren {
   AdminConversationsRoute: typeof AdminConversationsRouteWithChildren
   AdminCreditsRoute: typeof AdminCreditsRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
+  AdminLeadsRoute: typeof AdminLeadsRoute
   AdminOperatorsRoute: typeof AdminOperatorsRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminStickersRoute: typeof AdminStickersRoute
+  AdminSupportRoute: typeof AdminSupportRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -896,10 +1014,12 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminConversationsRoute: AdminConversationsRouteWithChildren,
   AdminCreditsRoute: AdminCreditsRoute,
   AdminInvitesRoute: AdminInvitesRoute,
+  AdminLeadsRoute: AdminLeadsRoute,
   AdminOperatorsRoute: AdminOperatorsRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminStickersRoute: AdminStickersRoute,
+  AdminSupportRoute: AdminSupportRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
@@ -925,6 +1045,7 @@ interface AppRouteChildren {
   AppOnboardingRoute: typeof AppOnboardingRoute
   AppPackagesRoute: typeof AppPackagesRoute
   AppProfileRoute: typeof AppProfileRoute
+  AppSupportRoute: typeof AppSupportRoute
   AppIndexRoute: typeof AppIndexRoute
   AppChatConversationIdRoute: typeof AppChatConversationIdRoute
 }
@@ -936,6 +1057,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOnboardingRoute: AppOnboardingRoute,
   AppPackagesRoute: AppPackagesRoute,
   AppProfileRoute: AppProfileRoute,
+  AppSupportRoute: AppSupportRoute,
   AppIndexRoute: AppIndexRoute,
   AppChatConversationIdRoute: AppChatConversationIdRoute,
 }
@@ -945,6 +1067,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 interface OperatorRouteChildren {
   OperatorAnalyticsRoute: typeof OperatorAnalyticsRoute
   OperatorConversationsRoute: typeof OperatorConversationsRoute
+  OperatorLeadsRoute: typeof OperatorLeadsRoute
   OperatorNewRoute: typeof OperatorNewRoute
   OperatorOnlineRoute: typeof OperatorOnlineRoute
   OperatorSettingsRoute: typeof OperatorSettingsRoute
@@ -955,6 +1078,7 @@ interface OperatorRouteChildren {
 const OperatorRouteChildren: OperatorRouteChildren = {
   OperatorAnalyticsRoute: OperatorAnalyticsRoute,
   OperatorConversationsRoute: OperatorConversationsRoute,
+  OperatorLeadsRoute: OperatorLeadsRoute,
   OperatorNewRoute: OperatorNewRoute,
   OperatorOnlineRoute: OperatorOnlineRoute,
   OperatorSettingsRoute: OperatorSettingsRoute,
@@ -970,6 +1094,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
+  CancelAccountDeletionRoute: CancelAccountDeletionRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   OperatorRoute: OperatorRouteWithChildren,
@@ -978,6 +1103,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   ServiceRoute: ServiceRoute,
   TermsRoute: TermsRoute,
+  VerifyAccountDeletionRoute: VerifyAccountDeletionRoute,
   AcceptInviteTokenRoute: AcceptInviteTokenRoute,
 }
 export const routeTree = rootRouteImport

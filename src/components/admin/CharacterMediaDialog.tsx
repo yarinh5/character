@@ -53,11 +53,26 @@ type UploadIntentResponse = {
   upload_url?: unknown;
   expires_at?: unknown;
 };
+type AssetTag = { id: string; name: string; character_id?: string };
 
 const ACCEPTED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const EMPTY_ASSETS: MediaAsset[] = [];
 const EMPTY_TAGS: MediaTag[] = [];
+
+function assetTags(asset: MediaAsset): AssetTag[] {
+  return Array.isArray(asset.media_tags)
+    ? asset.media_tags.filter(
+        (tag): tag is AssetTag =>
+          typeof tag === "object" &&
+          tag !== null &&
+          typeof (tag as Record<string, unknown>).id === "string" &&
+          typeof (tag as Record<string, unknown>).name === "string" &&
+          (typeof (tag as Record<string, unknown>).character_id === "string" ||
+            (tag as Record<string, unknown>).character_id === undefined),
+      )
+    : [{ id: asset.media_tag_id, name: asset.media_tag_name }];
+}
 
 async function functionErrorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("context" in error)) return null;
@@ -161,6 +176,10 @@ function AssetCard({
   onHardDelete,
   tags,
   onAssignTag,
+  onRemoveTag,
+  onToggleGlobal,
+  onToggleCharacter,
+  assignedToCharacter,
 }: {
   asset: MediaAsset;
   busy: boolean;
@@ -173,6 +192,10 @@ function AssetCard({
   onHardDelete: () => void;
   tags: MediaTag[];
   onAssignTag: (tagId: string) => void;
+  onRemoveTag: (tagId: string) => void;
+  onToggleGlobal: () => void;
+  onToggleCharacter: () => void;
+  assignedToCharacter: boolean;
 }) {
   const [price, setPrice] = useState(asset.locked_price_credits?.toString() ?? "");
   const [paidOpenPrice, setPaidOpenPrice] = useState(
@@ -197,6 +220,23 @@ function AssetCard({
           <span className="capitalize">{asset.ingest_status}</span>
           <span className="text-muted-foreground">·</span>
           <span className="capitalize">{asset.status}</span>
+        </div>
+        <div className="flex flex-wrap gap-1 text-xs">
+          {asset.is_global && (
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">מאגר כללי</span>
+          )}
+          {assetTags(asset).map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              className="rounded bg-muted px-1.5 py-0.5"
+              onClick={() => onRemoveTag(tag.id)}
+              disabled={busy}
+              title="הסר שיוך תגית"
+            >
+              {tag.name} ×
+            </button>
+          ))}
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <LockKeyhole className="h-3.5 w-3.5" />
@@ -223,6 +263,26 @@ function AssetCard({
               ))}
             </SelectContent>
           </Select>
+          <div className="grid grid-cols-2 gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onToggleGlobal}
+              disabled={busy}
+            >
+              {asset.is_global ? "הסר מהמאגר הכללי" : "הוסף למאגר הכללי"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onToggleCharacter}
+              disabled={busy}
+            >
+              {assignedToCharacter ? "הסר מהדמות" : "שייך לדמות"}
+            </Button>
+          </div>
         </div>
         {asset.processing_error_code && <div className="text-xs text-destructive">העיבוד נכשל</div>}
         {asset.locked_derivative_error_code && (
@@ -262,6 +322,7 @@ function AssetCard({
               onClick={onRetry}
               disabled={busy}
               title="נסה לעבד מחדש"
+              aria-label="נסה לעבד מחדש"
             >
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
@@ -272,6 +333,7 @@ function AssetCard({
             onClick={onHardDelete}
             disabled={busy}
             title="מחיקה מוחלטת"
+            aria-label="מחיקה מוחלטת"
           >
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </Button>
@@ -404,7 +466,7 @@ export function CharacterMediaDialog({
     () =>
       assets.filter(
         (asset) =>
-          (selectedTagId === "all" || asset.media_tag_id === selectedTagId) &&
+          (selectedTagId === "all" || assetTags(asset).some((tag) => tag.id === selectedTagId)) &&
           (!normalizedSearch ||
             (asset.display_name ?? "").toLocaleLowerCase().includes(normalizedSearch)),
       ),
@@ -440,9 +502,22 @@ export function CharacterMediaDialog({
 
   const refresh = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey }),
-      queryClient.invalidateQueries({ queryKey: tagQueryKey }),
+      queryClient.invalidateQueries({ queryKey, refetchType: "none" }),
+      queryClient.invalidateQueries({ queryKey: tagQueryKey, refetchType: "none" }),
     ]);
+    const [assetResult, tagResult] = await Promise.all([
+      assetsQuery.refetch(),
+      tagsQuery.refetch(),
+    ]);
+    return !assetResult.isError && !tagResult.isError;
+  };
+
+  const completeMutationRefresh = async (successMessage: string) => {
+    if (await refresh()) toast.success(successMessage);
+    else
+      toast.warning(
+        "השינוי נשמר, אך רענון הרשימה נכשל. הנתונים הקודמים נשארו זמינים לניסיון נוסף.",
+      );
   };
 
   const getTagErrorMessage = (error: unknown) => {
@@ -478,8 +553,7 @@ export function CharacterMediaDialog({
       });
       if (error) throw error;
       setNewTagName("");
-      await refresh();
-      toast.success("תגית המדיה נוצרה");
+      await completeMutationRefresh("תגית המדיה נוצרה");
     } catch (error) {
       toast.error(getTagErrorMessage(error));
     } finally {
@@ -508,8 +582,7 @@ export function CharacterMediaDialog({
         delete next[tag.id];
         return next;
       });
-      await refresh();
-      toast.success("תגית המדיה נשמרה");
+      await completeMutationRefresh("תגית המדיה נשמרה");
     } catch (error) {
       toast.error(getTagErrorMessage(error));
     } finally {
@@ -525,8 +598,7 @@ export function CharacterMediaDialog({
       const { error } = await supabase.rpc("delete_admin_media_tag", { _tag_id: tag.id });
       if (error) throw error;
       if (selectedTagId === tag.id) setSelectedTagId("all");
-      await refresh();
-      toast.success("תגית המדיה נמחקה");
+      await completeMutationRefresh("תגית המדיה נמחקה");
     } catch (error) {
       toast.error(getTagErrorMessage(error));
     } finally {
@@ -536,7 +608,7 @@ export function CharacterMediaDialog({
   };
 
   const assignAssetTag = async (asset: MediaAsset, tagId: string) => {
-    if (tagId === asset.media_tag_id) return;
+    if (assetTags(asset).some((tag) => tag.id === tagId)) return;
     setBusyAssetId(asset.id);
     try {
       const { error } = await supabase.rpc("assign_admin_media_asset_tag", {
@@ -544,8 +616,34 @@ export function CharacterMediaDialog({
         _media_tag_id: tagId,
       });
       if (error) throw error;
-      await refresh();
-      toast.success("תגית הנכס עודכנה");
+      await completeMutationRefresh("תגית הנכס עודכנה");
+    } catch (error) {
+      toast.error(getTagErrorMessage(error));
+    } finally {
+      setBusyAssetId(null);
+    }
+  };
+
+  const updateAssetAssignments = async (
+    asset: MediaAsset,
+    characterIds: string[],
+    tagIds: string[],
+    isGlobal: boolean,
+  ) => {
+    if (characterIds.length === 0 && !isGlobal) {
+      toast.error("נכס חייב להיות משויך לדמות אחת לפחות או למאגר הכללי");
+      return;
+    }
+    setBusyAssetId(asset.id);
+    try {
+      const { error } = await supabase.rpc("set_admin_media_asset_assignments", {
+        _asset_id: asset.id,
+        _character_ids: characterIds,
+        _media_tag_ids: tagIds,
+        _is_global: isGlobal,
+      });
+      if (error) throw error;
+      await completeMutationRefresh("שיוכי הנכס נשמרו");
     } catch (error) {
       toast.error(getTagErrorMessage(error));
     } finally {
@@ -568,8 +666,9 @@ export function CharacterMediaDialog({
         _price_credits: priceCredits ?? undefined,
       });
       if (error) throw error;
-      await refresh();
-      toast.success(priceCredits === null ? "הגדרת המדיה הנעולה הוסרה" : "מחיר המדיה הנעולה נשמר");
+      await completeMutationRefresh(
+        priceCredits === null ? "הגדרת המדיה הנעולה הוסרה" : "מחיר המדיה הנעולה נשמר",
+      );
     } catch {
       toast.error("לא ניתן לשמור את הגדרת המדיה הנעולה");
     } finally {
@@ -585,8 +684,9 @@ export function CharacterMediaDialog({
         _price_credits: priceCredits ?? undefined,
       });
       if (error) throw error;
-      await refresh();
-      toast.success(priceCredits === null ? "פתיחה בתשלום בוטלה" : "מחיר הפתיחה בתשלום נשמר");
+      await completeMutationRefresh(
+        priceCredits === null ? "פתיחה בתשלום בוטלה" : "מחיר הפתיחה בתשלום נשמר",
+      );
     } catch {
       toast.error("לא ניתן לשמור את הגדרת הפתיחה בתשלום");
     } finally {
@@ -604,14 +704,15 @@ export function CharacterMediaDialog({
       });
       if (error) throw new Error((await functionErrorCode(error)) ?? "media_delete_failed");
       if (!data || data.deleted !== true) throw new Error("media_delete_failed");
-      await refresh();
-      toast.success("המדיה נמחקה לצמיתות");
+      await completeMutationRefresh("המדיה נמחקה לצמיתות");
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       toast.error(
         message.includes("media_asset_in_use")
           ? "אי אפשר למחוק מדיה שכבר נשלחה או נמצאת בשימוש."
-          : "לא ניתן למחוק את המדיה כרגע. אפשר לנסות שוב.",
+          : message.includes("media_asset_shared")
+            ? "אי אפשר למחוק מכאן נכס משותף או נכס מהמאגר הכללי."
+            : "לא ניתן למחוק את המדיה כרגע. אפשר לנסות שוב.",
       );
     } finally {
       setAssetToHardDelete(null);
@@ -643,8 +744,7 @@ export function CharacterMediaDialog({
       if (!upload.ok) throw new Error("source_upload_failed");
 
       await processAsset(intent.asset_id);
-      await refresh();
-      toast.success("התמונה עובדה ומוכנה לשימוש");
+      await completeMutationRefresh("התמונה עובדה ומוכנה לשימוש");
     } catch {
       await refresh();
       toast.error("העלאה או עיבוד של התמונה נכשלו");
@@ -666,8 +766,7 @@ export function CharacterMediaDialog({
         );
         if (error) throw error;
       }
-      await refresh();
-      toast.success(
+      await completeMutationRefresh(
         action === "disable"
           ? "המדיה הושבתה"
           : action === "restore"
@@ -860,6 +959,7 @@ export function CharacterMediaDialog({
                       size="icon"
                       variant="outline"
                       title="שמור תגית"
+                      aria-label={`שמור תגית ${tag.name}`}
                       onClick={() => void updateTag(tag)}
                       disabled={busy}
                     >
@@ -879,6 +979,7 @@ export function CharacterMediaDialog({
                             ? "העבר נכסים לפני מחיקת התגית"
                             : "מחק תגית"
                       }
+                      aria-label={`מחק תגית ${tag.name}`}
                       onClick={() => setTagToDelete(tag)}
                       disabled={busy || tag.is_default || tag.asset_count > 0}
                     >
@@ -953,14 +1054,51 @@ export function CharacterMediaDialog({
                 busy={busyAssetId === asset.id}
                 tags={tags}
                 onAssignTag={(tagId) => void assignAssetTag(asset, tagId)}
+                onRemoveTag={(tagId) =>
+                  void updateAssetAssignments(
+                    asset,
+                    asset.character_ids,
+                    assetTags(asset)
+                      .map((tag) => tag.id)
+                      .filter((id) => id !== tagId),
+                    asset.is_global,
+                  )
+                }
+                onToggleGlobal={() =>
+                  void updateAssetAssignments(
+                    asset,
+                    asset.character_ids,
+                    assetTags(asset).map((tag) => tag.id),
+                    !asset.is_global,
+                  )
+                }
+                assignedToCharacter={asset.character_ids.includes(character.id)}
+                onToggleCharacter={() => {
+                  const assigned = asset.character_ids.includes(character.id);
+                  const currentCharacterTagIds = new Set(tags.map((tag) => tag.id));
+                  void updateAssetAssignments(
+                    asset,
+                    assigned
+                      ? asset.character_ids.filter((id) => id !== character.id)
+                      : [...new Set([...asset.character_ids, character.id])],
+                    assetTags(asset)
+                      .filter(
+                        (tag) =>
+                          !assigned ||
+                          (tag.character_id !== character.id &&
+                            !(!tag.character_id && currentCharacterTagIds.has(tag.id))),
+                      )
+                      .map((tag) => tag.id),
+                    asset.is_global,
+                  );
+                }}
                 onDisable={() => void runAssetAction(asset, "disable")}
                 onRestore={() => void runAssetAction(asset, "restore")}
                 onRetry={() => void runAssetAction(asset, "retry")}
                 onPrepareLocked={() => {
                   setBusyAssetId(asset.id);
                   void processAsset(asset.id, "locked")
-                    .then(refresh)
-                    .then(() => toast.success("נגזרות נעולות הוכנו"))
+                    .then(() => completeMutationRefresh("נגזרות נעולות הוכנו"))
                     .catch(() => toast.error("לא ניתן להכין נגזרות נעולות"))
                     .finally(() => setBusyAssetId(null));
                 }}

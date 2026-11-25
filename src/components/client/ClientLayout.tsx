@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Users, MessageCircle, User, LogOut, Coins, Star } from "lucide-react";
+import { Users, MessageCircle, User, LogOut, Coins, Star, LifeBuoy } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ const NAV = [
   { to: "/app/conversations", label: "שיחות", icon: MessageCircle },
   { to: "/app/profile", label: "פרופיל", icon: User },
   { to: "/app/packages", label: "חבילות", icon: Coins },
+  { to: "/app/support", label: "תמיכה", icon: LifeBuoy },
 ] as const;
 
 export function ClientLayout({ children }: { children: ReactNode }) {
@@ -98,7 +99,9 @@ export function RequireClient({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [statusLoading, setStatusLoading] = useState(true);
   const [clientStatus, setClientStatus] = useState<string | null>(null);
-  const [onboardingGate, setOnboardingGate] = useState<"loading" | "allowed" | "redirecting">("loading");
+  const [onboardingGate, setOnboardingGate] = useState<"loading" | "allowed" | "redirecting">(
+    "loading",
+  );
   const [onboardingRefresh, setOnboardingRefresh] = useState(0);
 
   useEffect(() => {
@@ -128,7 +131,7 @@ export function RequireClient({ children }: { children: ReactNode }) {
       .maybeSingle()
       .then(async ({ data }) => {
         if (!alive) return;
-        const status = data?.deleted_at ? "archived" : data?.status ?? "active";
+        const status = data?.deleted_at ? "archived" : (data?.status ?? "active");
         setClientStatus(status);
         setStatusLoading(false);
         if (status !== "active") {
@@ -196,7 +199,12 @@ export function RequireClient({ children }: { children: ReactNode }) {
     };
   }, [loading, navigate, onboardingRefresh, pathname, role, session?.user]);
 
-  if (loading || statusLoading || onboardingGate === "loading" || onboardingGate === "redirecting") {
+  if (
+    loading ||
+    statusLoading ||
+    onboardingGate === "loading" ||
+    onboardingGate === "redirecting"
+  ) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />

@@ -29,6 +29,7 @@ import {
   type StickerSendResult,
 } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
+import { useConversationReadAccess } from "@/hooks/useConversationReadAccess";
 import {
   operatorNewQueueClaimError,
   useOperatorNewQueue,
@@ -147,6 +148,28 @@ export function OperatorChatPage() {
   const { user } = useAuth();
   const { operator, isAdmin } = useOperator();
   const navigate = useNavigate();
+  const readAccess = useConversationReadAccess(conversationId);
+  const readAllowed = readAccess.state === "allowed";
+  const suspendReadAccess = readAccess.suspend;
+  const readScopeRef = useRef({
+    conversationId,
+    userId: user?.id,
+    generation: readAccess.generation,
+    allowed: readAllowed,
+  });
+  if (
+    readScopeRef.current.conversationId !== conversationId ||
+    readScopeRef.current.userId !== user?.id ||
+    readScopeRef.current.generation !== readAccess.generation ||
+    readScopeRef.current.allowed !== readAllowed
+  ) {
+    readScopeRef.current = {
+      conversationId,
+      userId: user?.id,
+      generation: readAccess.generation,
+      allowed: readAllowed,
+    };
+  }
 
   const [conv, setConv] = useState<Conv | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -174,6 +197,7 @@ export function OperatorChatPage() {
     applySuccessfulSendCycle,
     releaseOwnership,
   } = useOperatorSendOwnership(conversationId, isAdmin, operator?.id);
+  const invalidateSendScope = sendScope.invalidate;
   const responsibilityRef = useRef(responsibility);
   responsibilityRef.current = responsibility;
   const hasOtherResponsibility = () => responsibilityRef.current === "other";
@@ -207,14 +231,47 @@ export function OperatorChatPage() {
       ].sort(),
     [messages],
   );
-  const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
-  useActiveConversation(conversationId, isAdmin ? "admin" : "operator");
+  const attachmentAccess = useMessageAttachmentAccessMap(
+    attachmentIds,
+    readAllowed,
+    readAccess.generation,
+  );
+  useActiveConversation(
+    conversationId,
+    isAdmin ? "admin" : "operator",
+    readAllowed,
+    readAccess.generation,
+  );
   const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
     userId: user?.id,
     role: isAdmin ? "admin" : "operator",
     displayName: operator?.full_name ?? (isAdmin ? "מנהל" : "עובד"),
+    enabled: readAllowed,
+    accessGeneration: readAccess.generation,
   });
+
+  useEffect(() => {
+    if (readAllowed) return;
+    invalidateSendScope();
+    activeTextRequestRef.current = null;
+    setSending(false);
+    loadingOlderRef.current = false;
+    setLoadingOlderMessages(false);
+    setMediaPickerOpen(false);
+    setStickerPickerOpen(false);
+    setConv(null);
+    setMessages([]);
+    setAdminOperatorUserIds([]);
+    setClient(null);
+    setNotes([]);
+    setCustomerInfoEntries([]);
+    setConversationLock(null);
+    setInput("");
+    setNoteInput("");
+    setCustomerInfoInput("");
+    setLoading(true);
+  }, [invalidateSendScope, readAccess.generation, readAllowed]);
 
   useEffect(() => {
     activeTextRequestRef.current = null;
@@ -237,6 +294,8 @@ export function OperatorChatPage() {
   );
 
   const hydrateMessageDecorations = async (message: Msg) => {
+    const accessScope = readScopeRef.current;
+    if (!accessScope.allowed) return message;
     const [{ data: attachments }, { data: stickers }] = await Promise.all([
       supabase
         .from("message_attachments")
@@ -251,6 +310,7 @@ export function OperatorChatPage() {
         .eq("message_id", message.id),
     ]);
 
+    if (readScopeRef.current !== accessScope) return message;
     return {
       ...message,
       message_attachments: (attachments ?? []) as MessageAttachmentData[],
@@ -259,7 +319,8 @@ export function OperatorChatPage() {
   };
 
   const loadOlderMessages = async () => {
-    if (loadingOlderRef.current || !hasOlderMessages) return;
+    const accessScope = readScopeRef.current;
+    if (!accessScope.allowed || loadingOlderRef.current || !hasOlderMessages) return;
     const container = scrollRef.current;
     const before = getOldestMessageCursor(messages);
     if (!before || !container) return;
@@ -280,6 +341,11 @@ export function OperatorChatPage() {
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(MESSAGE_PAGE_SIZE);
+    if (readScopeRef.current !== accessScope) {
+      loadingOlderRef.current = false;
+      setLoadingOlderMessages(false);
+      return;
+    }
     setLoadingOlderMessages(false);
 
     if (error) {
@@ -301,7 +367,10 @@ export function OperatorChatPage() {
 
   // Load conversation, latest messages, notes, client info
   useEffect(() => {
+    if (!readAllowed) return;
     let cancelled = false;
+    const accessScope = readScopeRef.current;
+    const isStale = () => cancelled || readScopeRef.current !== accessScope || !accessScope.allowed;
     initialScrollDoneRef.current = false;
     shouldStickToBottomRef.current = true;
     (async () => {
@@ -313,7 +382,7 @@ export function OperatorChatPage() {
         )
         .eq("id", conversationId)
         .maybeSingle();
-      if (cancelled) return;
+      if (isStale()) return;
       if (ce || !c) {
         setForbidden(true);
         setLoading(false);
@@ -396,7 +465,7 @@ export function OperatorChatPage() {
           .eq("conversation_id", conversationId)
           .maybeSingle(),
       ]);
-      if (cancelled) return;
+      if (isStale()) return;
       const loadedMessages = sortMessagesAsc((m ?? []) as Msg[]);
       const operatorUserIds = [
         ...new Set(loadedMessages.map((message) => message.operators?.user_id).filter(Boolean)),
@@ -408,7 +477,7 @@ export function OperatorChatPage() {
             .in("user_id", operatorUserIds)
             .eq("role", "admin")
         : { data: [] as { user_id: string }[] };
-      if (cancelled) return;
+      if (isStale()) return;
       setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
       setMessages(loadedMessages);
       setHasOlderMessages(loadedMessages.length === MESSAGE_PAGE_SIZE);
@@ -440,10 +509,22 @@ export function OperatorChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, operator, isAdmin, refreshClientBlockStatus, refreshResponsibility]);
+  }, [
+    conversationId,
+    operator,
+    isAdmin,
+    readAccess.generation,
+    readAllowed,
+    refreshClientBlockStatus,
+    refreshResponsibility,
+  ]);
 
   // Realtime
   useEffect(() => {
+    if (!readAllowed) return;
+    let disposed = false;
+    const accessScope = readScopeRef.current;
+    const isStale = () => disposed || readScopeRef.current !== accessScope || !accessScope.allowed;
     const ch = supabase
       .channel(`op-chat-${conversationId}`)
       .on(
@@ -455,6 +536,7 @@ export function OperatorChatPage() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
+          if (isStale()) return;
           const newMsg = payload.new as Msg;
           shouldStickToBottomRef.current = isNearScrollBottom(scrollRef.current);
           if (payload.eventType === "UPDATE") {
@@ -468,6 +550,7 @@ export function OperatorChatPage() {
               .eq("id", newMsg.operator_id)
               .maybeSingle()
               .then(async ({ data }) => {
+                if (isStale()) return;
                 if (data?.user_id) {
                   const { data: adminRole } = await supabase
                     .from("user_roles")
@@ -476,6 +559,7 @@ export function OperatorChatPage() {
                     .eq("role", "admin")
                     .maybeSingle();
                   if (adminRole) {
+                    if (isStale()) return;
                     setAdminOperatorUserIds((prev) =>
                       prev.includes(adminRole.user_id) ? prev : [...prev, adminRole.user_id],
                     );
@@ -487,12 +571,14 @@ export function OperatorChatPage() {
                 };
                 setMessages((prev) => mergeMessagesById(prev, [hydrated]));
                 void hydrateMessageDecorations(hydrated).then((attachmentHydrated) => {
+                  if (isStale()) return;
                   setMessages((prev) => mergeMessagesById(prev, [attachmentHydrated]));
                 });
               });
           } else {
             setMessages((prev) => mergeMessagesById(prev, [newMsg]));
             void hydrateMessageDecorations(newMsg).then((hydrated) => {
+              if (isStale()) return;
               setMessages((prev) => mergeMessagesById(prev, [hydrated]));
             });
           }
@@ -518,6 +604,7 @@ export function OperatorChatPage() {
             .select("id, note, created_at, operator_id, operators(full_name)")
             .eq("conversation_id", conversationId)
             .order("created_at", { ascending: false });
+          if (isStale()) return;
           setNotes((data ?? []) as unknown as Note[]);
         },
       )
@@ -538,6 +625,7 @@ export function OperatorChatPage() {
             )
             .eq("client_id", conv.client_id)
             .order("created_at", { ascending: false });
+          if (isStale()) return;
           setCustomerInfoEntries((data ?? []) as unknown as CustomerInfoEntry[]);
         },
       )
@@ -557,6 +645,7 @@ export function OperatorChatPage() {
             )
             .eq("conversation_id", conversationId)
             .maybeSingle();
+          if (isStale()) return;
           setConversationLock((data ?? null) as unknown as ConversationLock | null);
         },
       )
@@ -565,18 +654,34 @@ export function OperatorChatPage() {
         {
           event: "*",
           schema: "public",
-          table: "conversation_handling_cycles",
-          filter: `conversation_id=eq.${conversationId}`,
+          table: "conversations",
+          filter: `id=eq.${conversationId}`,
         },
         () => {
+          if (isStale()) return;
           void refreshResponsibility();
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (disposed) return;
+        // The access hook reconciles its own subscription/reconnect. Doing it here
+        // tears down this channel while checking, creating a subscribe/check loop.
+        if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
+          suspendReadAccess();
+        }
+      });
     return () => {
+      disposed = true;
       supabase.removeChannel(ch);
     };
-  }, [conversationId, conv?.client_id, refreshResponsibility]);
+  }, [
+    conversationId,
+    conv?.client_id,
+    readAccess.generation,
+    readAllowed,
+    refreshResponsibility,
+    suspendReadAccess,
+  ]);
 
   useEffect(() => {
     if (!scrollRef.current || loadingOlderRef.current) return;
@@ -767,27 +872,6 @@ export function OperatorChatPage() {
     }
     const ticket = sendScope.beginRequest(responsibilityCycleId);
     activeTextRequestRef.current = ticket.requestId;
-    if (concurrencyMode === "lock") {
-      const active = isActiveLock(conversationLock);
-      if (active && operator && conversationLock?.locked_by_operator_id !== operator.id) {
-        toast.error("השיחה נעולה כרגע לעובד אחר");
-        return;
-      }
-      if (!active) {
-        const acquired = await acquireLock();
-        if (!acquired) {
-          if (!sendScope.isCurrent(ticket)) return;
-          if (activeTextRequestRef.current === ticket.requestId) {
-            activeTextRequestRef.current = null;
-          }
-          toast.error("לא ניתן לשלוח כי השיחה נעולה לעובד אחר");
-          return;
-        }
-        if (hasOtherResponsibility()) return;
-      }
-    } else if (concurrencyMode === "warning") {
-      void acquireLock();
-    }
     if (!sendScope.isCurrent(ticket) || hasOtherResponsibility()) return;
     stopTyping();
     setSending(true);
@@ -861,12 +945,12 @@ export function OperatorChatPage() {
 
   const saveNote = async () => {
     const text = noteInput.trim();
-    if (!text || !operator || savingNote) return;
+    if (!readAllowed || (!isAdmin && responsibility !== "mine") || !text || !operator || savingNote)
+      return;
     setSavingNote(true);
-    const { error } = await supabase.from("internal_notes").insert({
-      conversation_id: conversationId,
-      operator_id: operator.id,
-      note: text.slice(0, 2000),
+    const { error } = await supabase.rpc("add_operator_internal_note", {
+      _conversation_id: conversationId,
+      _note: text.slice(0, 2000),
     });
     setSavingNote(false);
     if (error) {
@@ -879,14 +963,20 @@ export function OperatorChatPage() {
 
   const saveCustomerInfo = async () => {
     const text = customerInfoInput.trim();
-    if (!text || !operator || !user || !conv || savingCustomerInfo) return;
+    if (
+      !readAllowed ||
+      (!isAdmin && responsibility !== "mine") ||
+      !text ||
+      !operator ||
+      !user ||
+      !conv ||
+      savingCustomerInfo
+    )
+      return;
     setSavingCustomerInfo(true);
-    const { error } = await supabase.from("customer_info_entries").insert({
-      client_id: conv.client_id,
-      conversation_id: conversationId,
-      operator_id: operator.id,
-      created_by_user_id: user.id,
-      content: text.slice(0, 2000),
+    const { error } = await supabase.rpc("add_operator_customer_info", {
+      _conversation_id: conversationId,
+      _content: text.slice(0, 2000),
     });
     setSavingCustomerInfo(false);
     if (error) {
@@ -898,11 +988,11 @@ export function OperatorChatPage() {
   };
 
   const updateStatus = async (status: "open" | "waiting" | "answered" | "closed") => {
-    if (!conv) return;
-    const { error } = await supabase
-      .from("conversations")
-      .update({ status })
-      .eq("id", conversationId);
+    if (!readAllowed || (!isAdmin && responsibility !== "mine") || !conv) return;
+    const { error } = await supabase.rpc("update_operator_conversation_status", {
+      _conversation_id: conversationId,
+      _status: status,
+    });
     if (error) {
       toast.error("עדכון סטטוס נכשל");
       return;
@@ -926,10 +1016,36 @@ export function OperatorChatPage() {
     });
   };
 
-  if (loading) {
+  if (readAccess.state === "checking" || (readAccess.state === "allowed" && loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  if (readAccess.state === "error") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4" dir="rtl">
+        <div className="text-center max-w-md">
+          <h2 className="text-xl font-bold mb-2">בדיקת ההרשאה נכשלה</h2>
+          <p className="text-muted-foreground mb-4">
+            התוכן הוסתר עד שניתן יהיה לאמת מחדש את הגישה.
+          </p>
+          <Button onClick={() => void readAccess.revalidate()}>נסה שוב</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (readAccess.state === "denied") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4" dir="rtl">
+        <div className="text-center max-w-md">
+          <h2 className="text-xl font-bold mb-2">הגישה לשיחה בוטלה</h2>
+          <p className="text-muted-foreground mb-4">אין לך עוד הרשאה לצפות בתוכן השיחה.</p>
+          <Button onClick={() => navigate({ to: "/operator/conversations" })}>חזרה לרשימה</Button>
+        </div>
       </div>
     );
   }
@@ -954,7 +1070,8 @@ export function OperatorChatPage() {
   const lockHeldByOther =
     !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
   const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
-  const composerReadOnly = responsibility === "other";
+  const composerReadOnly = !readAllowed || responsibility === "other";
+  const canMutateContent = readAllowed && (isAdmin || responsibility === "mine");
   const sendBlocked = sendBlockedByLock || composerReadOnly;
   const canReleaseConversation = responsibility === "mine";
   const clientTyping = typingUsers.some((presence) => presence.role === "client");
@@ -972,6 +1089,7 @@ export function OperatorChatPage() {
         <Button
           variant="ghost"
           size="icon"
+          aria-label="חזרה לרשימת השיחות"
           onClick={() => navigate({ to: "/operator/conversations" })}
         >
           <ArrowRight className="h-5 w-5" />
@@ -1070,7 +1188,7 @@ export function OperatorChatPage() {
         <div className="md:hidden flex gap-1">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button variant="ghost" size="icon" aria-label="פתיחת פרטי הלקוח והערות">
                 <User className="h-5 w-5" />
               </Button>
             </SheetTrigger>
@@ -1228,10 +1346,18 @@ export function OperatorChatPage() {
                         access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
                         accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
                         refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                        enabled={readAllowed}
+                        accessGeneration={readAccess.generation}
                       />
                     ))}
                     {stickerHydrationPending && <StickerHydrationPlaceholder />}
-                    {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
+                    {m.message_stickers && (
+                      <MessageSticker
+                        sticker={m.message_stickers}
+                        enabled={readAllowed}
+                        accessGeneration={readAccess.generation}
+                      />
+                    )}
                     <p
                       className={`text-[10px] mt-1 ${isOps ? "text-primary-foreground/70" : "text-muted-foreground"}`}
                     >
@@ -1298,16 +1424,14 @@ export function OperatorChatPage() {
                       }
                     }}
                     placeholder={
-                      sendBlocked
-                        ? composerReadOnly
-                          ? "השיחה בטיפול עובד אחר"
-                          : "השיחה נעולה כרגע לעובד אחר"
+                      composerReadOnly
+                        ? "השיחה בטיפול עובד אחר"
                         : `כתוב כ${character?.name ?? "דמות"}...`
                     }
                     rows={1}
                     maxLength={2000}
                     className="min-w-0 flex-1 resize-none min-h-[40px] max-h-32"
-                    disabled={sendBlocked}
+                    disabled={composerReadOnly}
                   />
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1359,7 +1483,7 @@ export function OperatorChatPage() {
                         <Button
                           className="h-10 w-10"
                           onClick={send}
-                          disabled={sending || !input.trim() || sendBlocked}
+                          disabled={sending || !input.trim() || composerReadOnly}
                           size="icon"
                           aria-label="שליחת הודעה"
                           aria-busy={sending}
@@ -1369,7 +1493,7 @@ export function OperatorChatPage() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {sendBlocked ? "השיחה אינה זמינה לשליחה" : "שליחת הודעה"}
+                      {composerReadOnly ? "השיחה אינה זמינה לשליחה" : "שליחת הודעה"}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1428,7 +1552,7 @@ export function OperatorChatPage() {
               setNoteInput={setNoteInput}
               saveNote={saveNote}
               savingNote={savingNote}
-              canEdit={!!operator}
+              canEdit={!!operator && canMutateContent}
             />
             <CustomerInfoPanel
               entries={customerInfoEntries}
@@ -1436,16 +1560,18 @@ export function OperatorChatPage() {
               setInput={setCustomerInfoInput}
               save={saveCustomerInfo}
               saving={savingCustomerInfo}
-              canEdit={!!operator}
+              canEdit={!!operator && canMutateContent}
             />
-            <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
+            {canMutateContent && (
+              <StatusActions status={conv?.status ?? "open"} updateStatus={updateStatus} />
+            )}
           </div>
         </aside>
       </div>
       <OperatorMediaPicker
         conversationId={conversationId}
         expectedCycleId={responsibilityCycleId}
-        operatorSendGeneration={sendScope.generation}
+        operatorSendGeneration={sendScope.generation + readAccess.generation * 1_000_000}
         readOnly={composerReadOnly}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
@@ -1459,7 +1585,7 @@ export function OperatorChatPage() {
         onOpenChange={setStickerPickerOpen}
         role="operator"
         expectedCycleId={responsibilityCycleId}
-        operatorSendGeneration={sendScope.generation}
+        operatorSendGeneration={sendScope.generation + readAccess.generation * 1_000_000}
         readOnly={composerReadOnly}
         onSent={handleStickerSent}
       />
@@ -1533,9 +1659,9 @@ function LockModeBanner({
     return (
       <div className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm" dir="rtl">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>{holderName} פעיל בשיחה הזו. אפשר לשלוח הודעה, אבל כדאי לתאם לפני מענה.</span>
+          <span>קיימת נעילה לתיאום של {holderName}. הרשאת שליחת הטקסט נקבעת בשרת.</span>
           {expiresAt && (
-            <span className="text-xs text-muted-foreground">פעילות עד {expiresAt}</span>
+            <span className="text-xs text-muted-foreground">תוקף הנעילה עד {expiresAt}</span>
           )}
         </div>
       </div>
@@ -1546,9 +1672,9 @@ function LockModeBanner({
     return (
       <div className="border-b border-border bg-muted/50 px-4 py-2 text-sm" dir="rtl">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>מצב נעילה פעיל. כדי לענות צריך לקחת את השיחה.</span>
+          <span>נעילה לתיאום אינה קובעת אחריות טיפול או זכאות לשליחת טקסט.</span>
           <Button size="sm" variant="outline" onClick={() => void onAcquire()} disabled={busy}>
-            קח שיחה
+            סמן לתיאום
           </Button>
         </div>
       </div>
@@ -1563,7 +1689,7 @@ function LockModeBanner({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <span className="font-medium">
-            {isMine ? "השיחה נעולה אליך" : `השיחה נעולה אצל ${holderName}`}
+            {isMine ? "נעילה לתיאום רשומה על שמך" : `נעילה לתיאום רשומה על שם ${holderName}`}
           </span>
           <span className="text-muted-foreground">
             {" "}
@@ -1573,7 +1699,7 @@ function LockModeBanner({
         </div>
         {(isMine || isAdmin) && (
           <Button size="sm" variant="outline" onClick={() => void onRelease()} disabled={busy}>
-            {isAdmin && !isMine ? "שחרור מנהל" : "שחרר שיחה"}
+            {isAdmin && !isMine ? "בטל סימון כמנהל" : "בטל סימון לתיאום"}
           </Button>
         )}
       </div>

@@ -13,6 +13,7 @@ type DiscoveryDeckProps = {
   startingChat: boolean;
   onPass: () => void;
   onLike: () => void;
+  onRemoveLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
   onViewProfile: () => void;

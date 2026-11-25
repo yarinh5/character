@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type ReadReply = { data: unknown[] | null; error: unknown };
@@ -13,6 +13,8 @@ type ReadRequest = {
 
 const io = vi.hoisted(() => ({
   read: vi.fn<(request: ReadRequest) => Promise<ReadReply>>(),
+  rpc: vi.fn(),
+  user: { id: "client-a" } as { id: string } | null,
   analytics: vi.fn(),
   toastInfo: vi.fn(),
   toastError: vi.fn(),
@@ -23,11 +25,20 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
 }));
 vi.mock("@/lib/analyticsEvents", () => ({ trackAnalyticsEvent: io.analytics }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    loading: false,
+    role: io.user ? "client" : null,
+    user: io.user,
+    session: io.user ? { user: { id: io.user.id } } : null,
+  }),
+}));
 vi.mock("sonner", () => ({
   toast: { info: io.toastInfo, error: io.toastError, success: io.toastSuccess },
 }));
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
+    rpc: io.rpc,
     from: (table: string) => {
       const request: ReadRequest = { table, columns: "", filters: [], orders: [] };
       const execute = () =>
@@ -97,6 +108,8 @@ function renderPage() {
 
 beforeEach(() => {
   io.read.mockReset().mockResolvedValue({ data: [firstPackage, secondPackage], error: null });
+  io.rpc.mockReset();
+  io.user = { id: "client-a" };
   io.analytics.mockReset().mockResolvedValue(undefined);
   io.toastInfo.mockReset();
   io.toastError.mockReset();
@@ -104,7 +117,7 @@ beforeEach(() => {
 });
 
 describe("client credit packages", () => {
-  it("preserves the active-package query, server order, and analytics while removing the fake purchase action", async () => {
+  it("preserves the active-package query and presents a real request without claiming payment", async () => {
     renderPage();
 
     expect(await screen.findByText("חבילת התחלה")).toBeInTheDocument();
@@ -120,17 +133,57 @@ describe("client credit packages", () => {
     expect(
       screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
     ).toEqual(["חבילת התחלה", "חבילה גדולה"]);
-    expect(screen.getByRole("note")).toHaveTextContent(
-      "רכישה מתוך האתר אינה זמינה כרגע. לא נשלחה בקשה ולא בוצע חיוב.",
-    );
-    expect(screen.queryByRole("button", { name: "בקשת רכישה ידנית" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/בקשת רכישה נרשמה/)).not.toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("אין סליקה באתר");
+    expect(
+      screen.getByRole("button", { name: "שליחת בקשת קרדיטים עבור חבילת התחלה" }),
+    ).toBeEnabled();
     expect(io.toastInfo).not.toHaveBeenCalled();
     expect(io.analytics).toHaveBeenCalledWith({
       eventName: "packages_viewed",
       metadata: { source: "client_packages_page" },
       dedupeSeconds: 900,
     });
+  });
+
+  it("creates one idempotent request, blocks double submit, and does not claim a charge", async () => {
+    const write = deferred<{ data: unknown; error: unknown }>();
+    io.rpc.mockReturnValue(write.promise);
+    renderPage();
+    await screen.findByText("חבילת התחלה");
+
+    const button = screen.getByRole("button", {
+      name: "שליחת בקשת קרדיטים עבור חבילת התחלה",
+    });
+    act(() => {
+      button.click();
+      button.click();
+    });
+    await waitFor(() => expect(io.rpc).toHaveBeenCalledTimes(1));
+    const firstCall = io.rpc.mock.calls[0];
+    expect(firstCall[0]).toBe("create_credit_request");
+    expect(firstCall[1]).toEqual({
+      _package_id: "package-a",
+      _idempotency_key: expect.any(String),
+    });
+
+    await act(async () =>
+      write.resolve({
+        data: [
+          {
+            id: "request-a",
+            package_id: "package-a",
+            package_name: "חבילת התחלה",
+            credits: 50,
+            status: "pending",
+            requested_at: "2026-11-05T10:00:00Z",
+          },
+        ],
+        error: null,
+      }),
+    );
+    expect(await screen.findByText(/לא בוצע חיוב/)).toBeInTheDocument();
+    expect(io.toastSuccess).toHaveBeenCalledWith("בקשת הקרדיטים נשלחה לטיפול");
+    expect(button).toBeDisabled();
   });
 
   it("distinguishes initial loading from a true empty result", async () => {

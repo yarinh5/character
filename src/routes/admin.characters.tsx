@@ -876,7 +876,7 @@ function CharacterDialog({
             />
           </Field>
           <div className="space-y-1">
-            <Label>עיר גילוי</Label>
+            <Label htmlFor="character-discovery-city">עיר גילוי</Label>
             {citiesQuery.isError && (
               <RetryMessage
                 label="טעינת הערים נכשלה"
@@ -887,6 +887,7 @@ function CharacterDialog({
             <Popover open={cityOpen} onOpenChange={setCityOpen}>
               <PopoverTrigger asChild>
                 <Button
+                  id="character-discovery-city"
                   type="button"
                   variant="outline"
                   role="combobox"

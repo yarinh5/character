@@ -22,9 +22,13 @@ const query = vi.hoisted(() => ({
 }));
 
 const rpc = vi.hoisted(() => vi.fn());
+const queryClient = vi.hoisted(() => ({ invalidateQueries: vi.fn(), removeQueries: vi.fn() }));
 const channel = {
   on: vi.fn(() => channel),
-  subscribe: vi.fn(() => channel),
+  subscribe: vi.fn((callback?: (status: string) => void) => {
+    callback?.("SUBSCRIBED");
+    return channel;
+  }),
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -46,7 +50,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => query,
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => queryClient,
 }));
 
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "user-a" } }) }));
@@ -119,6 +123,8 @@ beforeEach(() => {
   query.isLoading = false;
   query.refetch.mockClear();
   rpc.mockReset();
+  queryClient.invalidateQueries.mockClear();
+  queryClient.removeQueries.mockClear();
   channel.on.mockClear();
   channel.subscribe.mockClear();
 });

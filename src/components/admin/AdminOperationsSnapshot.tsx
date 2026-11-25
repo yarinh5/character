@@ -22,6 +22,10 @@ import { useAuth } from "@/lib/auth";
 
 type OperationsSnapshot =
   Database["public"]["Functions"]["get_admin_operations_snapshot"]["Returns"][number];
+type OperationalWaitSummary =
+  Database["public"]["Functions"]["get_admin_operational_wait_summary"]["Returns"][number];
+type CompletionExceptions =
+  Database["public"]["Functions"]["get_admin_completion_exceptions"]["Returns"][number];
 
 export function AdminOperationsSnapshot() {
   const { loading, role, user, session } = useAuth();
@@ -52,6 +56,45 @@ function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
       const { data, error } = await supabase.rpc("get_admin_operations_snapshot");
       if (error || !isValidSnapshot(data?.[0])) {
         throw new Error("admin_operations_snapshot_unavailable");
+      }
+
+      return data[0];
+    },
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const {
+    data: exceptions,
+    isLoading: exceptionsLoading,
+    isError: exceptionsError,
+    isFetching: exceptionsFetching,
+    refetch: refetchExceptions,
+  } = useQuery({
+    queryKey: ["admin-completion-exceptions", adminId],
+    queryFn: async (): Promise<CompletionExceptions> => {
+      const { data, error } = await supabase.rpc("get_admin_completion_exceptions");
+      if (error || !isValidCompletionExceptions(data?.[0])) {
+        throw new Error("admin_completion_exceptions_unavailable");
+      }
+      return data[0];
+    },
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const {
+    data: waitSummary,
+    isLoading: waitSummaryLoading,
+    isError: waitSummaryError,
+    isFetching: waitSummaryFetching,
+    refetch: refetchWaitSummary,
+  } = useQuery({
+    queryKey: ["admin-operational-wait-summary", adminId],
+    queryFn: async (): Promise<OperationalWaitSummary> => {
+      const { data, error } = await supabase.rpc("get_admin_operational_wait_summary");
+      if (error || !isValidWaitSummary(data?.[0])) {
+        throw new Error("admin_operational_wait_summary_unavailable");
       }
 
       return data[0];
@@ -107,6 +150,29 @@ function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
         </Card>
       )}
 
+      {waitSummaryError && (
+        <div
+          role="alert"
+          aria-label={waitSummary ? "שגיאת רענון מדד זמן תגובה" : "שגיאת טעינת מדד זמן תגובה"}
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
+        >
+          <span>
+            {waitSummary
+              ? "רענון מדד זמן התגובה נכשל. מוצגים הנתונים האחרונים שהתקבלו."
+              : "טעינת מדד זמן התגובה נכשלה. שאר המדדים ממשיכים להיות זמינים."}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void refetchWaitSummary()}
+            disabled={waitSummaryFetching}
+          >
+            נסה שוב
+          </Button>
+        </div>
+      )}
+
       {snapshot && (
         <>
           {isError && (
@@ -159,6 +225,34 @@ function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
             </OperationsGroup>
 
             <OperationsGroup
+              title="זמן תגובה תפעולי"
+              subtitle="מדד עצמאי מחלון חוסר המענה"
+              icon={Timer}
+              to="/admin/operators"
+              linkLabel="למסך עובדים"
+            >
+              {waitSummaryLoading && !waitSummary ? (
+                <Skeleton className="col-span-full h-12 w-full" />
+              ) : waitSummary ? (
+                <>
+                  <Metric label="ממתינות למענה" value={waitSummary.waiting_count} />
+                  <Metric
+                    label="עברו את היעד"
+                    value={waitSummary.over_target_count}
+                    tone={waitSummary.over_target_count > 0 ? "critical" : "normal"}
+                  />
+                  <Metric
+                    label="המתנה תפעולית ותיקה"
+                    value={formatWait(waitSummary.oldest_wait_seconds)}
+                  />
+                  <Metric label="יעד תפעולי" value={formatWait(waitSummary.target_seconds)} />
+                </>
+              ) : (
+                <p className="col-span-full text-xs text-muted-foreground">המדד אינו זמין כרגע.</p>
+              )}
+            </OperationsGroup>
+
+            <OperationsGroup
               title="כוח עבודה"
               icon={UsersRound}
               to="/admin/operators"
@@ -202,6 +296,57 @@ function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
               <Metric label="מושבתים" value={snapshot.media_asset_disabled_count} />
               <Metric label="הזמנות פעילות" value={snapshot.active_media_reservation_count} />
               <Metric label="תגיות פעילות" value={snapshot.active_media_tag_count} />
+            </OperationsGroup>
+
+            <OperationsGroup
+              title="חריגים פתוחים"
+              subtitle="מקורות שרת; ללא אומדן בדפדפן"
+              icon={AlertTriangle}
+              to="/admin/reports"
+              linkLabel="לטיפול בחריגים"
+            >
+              {exceptionsLoading && !exceptions ? (
+                <Skeleton className="col-span-full h-12 w-full" />
+              ) : exceptions ? (
+                <>
+                  <Metric label="שיוך/הקצאה" value={exceptions.allocation_issue_count} />
+                  <Metric label="חלוקת Gift נכשלה" value={exceptions.gift_reward_failure_count} />
+                  <Metric label="Gift ללא זכאים" value={exceptions.gift_unallocated_event_count} />
+                  <Metric label="ניקוי מדיה נכשל" value={exceptions.media_cleanup_failure_count} />
+                  <Metric
+                    label="מחיקות חסומות"
+                    value={
+                      exceptions.account_deletion_blocked_count +
+                      exceptions.conversation_deletion_blocked_count
+                    }
+                  />
+                  <Metric
+                    label="מחיקות שנכשלו"
+                    value={
+                      exceptions.account_deletion_failure_count +
+                      exceptions.conversation_deletion_failure_count
+                    }
+                  />
+                </>
+              ) : (
+                <div className="col-span-full space-y-2 text-xs text-muted-foreground">
+                  <p>מדדי החריגים אינם זמינים. שאר תמונת המצב נשמרת.</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchExceptions()}
+                    disabled={exceptionsFetching}
+                  >
+                    נסה שוב
+                  </Button>
+                </div>
+              )}
+              {exceptionsError && exceptions && (
+                <div role="alert" className="col-span-full text-xs text-warning">
+                  רענון החריגים נכשל; מוצגים הנתונים האחרונים.
+                </div>
+              )}
             </OperationsGroup>
           </div>
         </>
@@ -360,5 +505,40 @@ function isValidSnapshot(value: OperationsSnapshot | undefined): value is Operat
   }
   return numericSnapshotFields.every(
     (field) => typeof value[field] === "number" && Number.isFinite(value[field]),
+  );
+}
+
+function isValidWaitSummary(
+  value: OperationalWaitSummary | undefined,
+): value is OperationalWaitSummary {
+  if (!value) return false;
+  return [
+    value.waiting_count,
+    value.over_target_count,
+    value.oldest_wait_seconds,
+    value.target_seconds,
+  ].every((metric) => typeof metric === "number" && Number.isFinite(metric) && metric >= 0);
+}
+
+const completionExceptionFields: Array<keyof CompletionExceptions> = [
+  "allocation_issue_count",
+  "gift_reward_failure_count",
+  "gift_unallocated_event_count",
+  "media_cleanup_failure_count",
+  "account_deletion_blocked_count",
+  "account_deletion_failure_count",
+  "conversation_deletion_blocked_count",
+  "conversation_deletion_failure_count",
+];
+
+function isValidCompletionExceptions(
+  value: CompletionExceptions | undefined,
+): value is CompletionExceptions {
+  return Boolean(
+    value &&
+    completionExceptionFields.every(
+      (field) =>
+        typeof value[field] === "number" && Number.isFinite(value[field]) && value[field] >= 0,
+    ),
   );
 }

@@ -11,6 +11,14 @@
 
 ## Implemented behavior
 
+### P05 operational wait alerts — implemented Offline
+
+- The authoritative event is the existing `(conversation_id, pending_since)` cycle while `needs_handling=true`; additional client messages, claim, requeue and read do not reset or resolve it.
+- The target is 420 seconds, measured continuously 24/7 from server time. Existing 5/15-minute risk metrics remain reporting signals and no longer form a second automatic alert path.
+- The existing scheduler entry point now calls the operational wait emitter. External scheduler configuration and a live invocation remain required; opening an admin screen is not the emission mechanism.
+- Notifications carry one semantic event key per recipient. A successful business response changes active notification metadata to `resolved` without deleting history or forcing `is_read`.
+- The bell renders active/resolved state and the wait duration captured at emission. Live DB, Realtime delivery and scheduler verification are still pending.
+
 - Dashboard, analytics and operations snapshot wait for initialized Auth with an admin role and matching `user.id` / `session.user.id`. Query keys, component instances and the dashboard Realtime channel are scoped by that verified administrator identity; logout or replacement hides old UI and prevents late results from appearing in the new context.
 - Dashboard aggregate reads now verify every Supabase result and required count. A failed initial read does not invent zeroes or an empty list, while a failed refresh retains verified cached data and exposes one bounded manual retry. The independent server-analytics source has its own initial and cached-refresh states and retry.
 - F1 correction: recent-conversation rows now validate every field and nested relation consumed by the render, including contract-valid nullable values. Dashboard analytics validates consumed entries in `topCharacters`, `topOperatorsByAvailablePoints` and `lowBalanceUsers`; all required numbers must be finite. Malformed entries fail the existing source query instead of being coerced, filtered or displayed, so previously verified cache remains authoritative during a failed refresh.
@@ -45,3 +53,41 @@
 - No backend, RPC, schema, migration, RLS, Auth provider, dependency, lockfile, workflow, route or layout changed.
 - Local/QA/Production application and deploy: not executed.
 - WP11 as a whole is not complete and no product-delivery claim is made.
+
+## Operator Points source alignment — offline draft, 2026-11-05
+
+The existing dashboard and advanced analytics server functions now read operator balances and
+reward events from `operator_point_wallets` and `operator_point_transactions`. Client Credit spend,
+manual Client Credit adjustments and low Client Credit balances remain on the Client Credit ledger.
+Historical payout-like Client Credit rows are no longer presented as current Operator Points. This
+is a source-alignment change only; no new SLA formula, financial-revenue claim or browser-side points
+calculation was introduced. P05 still blocks final SLA/alert semantics, and live DB aggregation,
+Realtime and browser integration remain **NOT VERIFIED**.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- Dashboard sections retain independent reads and failure states, so one source does not block the
+  full screen. Identity-scoped caches reject stale completions and preserve verified data through a
+  failed refresh. Existing recent-conversation and advanced-analytics source caps remain explicit;
+  no browser-side unbounded history fetch was introduced by this package.
+- Offline tests cover request identity, retained cache, retry, malformed responses and Realtime
+  cleanup. They do not measure latency or production aggregation cost.
+- Live query plans, production-scale aggregation, browser chart/layout responsiveness and Realtime
+  fan-out remain **NOT VERIFIED**. The documented 10,000-row analytics caps are coverage limits, not
+  performance evidence.
+
+## Independent operational wait metric — offline draft, 2026-11-05
+
+- A server-owned wait cycle starts from the existing `pending_since`, is not reset by additional
+  client messages in the same cycle, and ends when handling is cleared. The seven-minute target is
+  independent of the 180-second ownership inactivity release.
+- Alert emission is once per wait cycle. The dashboard reads a dedicated aggregate RPC in its own
+  identity-scoped query, so failure does not hide the existing operations snapshot and cached data
+  remains visible after refresh failure.
+- Focused component coverage verifies the server result, independent failure and existing polling
+  cleanup. DB trigger/alert cases are written and **NOT RUN**; scheduler wiring, live Realtime and
+  browser behavior remain **NOT VERIFIED**.
+- The same operations area now reads a separate server aggregate for unresolved allocation
+  evidence, failed/unallocated Gift rewards, failed media cleanup and blocked/failed deletion
+  workflows. Failure of this aggregate does not hide the established snapshot or wait metric, and
+  the display does not label Client Credits as monetary revenue.

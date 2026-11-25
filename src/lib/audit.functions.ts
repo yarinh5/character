@@ -20,6 +20,12 @@ export const adminListAuditLogs = createServerFn({ method: "POST" })
       .object({
         limit: z.number().min(1).max(500).default(200),
         action: z.string().optional(),
+        cursor: z
+          .object({
+            createdAt: z.string().datetime({ offset: true }),
+            id: z.string().uuid(),
+          })
+          .optional(),
       })
       .parse(d ?? {}),
   )
@@ -29,19 +35,38 @@ export const adminListAuditLogs = createServerFn({ method: "POST" })
       .from("audit_logs")
       .select("id, actor_user_id, action, entity_type, entity_id, metadata, created_at")
       .order("created_at", { ascending: false })
-      .limit(data.limit);
+      .order("id", { ascending: false })
+      .limit(data.limit + 1);
     if (data.action) q = q.eq("action", data.action);
+    if (data.cursor) {
+      q = q.or(
+        `created_at.lt.${data.cursor.createdAt},and(created_at.eq.${data.cursor.createdAt},id.lt.${data.cursor.id})`,
+      );
+    }
     const { data: logs, error } = await q;
     if (error) throw new Error(error.message);
 
-    const ids = Array.from(new Set((logs ?? []).map((l) => l.actor_user_id).filter(Boolean))) as string[];
+    const page = (logs ?? []).slice(0, data.limit);
+    const ids = Array.from(new Set(page.map((l) => l.actor_user_id).filter(Boolean))) as string[];
     const { data: profiles } = ids.length
-      ? await supabaseAdmin.from("profiles").select("user_id, email, display_name").in("user_id", ids)
+      ? await supabaseAdmin
+          .from("profiles")
+          .select("user_id, email, display_name")
+          .in("user_id", ids)
       : { data: [] as { user_id: string; email: string | null; display_name: string | null }[] };
     const byUser = new Map(profiles?.map((p) => [p.user_id, p]) ?? []);
 
-    return (logs ?? []).map((l) => ({
+    const items = page.map((l) => ({
       ...l,
-      actor: l.actor_user_id ? byUser.get(l.actor_user_id) ?? null : null,
+      actor: l.actor_user_id ? (byUser.get(l.actor_user_id) ?? null) : null,
     }));
+    const last = items.at(-1);
+
+    return {
+      items,
+      nextCursor:
+        logs !== null && logs.length > data.limit && last
+          ? { createdAt: last.created_at, id: last.id }
+          : null,
+    };
   });

@@ -13,8 +13,16 @@ export function StickerHydrationPlaceholder() {
   );
 }
 
-export function MessageSticker({ sticker }: { sticker: ChatMessageSticker }) {
-  const preview = useStickerViewUrl(sticker.id);
+export function MessageSticker({
+  sticker,
+  enabled = true,
+  accessGeneration = 0,
+}: {
+  sticker: ChatMessageSticker;
+  enabled?: boolean;
+  accessGeneration?: number;
+}) {
+  const preview = useStickerViewUrl(sticker.id, enabled, accessGeneration);
   const label = `${sticker.collection_name_snapshot}: ${sticker.sticker_name_snapshot}`;
 
   if (preview.status === "loading" || preview.status === "idle") {

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { assertConcurrencyMigrationVersions } from "./migration-inventory.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const projectId = "qmgkmsarzfjnqltljkjl";
@@ -359,13 +360,12 @@ try {
   await observer.initialize();
   await observer.ok("\\set ON_ERROR_STOP on\nSELECT 1;");
   baseline = await observer.json(baselineSql);
-  assert.equal(baseline.migrations.length, 117);
-  assert.equal(baseline.migrations.at(-1), "20261013113744");
+  assertConcurrencyMigrationVersions(baseline.migrations);
   console.log(
     `Baseline counts: ${JSON.stringify(Object.fromEntries(Object.entries(baseline).filter(([key]) => !["migrations", "settings"].includes(key))))}`,
   );
   console.log(
-    `Local stack verified: API ${localTarget.apiPort}, DB ${localTarget.dbPort}, migrations 117/latest 20261013113744.`,
+    `Local stack verified: API ${localTarget.apiPort}, DB ${localTarget.dbPort}, migrations ${baseline.migrations.length}/latest ${baseline.migrations.at(-1)}.`,
   );
   await scenario(observer, "forward", false);
   await verifyBaseline();

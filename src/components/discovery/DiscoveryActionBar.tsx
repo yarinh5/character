@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Check, Heart, MessageCirclePlus, Star, UserRound, X } from "lucide-react";
+import { Check, Heart, HeartOff, MessageCirclePlus, Star, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -11,6 +11,7 @@ type DiscoveryActionBarProps = {
   startingChat: boolean;
   onPass: () => void;
   onLike: () => void;
+  onRemoveLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
   onViewProfile: () => void;
@@ -41,6 +42,7 @@ export function DiscoveryActionBar({
   startingChat,
   onPass,
   onLike,
+  onRemoveLike,
   onFavorite,
   onStartChat,
   onViewProfile,
@@ -73,6 +75,17 @@ export function DiscoveryActionBar({
       >
         {isLiked ? <Check className="h-5 w-5" /> : <Heart className="h-5 w-5 fill-current" />}
       </IconAction>
+      {isLiked && (
+        <IconAction
+          label="הסר לייק"
+          variant="outline"
+          disabled={disabled}
+          onClick={onRemoveLike}
+          className="h-12 w-12 rounded-full"
+        >
+          <HeartOff className="h-5 w-5" />
+        </IconAction>
+      )}
       <Button variant="outline" disabled={disabled} onClick={onViewProfile} className="h-12 shrink-0 whitespace-nowrap px-4">
         <UserRound className="h-4 w-4" />
         לפרופיל

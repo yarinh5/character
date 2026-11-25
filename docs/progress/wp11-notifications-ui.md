@@ -39,3 +39,40 @@
 - Local/QA/Production application and deploy: not executed.
 - `npm ci` reported 42 existing dependency vulnerabilities (2 low, 20 moderate, 14 high, 6 critical). Remediation is outside this allowlist.
 - WP11 as a whole is not complete and no product-delivery claim is made.
+
+## Exact notification counts — 2026-11-04
+
+- Baseline: merged `main` at `652047682250f3f2bcbf7a921ba843cbde721d44`, isolated on
+  `codex/product-completion`. KEEP: the 20-row latest-notification display, Realtime subscriptions,
+  identity lifecycle, mark-all contract and cached-error behavior.
+- MODIFY: the latest-20 list read now requests an exact total count, while a separate authenticated
+  head/count query obtains the exact unread count. The badge and mark-all availability no longer
+  infer unread history from the capped list. If more rows exist, the popover states how many latest
+  rows are displayed out of the exact total.
+- Both results belong to one guarded read generation. A list/count error or malformed count follows
+  the existing initial/refresh error path and keeps the previous verified list and counts; Realtime,
+  retries and the post-write verification read refresh both together.
+- Focused completion review tightened the external count contract: only non-negative safe integers
+  are accepted. A non-finite or otherwise malformed count is not rendered as verified badge state
+  and follows the same retained-data error path.
+- RED proved that the unread-count query was absent. The focused bell suite passes 15/15, including
+  a 20-row all-read window with 27 unread of 42 total, identity transitions, concurrent reads,
+  a failed count refresh with cached recovery, Realtime refresh and mark-all verification.
+- Consolidated final gates on this local snapshot: five focused WP04/WP11 suites pass 98/98; full
+  Vitest passes 393 tests with 24 existing skips; format, changed-file lint, typecheck and client/SSR
+  build pass. Existing jsdom navigation, `punycode` and large-chunk notices remain non-failing.
+- No schema, migration, grant, RLS policy, notification generation, route, dependency or runtime
+  environment changed. Browser and live Auth/Supabase/RLS/Realtime remain **NOT VERIFIED**. This
+  corrects capped-count semantics; it does not add a full notification-history screen or close
+  WP11.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- The bell keeps the visible list bounded to the latest 20 rows and obtains exact totals with count
+  queries instead of downloading notification history. Reads and Realtime are identity-scoped,
+  concurrent refresh generations are guarded, and the channel is removed on identity change or
+  unmount. Mark-all exposes a local pending state and verifies the authoritative read afterward.
+- Offline tests cover expected read counts, duplicate-submit prevention, cached refresh recovery,
+  late identity responses and subscription cleanup.
+- Live notification volume, Realtime delivery, popover/browser responsiveness and RTL/mobile focus
+  behavior remain **NOT VERIFIED**. No latency or speed comparison was performed.

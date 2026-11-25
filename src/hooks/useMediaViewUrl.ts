@@ -21,11 +21,19 @@ type ViewUrlResponse = {
   expires_at?: unknown;
 };
 
-export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversationId?: string, enabled = true) {
+export function useMediaViewUrl(
+  kind: MediaViewKind,
+  targetId?: string,
+  conversationId?: string,
+  enabled = true,
+  accessGeneration = 0,
+) {
   const [state, setState] = useState<ViewState>(() =>
     targetId && enabled ? { status: "loading", url: null } : { status: "idle", url: null },
   );
   const requestVersionRef = useRef(0);
+  const accessGenerationRef = useRef(accessGeneration);
+  accessGenerationRef.current = accessGeneration;
   const retriedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -35,6 +43,7 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversa
     }
 
     const requestVersion = ++requestVersionRef.current;
+    const requestAccessGeneration = accessGeneration;
     setState({ status: "loading", url: null });
 
     const body =
@@ -58,7 +67,11 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversa
     }
 
     const { data, error } = await supabase.functions.invoke("media-view-url", { body });
-    if (requestVersion !== requestVersionRef.current) return;
+    if (
+      requestVersion !== requestVersionRef.current ||
+      requestAccessGeneration !== accessGenerationRef.current
+    )
+      return;
 
     const response = (data ?? {}) as ViewUrlResponse;
     if (error || typeof response.url !== "string" || typeof response.expires_at !== "string") {
@@ -67,7 +80,7 @@ export function useMediaViewUrl(kind: MediaViewKind, targetId?: string, conversa
     }
 
     setState({ status: "ready", url: response.url });
-  }, [conversationId, enabled, kind, targetId]);
+  }, [accessGeneration, conversationId, enabled, kind, targetId]);
 
   useEffect(() => {
     retriedRef.current = false;

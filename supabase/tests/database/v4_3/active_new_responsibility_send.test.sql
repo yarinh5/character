@@ -46,14 +46,16 @@ INSERT INTO public.operators (id, user_id, full_name, is_active, availability_st
 INSERT INTO public.characters (id, name, is_active, is_visible, availability_status) VALUES
   ('00000000-0000-4000-8000-000000092101', 'V4-3-E1 blocked character', true, true, 'available'),
   ('00000000-0000-4000-8000-000000092102', 'V4-3-E1 owner character', true, true, 'available'),
-  ('00000000-0000-4000-8000-000000092103', 'V4-3-E1 admin character', true, true, 'available');
+  ('00000000-0000-4000-8000-000000092103', 'V4-3-E1 admin character', true, true, 'available'),
+  ('00000000-0000-4000-8000-000000092104', 'V4-3-E1 non-pending release character', true, true, 'available');
 
 INSERT INTO public.character_operator_assignments (character_id, operator_id)
 SELECT character_id, operator_id
 FROM (VALUES
   ('00000000-0000-4000-8000-000000092101'::uuid),
   ('00000000-0000-4000-8000-000000092102'::uuid),
-  ('00000000-0000-4000-8000-000000092103'::uuid)
+  ('00000000-0000-4000-8000-000000092103'::uuid),
+  ('00000000-0000-4000-8000-000000092104'::uuid)
 ) AS characters(character_id)
 CROSS JOIN (VALUES
   ('00000000-0000-4000-8000-000000091102'::uuid),
@@ -61,22 +63,61 @@ CROSS JOIN (VALUES
   ('00000000-0000-4000-8000-000000091104'::uuid)
 ) AS operators(operator_id);
 
-INSERT INTO public.conversations (id, client_id, character_id, assigned_operator_id, status) VALUES
-  ('00000000-0000-4000-8000-000000093101', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092101', '00000000-0000-4000-8000-000000091102', 'open'),
-  ('00000000-0000-4000-8000-000000093102', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092102', '00000000-0000-4000-8000-000000091102', 'open'),
-  ('00000000-0000-4000-8000-000000093103', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092103', '00000000-0000-4000-8000-000000091102', 'open');
+WITH active_conversation_clock AS (
+  SELECT clock_timestamp() AS activity_at
+)
+INSERT INTO public.conversations (
+  id,
+  client_id,
+  character_id,
+  assigned_operator_id,
+  status,
+  last_business_message_at,
+  inactivity_expires_at
+)
+SELECT
+  fixture.id,
+  fixture.client_id,
+  fixture.character_id,
+  fixture.assigned_operator_id,
+  fixture.status,
+  activity_at,
+  activity_at + interval '180 seconds'
+FROM (VALUES
+  ('00000000-0000-4000-8000-000000093101'::uuid, '00000000-0000-4000-8000-000000090101'::uuid, '00000000-0000-4000-8000-000000092101'::uuid, '00000000-0000-4000-8000-000000091102'::uuid, 'open'::public.conversation_status),
+  ('00000000-0000-4000-8000-000000093102'::uuid, '00000000-0000-4000-8000-000000090101'::uuid, '00000000-0000-4000-8000-000000092102'::uuid, '00000000-0000-4000-8000-000000091102'::uuid, 'open'::public.conversation_status),
+  ('00000000-0000-4000-8000-000000093103'::uuid, '00000000-0000-4000-8000-000000090101'::uuid, '00000000-0000-4000-8000-000000092103'::uuid, '00000000-0000-4000-8000-000000091102'::uuid, 'open'::public.conversation_status),
+  ('00000000-0000-4000-8000-000000093104'::uuid, '00000000-0000-4000-8000-000000090101'::uuid, '00000000-0000-4000-8000-000000092104'::uuid, '00000000-0000-4000-8000-000000091102'::uuid, 'open'::public.conversation_status)
+) AS fixture(id, client_id, character_id, assigned_operator_id, status)
+CROSS JOIN active_conversation_clock;
 
 INSERT INTO public.conversation_work_items (id, conversation_id, client_id, character_id, status, responsible_operator_id, assigned_at, last_activity_at) VALUES
   ('00000000-0000-4000-8000-000000094101', '00000000-0000-4000-8000-000000093101', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092101', 'assigned', '00000000-0000-4000-8000-000000091102', clock_timestamp(), clock_timestamp()),
   ('00000000-0000-4000-8000-000000094102', '00000000-0000-4000-8000-000000093102', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092102', 'assigned', '00000000-0000-4000-8000-000000091102', clock_timestamp(), clock_timestamp()),
-  ('00000000-0000-4000-8000-000000094103', '00000000-0000-4000-8000-000000093103', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092103', 'assigned', '00000000-0000-4000-8000-000000091102', clock_timestamp(), clock_timestamp());
+  ('00000000-0000-4000-8000-000000094103', '00000000-0000-4000-8000-000000093103', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092103', 'assigned', '00000000-0000-4000-8000-000000091102', clock_timestamp(), clock_timestamp()),
+  ('00000000-0000-4000-8000-000000094104', '00000000-0000-4000-8000-000000093104', '00000000-0000-4000-8000-000000090101', '00000000-0000-4000-8000-000000092104', 'assigned', '00000000-0000-4000-8000-000000091102', clock_timestamp(), clock_timestamp());
 
 INSERT INTO public.conversation_handling_cycles (conversation_id, work_item_id, operator_id) VALUES
   ('00000000-0000-4000-8000-000000093101', '00000000-0000-4000-8000-000000094101', '00000000-0000-4000-8000-000000091102'),
   ('00000000-0000-4000-8000-000000093102', '00000000-0000-4000-8000-000000094102', '00000000-0000-4000-8000-000000091102'),
-  ('00000000-0000-4000-8000-000000093103', '00000000-0000-4000-8000-000000094103', '00000000-0000-4000-8000-000000091102');
+  ('00000000-0000-4000-8000-000000093103', '00000000-0000-4000-8000-000000094103', '00000000-0000-4000-8000-000000091102'),
+  ('00000000-0000-4000-8000-000000093104', '00000000-0000-4000-8000-000000094104', '00000000-0000-4000-8000-000000091102');
 
-SELECT plan(21);
+-- Drive the positive release scenario through the canonical message trigger.
+-- This is intentionally not a direct assignment to needs_handling/pending_since.
+INSERT INTO public.messages (
+  id, conversation_id, sender_type, sender_id, content, created_at
+)
+VALUES (
+  '00000000-0000-4000-8000-000000096101',
+  '00000000-0000-4000-8000-000000093101',
+  'client'::public.sender_type,
+  '00000000-0000-4000-8000-000000090101',
+  'pending client request before release',
+  clock_timestamp()
+);
+
+SELECT plan(30);
 
 SELECT is(
   to_regprocedure('private.assert_operator_can_send_conversation_message(uuid,boolean)'),
@@ -187,19 +228,50 @@ SELECT throws_like(
 RESET ROLE;
 SELECT is(pg_temp.v4_3_e1_counts(), current_setting('v4_3_e1.before_admin')::jsonb, 'Rejected Admin worker send has no side effect');
 
-SELECT set_config('v4_3_e1.owner_cycle', (SELECT id::text FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-000000093102'::uuid AND ended_at IS NULL), true);
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'needs_handling', needs_handling,
+      'pending_since_present', pending_since IS NOT NULL,
+      'expiry_seconds', extract(epoch FROM (inactivity_expires_at - last_business_message_at))::integer,
+      'not_expired', inactivity_expires_at > clock_timestamp()
+    )
+    FROM public.conversations
+    WHERE id = '00000000-0000-4000-8000-000000093101'::uuid
+  ),
+  '{"needs_handling":true,"pending_since_present":true,"expiry_seconds":180,"not_expired":true}'::jsonb,
+  'Canonical Client event creates valid pending work before release'
+);
+
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090102';
 SELECT lives_ok(
   $$SELECT public.release_operator_conversation('00000000-0000-4000-8000-000000093101'::uuid, 'released')$$,
-  'Cycle owner can explicitly release responsibility'
+  'Cycle owner can explicitly release pending responsibility'
 );
 RESET ROLE;
 SELECT is(
   (SELECT count(*) FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-000000093101'::uuid AND ended_at IS NULL),
   0::bigint,
-  'Explicit release ends the active cycle'
+  'Pending release ends the active cycle'
+);
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'assigned_operator_id', conversation.assigned_operator_id,
+      'work_status', work_item.status,
+      'responsible_operator_id', work_item.responsible_operator_id,
+      'needs_handling', conversation.needs_handling,
+      'pending_since_present', conversation.pending_since IS NOT NULL
+    )
+    FROM public.conversations conversation
+    JOIN public.conversation_work_items work_item
+      ON work_item.id = '00000000-0000-4000-8000-000000094101'::uuid
+    WHERE conversation.id = '00000000-0000-4000-8000-000000093101'::uuid
+  ),
+  '{"assigned_operator_id":null,"work_status":"new","responsible_operator_id":null,"needs_handling":true,"pending_since_present":true}'::jsonb,
+  'Pending release removes ownership and returns one work item to NEW'
 );
 
 SET LOCAL ROLE authenticated;
@@ -207,13 +279,113 @@ SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090103';
 SELECT lives_ok(
   $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093101'::uuid, 'post release response', NULL)$$,
-  'Assigned Operator can send after an explicit release leaves no active cycle'
+  'Assigned Operator can claim and send after pending work is released'
 );
 RESET ROLE;
 SELECT is(
-  (SELECT count(*) FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-000000093101'::uuid AND sender_id = '00000000-0000-4000-8000-000000090103'::uuid),
+  (
+    SELECT jsonb_build_object(
+      'assigned_operator_id', conversation.assigned_operator_id,
+      'work_status', work_item.status,
+      'responsible_operator_id', work_item.responsible_operator_id,
+      'active_cycle_operator_id', cycle.operator_id
+    )
+    FROM public.conversations conversation
+    JOIN public.conversation_work_items work_item
+      ON work_item.id = '00000000-0000-4000-8000-000000094101'::uuid
+    LEFT JOIN public.conversation_handling_cycles cycle
+      ON cycle.conversation_id = conversation.id
+     AND cycle.ended_at IS NULL
+    WHERE conversation.id = '00000000-0000-4000-8000-000000093101'::uuid
+  ),
+  '{"assigned_operator_id":"00000000-0000-4000-8000-000000091103","work_status":"assigned","responsible_operator_id":"00000000-0000-4000-8000-000000091103","active_cycle_operator_id":"00000000-0000-4000-8000-000000091103"}'::jsonb,
+  'Claim-on-send gives authority to the assigned Operator'
+);
+SELECT is(
+  (SELECT count(*) FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-000000093101'::uuid AND sender_id = '00000000-0000-4000-8000-000000090103'::uuid AND content = 'post release response'),
   1::bigint,
-  'Post-release response persists exactly once'
+  'Post-release claim response persists exactly once'
+);
+
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'needs_handling', needs_handling,
+      'pending_since', pending_since,
+      'active_cycle_count', (
+        SELECT count(*)
+        FROM public.conversation_handling_cycles cycle
+        WHERE cycle.conversation_id = conversation.id
+          AND cycle.ended_at IS NULL
+      )
+    )
+    FROM public.conversations conversation
+    WHERE id = '00000000-0000-4000-8000-000000093104'::uuid
+  ),
+  '{"needs_handling":null,"pending_since":null,"active_cycle_count":1}'::jsonb,
+  'Non-pending release fixture has no work waiting'
+);
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.role" = 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090102';
+SELECT lives_ok(
+  $$SELECT public.release_operator_conversation('00000000-0000-4000-8000-000000093104'::uuid, 'released')$$,
+  'Cycle owner can release a conversation with no pending work'
+);
+RESET ROLE;
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'assigned_operator_id', conversation.assigned_operator_id,
+      'work_status', work_item.status,
+      'responsible_operator_id', work_item.responsible_operator_id,
+      'active_cycle_count', (
+        SELECT count(*)
+        FROM public.conversation_handling_cycles cycle
+        WHERE cycle.conversation_id = conversation.id
+          AND cycle.ended_at IS NULL
+      )
+    )
+    FROM public.conversations conversation
+    JOIN public.conversation_work_items work_item
+      ON work_item.id = '00000000-0000-4000-8000-000000094104'::uuid
+    WHERE conversation.id = '00000000-0000-4000-8000-000000093104'::uuid
+  ),
+  '{"assigned_operator_id":null,"work_status":"closed","responsible_operator_id":null,"active_cycle_count":0}'::jsonb,
+  'Non-pending release leaves the conversation unowned and out of NEW'
+);
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.role" = 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000090103';
+SELECT throws_like(
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-000000093104'::uuid, 'rejected non-pending response', NULL)$$,
+  'conversation_not_available_for_claim',
+  'Send after non-pending release is not available for claim'
+);
+RESET ROLE;
+SELECT is(
+  (SELECT count(*) FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-000000093104'::uuid AND content = 'rejected non-pending response'),
+  0::bigint,
+  'Rejected non-pending release send writes no message'
+);
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'assigned_operator_id', conversation.assigned_operator_id,
+      'active_cycle_count', (
+        SELECT count(*)
+        FROM public.conversation_handling_cycles cycle
+        WHERE cycle.conversation_id = conversation.id
+          AND cycle.ended_at IS NULL
+      )
+    )
+    FROM public.conversations conversation
+    WHERE conversation.id = '00000000-0000-4000-8000-000000093104'::uuid
+  ),
+  '{"assigned_operator_id":null,"active_cycle_count":0}'::jsonb,
+  'Rejected non-pending release send creates no cycle or ownership'
 );
 
 SELECT * FROM finish();

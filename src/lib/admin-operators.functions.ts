@@ -103,22 +103,39 @@ export const adminListOperators = createServerFn({ method: "GET" })
     const ids = opsList.map((operator) => operator.id);
     const userIds = opsList.map((operator) => operator.user_id);
 
-    const [{ data: roles }, { data: assigns }, { data: convs }, { data: profs }, { data: wallets }] = await Promise.all([
+    const [
+      { data: roles },
+      { data: assigns },
+      { data: convs },
+      { data: profs },
+      { data: wallets },
+    ] = await Promise.all([
       userIds.length
         ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
         : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[] }),
       ids.length
-        ? supabaseAdmin.from("character_operator_assignments").select("operator_id").in("operator_id", ids)
+        ? supabaseAdmin
+            .from("character_operator_assignments")
+            .select("operator_id")
+            .in("operator_id", ids)
         : Promise.resolve({ data: [] as { operator_id: string }[] }),
       ids.length
-        ? supabaseAdmin.from("conversations").select("assigned_operator_id, status").in("assigned_operator_id", ids)
-        : Promise.resolve({ data: [] as { assigned_operator_id: string | null; status: string }[] }),
+        ? supabaseAdmin
+            .from("conversations")
+            .select("assigned_operator_id, status")
+            .in("assigned_operator_id", ids)
+        : Promise.resolve({
+            data: [] as { assigned_operator_id: string | null; status: string }[],
+          }),
       userIds.length
         ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
         : Promise.resolve({ data: [] as { user_id: string; email: string | null }[] }),
-      userIds.length
-        ? supabaseAdmin.from("credit_wallets").select("user_id, balance").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; balance: number }[] }),
+      ids.length
+        ? supabaseAdmin
+            .from("operator_point_wallets")
+            .select("operator_id, balance")
+            .in("operator_id", ids)
+        : Promise.resolve({ data: [] as { operator_id: string; balance: number }[] }),
     ]);
 
     const rolesByUser = new Map<string, Set<AppRole>>();
@@ -129,19 +146,24 @@ export const adminListOperators = createServerFn({ method: "GET" })
     });
 
     const charsCount = new Map<string, number>();
-    (assigns ?? []).forEach((row) => charsCount.set(row.operator_id, (charsCount.get(row.operator_id) ?? 0) + 1));
+    (assigns ?? []).forEach((row) =>
+      charsCount.set(row.operator_id, (charsCount.get(row.operator_id) ?? 0) + 1),
+    );
 
     const activeCount = new Map<string, number>();
     (convs ?? []).forEach((row) => {
       if (row.status !== "closed" && row.assigned_operator_id) {
-        activeCount.set(row.assigned_operator_id, (activeCount.get(row.assigned_operator_id) ?? 0) + 1);
+        activeCount.set(
+          row.assigned_operator_id,
+          (activeCount.get(row.assigned_operator_id) ?? 0) + 1,
+        );
       }
     });
 
     const emailMap = new Map<string, string | null>();
     (profs ?? []).forEach((row) => emailMap.set(row.user_id, row.email));
     const walletMap = new Map<string, number>();
-    (wallets ?? []).forEach((row) => walletMap.set(row.user_id, row.balance));
+    (wallets ?? []).forEach((row) => walletMap.set(row.operator_id, row.balance));
 
     return opsList
       .filter((operator) => {
@@ -154,7 +176,7 @@ export const adminListOperators = createServerFn({ method: "GET" })
         role: rolesByUser.get(operator.user_id)?.has("admin") ? "admin" : "operator",
         chars: charsCount.get(operator.id) ?? 0,
         active: activeCount.get(operator.id) ?? 0,
-        credit_balance: walletMap.get(operator.user_id) ?? 0,
+        credit_balance: walletMap.get(operator.id) ?? 0,
       }));
   });
 
@@ -179,11 +201,15 @@ export const adminCreateOperatorUser = createServerFn({ method: "POST" })
       password: data.password,
       email_confirm: true,
       user_metadata: { display_name: data.full_name },
+      app_metadata: { registration_origin: "admin_provisioned" },
     });
     if (error || !created.user) throw new Error(error?.message ?? "יצירת משתמש נכשלה");
 
     const userId = created.user.id;
-    await supabaseAdmin.from("profiles").update({ display_name: data.full_name }).eq("user_id", userId);
+    await supabaseAdmin
+      .from("profiles")
+      .update({ display_name: data.full_name })
+      .eq("user_id", userId);
     await setSingleRole(userId, "operator");
 
     const { data: operator, error: opError } = await supabaseAdmin
@@ -232,7 +258,10 @@ export const adminPromoteClientToOperator = createServerFn({ method: "POST" })
     if (!profile) throw new Error("לא נמצא משתמש רשום עם האימייל הזה");
     if (profile.user_id === context.userId) throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
 
-    await supabaseAdmin.from("profiles").update({ display_name: data.full_name }).eq("user_id", profile.user_id);
+    await supabaseAdmin
+      .from("profiles")
+      .update({ display_name: data.full_name })
+      .eq("user_id", profile.user_id);
     await setSingleRole(profile.user_id, "operator");
 
     const { data: existing } = await supabaseAdmin
@@ -329,7 +358,8 @@ export const adminConvertOperatorToClient = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
-    if (operator.user_id === context.userId) throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
+    if (operator.user_id === context.userId)
+      throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
     if (isAdminUser) throw new Error("לא ניתן להפוך אדמין ללקוח מעמוד העובדים");
 
     await setSingleRole(operator.user_id, "client");
@@ -361,7 +391,8 @@ export const adminArchiveOperator = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
-    if (operator.user_id === context.userId) throw new Error("לא ניתן למחוק את רשומת העובד של עצמך מכאן");
+    if (operator.user_id === context.userId)
+      throw new Error("לא ניתן למחוק את רשומת העובד של עצמך מכאן");
     if (isAdminUser) throw new Error("לא ניתן למחוק או לארכב חשבון אדמין");
 
     const { error } = await supabaseAdmin

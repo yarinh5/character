@@ -133,6 +133,7 @@ export type Database = {
           height: number | null;
           id: string;
           ingest_status: string;
+          is_global: boolean;
           locked_delivery_path: string | null;
           locked_derivative_completed_at: string | null;
           locked_derivative_error_code: string | null;
@@ -174,6 +175,7 @@ export type Database = {
           height?: number | null;
           id?: string;
           ingest_status?: string;
+          is_global?: boolean;
           locked_delivery_path?: string | null;
           locked_derivative_completed_at?: string | null;
           locked_derivative_error_code?: string | null;
@@ -215,6 +217,7 @@ export type Database = {
           height?: number | null;
           id?: string;
           ingest_status?: string;
+          is_global?: boolean;
           locked_delivery_path?: string | null;
           locked_derivative_completed_at?: string | null;
           locked_derivative_error_code?: string | null;
@@ -257,8 +260,87 @@ export type Database = {
           },
         ];
       };
+      character_media_asset_characters: {
+        Row: {
+          character_id: string;
+          created_at: string;
+          created_by_user_id: string | null;
+          media_asset_id: string;
+        };
+        Insert: {
+          character_id: string;
+          created_at?: string;
+          created_by_user_id?: string | null;
+          media_asset_id: string;
+        };
+        Update: {
+          character_id?: string;
+          created_at?: string;
+          created_by_user_id?: string | null;
+          media_asset_id?: string;
+        };
+        Relationships: [];
+      };
+      character_media_asset_tags: {
+        Row: {
+          created_at: string;
+          created_by_user_id: string | null;
+          media_asset_id: string;
+          media_tag_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by_user_id?: string | null;
+          media_asset_id: string;
+          media_tag_id: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by_user_id?: string | null;
+          media_asset_id?: string;
+          media_tag_id?: string;
+        };
+        Relationships: [];
+      };
+      character_media_deliveries: {
+        Row: {
+          client_id: string;
+          conversation_id: string | null;
+          delivered_at: string;
+          delivered_by_user_id: string | null;
+          id: string;
+          media_asset_id: string;
+          message_attachment_id: string | null;
+          metadata: Json;
+          reservation_id: string | null;
+        };
+        Insert: {
+          client_id: string;
+          conversation_id?: string | null;
+          delivered_at?: string;
+          delivered_by_user_id?: string | null;
+          id?: string;
+          media_asset_id: string;
+          message_attachment_id?: string | null;
+          metadata?: Json;
+          reservation_id?: string | null;
+        };
+        Update: {
+          client_id?: string;
+          conversation_id?: string | null;
+          delivered_at?: string;
+          delivered_by_user_id?: string | null;
+          id?: string;
+          media_asset_id?: string;
+          message_attachment_id?: string | null;
+          metadata?: Json;
+          reservation_id?: string | null;
+        };
+        Relationships: [];
+      };
       character_media_reservations: {
         Row: {
+          client_id: string;
           conversation_id: string;
           created_at: string;
           ended_at: string | null;
@@ -275,6 +357,7 @@ export type Database = {
           state: string;
         };
         Insert: {
+          client_id: string;
           conversation_id: string;
           created_at?: string;
           ended_at?: string | null;
@@ -291,6 +374,7 @@ export type Database = {
           state?: string;
         };
         Update: {
+          client_id?: string;
           conversation_id?: string;
           created_at?: string;
           ended_at?: string | null;
@@ -475,6 +559,88 @@ export type Database = {
           },
         ];
       };
+      client_consent_acceptances: {
+        Row: {
+          accepted_at: string;
+          client_id: string;
+          document_id: string;
+        };
+        Insert: {
+          accepted_at?: string;
+          client_id: string;
+          document_id: string;
+        };
+        Update: {
+          accepted_at?: string;
+          client_id?: string;
+          document_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "client_consent_acceptances_document_id_fkey";
+            columns: ["document_id"];
+            isOneToOne: false;
+            referencedRelation: "client_consent_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      client_consent_documents: {
+        Row: {
+          activated_at: string;
+          approval_reference: string | null;
+          approved_at: string | null;
+          approved_by: string | null;
+          consent_key: string;
+          created_at: string;
+          document_url: string;
+          id: string;
+          lifecycle_status: string;
+          required: boolean;
+          retired_at: string | null;
+          title: string;
+          version: string;
+        };
+        Insert: {
+          activated_at?: string;
+          approval_reference?: string | null;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          consent_key: string;
+          created_at?: string;
+          document_url: string;
+          id?: string;
+          lifecycle_status?: string;
+          required?: boolean;
+          retired_at?: string | null;
+          title: string;
+          version: string;
+        };
+        Update: {
+          activated_at?: string;
+          approval_reference?: string | null;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          consent_key?: string;
+          created_at?: string;
+          document_url?: string;
+          id?: string;
+          lifecycle_status?: string;
+          required?: boolean;
+          retired_at?: string | null;
+          title?: string;
+          version?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "client_consent_documents_approved_by_fkey";
+            columns: ["approved_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       client_conversation_deletions: {
         Row: {
           client_id: string;
@@ -569,6 +735,118 @@ export type Database = {
           started_at?: string;
         };
         Relationships: [];
+      };
+      client_media_uploads: {
+        Row: {
+          access_expires_at: string | null;
+          bucket_id: string;
+          byte_size: number | null;
+          cleanup_attempts: number;
+          cleanup_claimed_at: string | null;
+          cleanup_claim_expires_at: string | null;
+          cleanup_claim_token: string | null;
+          cleanup_error_code: string | null;
+          client_id: string;
+          content_type: string;
+          conversation_id: string;
+          created_at: string;
+          deleted_at: string | null;
+          finalized_at: string | null;
+          finalize_claimed_at: string | null;
+          finalize_claim_expires_at: string | null;
+          finalize_claim_token: string | null;
+          id: string;
+          idempotency_key: string | null;
+          message_attachment_id: string | null;
+          message_id: string | null;
+          next_cleanup_at: string | null;
+          preview_path: string | null;
+          source_path: string;
+          status: string;
+          updated_at: string;
+          upload_expires_at: string;
+        };
+        Insert: {
+          access_expires_at?: string | null;
+          bucket_id?: string;
+          byte_size?: number | null;
+          cleanup_attempts?: number;
+          cleanup_claimed_at?: string | null;
+          cleanup_claim_expires_at?: string | null;
+          cleanup_claim_token?: string | null;
+          cleanup_error_code?: string | null;
+          client_id: string;
+          content_type: string;
+          conversation_id: string;
+          created_at?: string;
+          deleted_at?: string | null;
+          finalized_at?: string | null;
+          finalize_claimed_at?: string | null;
+          finalize_claim_expires_at?: string | null;
+          finalize_claim_token?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          message_attachment_id?: string | null;
+          message_id?: string | null;
+          next_cleanup_at?: string | null;
+          preview_path?: string | null;
+          source_path: string;
+          status?: string;
+          updated_at?: string;
+          upload_expires_at: string;
+        };
+        Update: {
+          access_expires_at?: string | null;
+          bucket_id?: string;
+          byte_size?: number | null;
+          cleanup_attempts?: number;
+          cleanup_claimed_at?: string | null;
+          cleanup_claim_expires_at?: string | null;
+          cleanup_claim_token?: string | null;
+          cleanup_error_code?: string | null;
+          client_id?: string;
+          content_type?: string;
+          conversation_id?: string;
+          created_at?: string;
+          deleted_at?: string | null;
+          finalized_at?: string | null;
+          finalize_claimed_at?: string | null;
+          finalize_claim_expires_at?: string | null;
+          finalize_claim_token?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          message_attachment_id?: string | null;
+          message_id?: string | null;
+          next_cleanup_at?: string | null;
+          preview_path?: string | null;
+          source_path?: string;
+          status?: string;
+          updated_at?: string;
+          upload_expires_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "client_media_uploads_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "client_media_uploads_message_attachment_fkey";
+            columns: ["message_attachment_id"];
+            isOneToOne: true;
+            referencedRelation: "message_attachments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "client_media_uploads_message_id_fkey";
+            columns: ["message_id"];
+            isOneToOne: true;
+            referencedRelation: "messages";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       client_profiles: {
         Row: {
@@ -878,6 +1156,98 @@ export type Database = {
           },
         ];
       };
+      client_level_progress: {
+        Row: {
+          client_id: string;
+          eligible_message_count: number;
+          level: number;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          eligible_message_count?: number;
+          level?: number;
+          updated_at?: string;
+        };
+        Update: {
+          client_id?: string;
+          eligible_message_count?: number;
+          level?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      conversation_presence_states: {
+        Row: {
+          active_in_conversation: boolean;
+          conversation_id: string;
+          display_name: string;
+          expires_at: string;
+          is_typing: boolean;
+          last_seen_at: string;
+          role: string;
+          user_id: string;
+        };
+        Insert: {
+          active_in_conversation?: boolean;
+          conversation_id: string;
+          display_name: string;
+          expires_at?: string;
+          is_typing?: boolean;
+          last_seen_at?: string;
+          role: string;
+          user_id: string;
+        };
+        Update: {
+          active_in_conversation?: boolean;
+          conversation_id?: string;
+          display_name?: string;
+          expires_at?: string;
+          is_typing?: boolean;
+          last_seen_at?: string;
+          role?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "conversation_presence_states_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      client_level_transitions: {
+        Row: {
+          client_id: string;
+          created_at: string;
+          from_level: number;
+          id: string;
+          message_id: string;
+          notified_at: string | null;
+          to_level: number;
+        };
+        Insert: {
+          client_id: string;
+          created_at?: string;
+          from_level: number;
+          id?: string;
+          message_id: string;
+          notified_at?: string | null;
+          to_level: number;
+        };
+        Update: {
+          client_id?: string;
+          created_at?: string;
+          from_level?: number;
+          id?: string;
+          message_id?: string;
+          notified_at?: string | null;
+          to_level?: number;
+        };
+        Relationships: [];
+      };
       conversations: {
         Row: {
           assigned_operator_id: string | null;
@@ -998,6 +1368,57 @@ export type Database = {
           price?: number;
           sort_order?: number;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      credit_requests: {
+        Row: {
+          client_id: string;
+          credits_snapshot: number;
+          currency_snapshot: string;
+          id: string;
+          idempotency_key: string;
+          package_id: string | null;
+          package_name_snapshot: string;
+          price_snapshot: number;
+          requested_at: string;
+          resolution_note: string | null;
+          resolved_at: string | null;
+          resolved_by: string | null;
+          status: string;
+          transaction_id: string | null;
+        };
+        Insert: {
+          client_id: string;
+          credits_snapshot: number;
+          currency_snapshot: string;
+          id?: string;
+          idempotency_key: string;
+          package_id?: string | null;
+          package_name_snapshot: string;
+          price_snapshot: number;
+          requested_at?: string;
+          resolution_note?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          status?: string;
+          transaction_id?: string | null;
+        };
+        Update: {
+          client_id?: string;
+          credits_snapshot?: number;
+          currency_snapshot?: string;
+          id?: string;
+          idempotency_key?: string;
+          package_id?: string | null;
+          package_name_snapshot?: string;
+          price_snapshot?: number;
+          requested_at?: string;
+          resolution_note?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          status?: string;
+          transaction_id?: string | null;
         };
         Relationships: [];
       };
@@ -1175,6 +1596,93 @@ export type Database = {
           slug?: string;
         };
         Relationships: [];
+      };
+      gift_attachment_purchases: {
+        Row: {
+          attachment_id: string;
+          charged_transaction_id: string | null;
+          client_id: string;
+          conversation_id: string;
+          created_at: string;
+          gift_id: string;
+          gift_message_id: string | null;
+          gift_name_snapshot: string;
+          id: string;
+          idempotency_key: string;
+          opened_at: string | null;
+          price_credits_snapshot: number;
+          purchased_at: string | null;
+          status: string;
+        };
+        Insert: {
+          attachment_id: string;
+          charged_transaction_id?: string | null;
+          client_id: string;
+          conversation_id: string;
+          created_at?: string;
+          gift_id: string;
+          gift_message_id?: string | null;
+          gift_name_snapshot: string;
+          id?: string;
+          idempotency_key: string;
+          opened_at?: string | null;
+          price_credits_snapshot: number;
+          purchased_at?: string | null;
+          status?: string;
+        };
+        Update: {
+          attachment_id?: string;
+          charged_transaction_id?: string | null;
+          client_id?: string;
+          conversation_id?: string;
+          created_at?: string;
+          gift_id?: string;
+          gift_message_id?: string | null;
+          gift_name_snapshot?: string;
+          id?: string;
+          idempotency_key?: string;
+          opened_at?: string | null;
+          price_credits_snapshot?: number;
+          purchased_at?: string | null;
+          status?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "gift_attachment_purchases_attachment_id_fkey";
+            columns: ["attachment_id"];
+            isOneToOne: false;
+            referencedRelation: "message_attachments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "gift_attachment_purchases_charged_transaction_id_fkey";
+            columns: ["charged_transaction_id"];
+            isOneToOne: true;
+            referencedRelation: "credit_transactions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "gift_attachment_purchases_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "gift_attachment_purchases_gift_id_fkey";
+            columns: ["gift_id"];
+            isOneToOne: false;
+            referencedRelation: "stickers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "gift_attachment_purchases_gift_message_id_fkey";
+            columns: ["gift_message_id"];
+            isOneToOne: true;
+            referencedRelation: "messages";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       internal_notes: {
         Row: {
@@ -1368,53 +1876,78 @@ export type Database = {
       message_attachments: {
         Row: {
           access_mode: string;
+          access_expires_at: string | null;
           caption: string | null;
+          client_upload_id: string | null;
           created_at: string;
           id: string;
           kind: string;
-          media_asset_id: string;
+          media_asset_id: string | null;
           message_id: string;
           metadata: Json;
           position: number;
           price_credits_snapshot: number | null;
-          reservation_id: string;
+          required_gift_id: string | null;
+          required_gift_name_snapshot: string | null;
+          required_gift_price_credits_snapshot: number | null;
+          reservation_id: string | null;
           view_mode: string;
           view_once_completed_at: string | null;
           view_once_opened_at: string | null;
+          view_policy_version: string;
         };
         Insert: {
           access_mode?: string;
+          access_expires_at?: string | null;
           caption?: string | null;
+          client_upload_id?: string | null;
           created_at?: string;
           id?: string;
           kind: string;
-          media_asset_id: string;
+          media_asset_id?: string | null;
           message_id: string;
           metadata?: Json;
           position?: number;
           price_credits_snapshot?: number | null;
-          reservation_id: string;
+          required_gift_id?: string | null;
+          required_gift_name_snapshot?: string | null;
+          required_gift_price_credits_snapshot?: number | null;
+          reservation_id?: string | null;
           view_mode?: string;
           view_once_completed_at?: string | null;
           view_once_opened_at?: string | null;
+          view_policy_version?: string;
         };
         Update: {
           access_mode?: string;
+          access_expires_at?: string | null;
           caption?: string | null;
+          client_upload_id?: string | null;
           created_at?: string;
           id?: string;
           kind?: string;
-          media_asset_id?: string;
+          media_asset_id?: string | null;
           message_id?: string;
           metadata?: Json;
           position?: number;
           price_credits_snapshot?: number | null;
-          reservation_id?: string;
+          required_gift_id?: string | null;
+          required_gift_name_snapshot?: string | null;
+          required_gift_price_credits_snapshot?: number | null;
+          reservation_id?: string | null;
           view_mode?: string;
           view_once_completed_at?: string | null;
           view_once_opened_at?: string | null;
+          view_policy_version?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "message_attachments_client_upload_id_fkey";
+            columns: ["client_upload_id"];
+            isOneToOne: true;
+            referencedRelation: "client_media_uploads";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "message_attachments_media_asset_id_fkey";
             columns: ["media_asset_id"];
@@ -1434,6 +1967,13 @@ export type Database = {
             columns: ["reservation_id"];
             isOneToOne: true;
             referencedRelation: "character_media_reservations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "message_attachments_required_gift_id_fkey";
+            columns: ["required_gift_id"];
+            isOneToOne: false;
+            referencedRelation: "stickers";
             referencedColumns: ["id"];
           },
         ];
@@ -1797,6 +2337,95 @@ export type Database = {
           },
         ];
       };
+      operator_point_transactions: {
+        Row: {
+          amount: number;
+          balance_after: number;
+          created_at: string;
+          event_type: string;
+          gift_reward_event_id: string | null;
+          id: string;
+          metadata: Json;
+          operator_id: string;
+          reason: string;
+          source_score_event_id: string | null;
+        };
+        Insert: {
+          amount: number;
+          balance_after: number;
+          created_at?: string;
+          event_type: string;
+          gift_reward_event_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          operator_id: string;
+          reason: string;
+          source_score_event_id?: string | null;
+        };
+        Update: {
+          amount?: number;
+          balance_after?: number;
+          created_at?: string;
+          event_type?: string;
+          gift_reward_event_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          operator_id?: string;
+          reason?: string;
+          source_score_event_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "operator_point_transactions_operator_id_fkey";
+            columns: ["operator_id"];
+            isOneToOne: false;
+            referencedRelation: "operators";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "operator_point_transactions_source_score_event_id_fkey";
+            columns: ["source_score_event_id"];
+            isOneToOne: true;
+            referencedRelation: "operator_score_events";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      operator_point_wallets: {
+        Row: {
+          balance: number;
+          created_at: string;
+          lifetime_adjusted: number;
+          lifetime_earned: number;
+          operator_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          balance?: number;
+          created_at?: string;
+          lifetime_adjusted?: number;
+          lifetime_earned?: number;
+          operator_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          balance?: number;
+          created_at?: string;
+          lifetime_adjusted?: number;
+          lifetime_earned?: number;
+          operator_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "operator_point_wallets_operator_id_fkey";
+            columns: ["operator_id"];
+            isOneToOne: true;
+            referencedRelation: "operators";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       operator_outreach_attempts: {
         Row: {
           character_id: string;
@@ -2125,6 +2754,7 @@ export type Database = {
           id: string;
           ingest_status: string;
           is_active: boolean;
+          is_gift: boolean;
           metadata: Json;
           name: string;
           object_path: string;
@@ -2153,6 +2783,7 @@ export type Database = {
           id?: string;
           ingest_status?: string;
           is_active?: boolean;
+          is_gift?: boolean;
           metadata?: Json;
           name: string;
           object_path: string;
@@ -2181,6 +2812,7 @@ export type Database = {
           id?: string;
           ingest_status?: string;
           is_active?: boolean;
+          is_gift?: boolean;
           metadata?: Json;
           name?: string;
           object_path?: string;
@@ -2204,6 +2836,191 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      support_incident_actions: {
+        Row: {
+          action: string;
+          actor_admin_id: string;
+          created_at: string;
+          id: string;
+          incident_id: string;
+        };
+        Insert: {
+          action: string;
+          actor_admin_id: string;
+          created_at?: string;
+          id?: string;
+          incident_id: string;
+        };
+        Update: {
+          action?: string;
+          actor_admin_id?: string;
+          created_at?: string;
+          id?: string;
+          incident_id?: string;
+        };
+        Relationships: [];
+      };
+      support_incident_tickets: {
+        Row: { incident_id: string; linked_at: string; linked_by: string; ticket_id: string };
+        Insert: { incident_id: string; linked_at?: string; linked_by: string; ticket_id: string };
+        Update: {
+          incident_id?: string;
+          linked_at?: string;
+          linked_by?: string;
+          ticket_id?: string;
+        };
+        Relationships: [];
+      };
+      support_incidents: {
+        Row: {
+          acknowledged_at: string | null;
+          escalation_failure_code: string | null;
+          escalation_status: string;
+          details: string;
+          id: string;
+          idempotency_key: string;
+          incident_type: string;
+          opened_at: string;
+          opened_by: string;
+          owner_admin_id: string | null;
+          resolved_at: string | null;
+          severity: string;
+          status: string;
+          title: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          acknowledged_at?: string | null;
+          escalation_failure_code?: string | null;
+          escalation_status: string;
+          details: string;
+          id?: string;
+          idempotency_key: string;
+          incident_type: string;
+          opened_at?: string;
+          opened_by: string;
+          owner_admin_id?: string | null;
+          resolved_at?: string | null;
+          severity: string;
+          status?: string;
+          title: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          acknowledged_at?: string | null;
+          escalation_failure_code?: string | null;
+          escalation_status?: string;
+          details?: string;
+          id?: string;
+          idempotency_key?: string;
+          incident_type?: string;
+          opened_at?: string;
+          opened_by?: string;
+          owner_admin_id?: string | null;
+          resolved_at?: string | null;
+          severity?: string;
+          status?: string;
+          title?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
+      support_ticket_messages: {
+        Row: {
+          author_kind: string;
+          author_user_id: string;
+          body: string;
+          created_at: string;
+          id: string;
+          idempotency_key: string;
+          ticket_id: string;
+          visibility: string;
+        };
+        Insert: {
+          author_kind: string;
+          author_user_id: string;
+          body: string;
+          created_at?: string;
+          id?: string;
+          idempotency_key: string;
+          ticket_id: string;
+          visibility: string;
+        };
+        Update: {
+          author_kind?: string;
+          author_user_id?: string;
+          body?: string;
+          created_at?: string;
+          id?: string;
+          idempotency_key?: string;
+          ticket_id?: string;
+          visibility?: string;
+        };
+        Relationships: [];
+      };
+      support_tickets: {
+        Row: {
+          assignee_admin_id: string | null;
+          category: string;
+          client_id: string;
+          closed_at: string | null;
+          created_at: string;
+          description: string;
+          first_human_response_at: string | null;
+          first_response_schedule_version: number | null;
+          first_response_target_at: string | null;
+          first_response_timezone: string | null;
+          first_response_within_target: boolean | null;
+          id: string;
+          idempotency_key: string;
+          status: string;
+          subject: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          assignee_admin_id?: string | null;
+          category: string;
+          client_id: string;
+          closed_at?: string | null;
+          created_at?: string;
+          description: string;
+          first_human_response_at?: string | null;
+          first_response_schedule_version?: number | null;
+          first_response_target_at?: string | null;
+          first_response_timezone?: string | null;
+          first_response_within_target?: boolean | null;
+          id?: string;
+          idempotency_key: string;
+          status?: string;
+          subject: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          assignee_admin_id?: string | null;
+          category?: string;
+          client_id?: string;
+          closed_at?: string | null;
+          created_at?: string;
+          description?: string;
+          first_human_response_at?: string | null;
+          first_response_schedule_version?: number | null;
+          first_response_target_at?: string | null;
+          first_response_timezone?: string | null;
+          first_response_within_target?: boolean | null;
+          id?: string;
+          idempotency_key?: string;
+          status?: string;
+          subject?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
       };
       system_settings: {
         Row: {
@@ -2258,6 +3075,24 @@ export type Database = {
           },
         ];
       };
+      user_conversation_access_versions: {
+        Row: {
+          updated_at: string;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          updated_at?: string;
+          user_id: string;
+          version?: number;
+        };
+        Update: {
+          updated_at?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
       user_roles: {
         Row: {
           created_at: string;
@@ -2284,9 +3119,254 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      add_operator_customer_info: {
+        Args: { _content: string; _conversation_id: string };
+        Returns: {
+          client_id: string;
+          content: string;
+          conversation_id: string | null;
+          created_at: string;
+          created_by_user_id: string;
+          id: string;
+          metadata: Json;
+          operator_id: string;
+          updated_at: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "customer_info_entries";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      add_operator_internal_note: {
+        Args: { _conversation_id: string; _note: string };
+        Returns: {
+          conversation_id: string;
+          created_at: string;
+          id: string;
+          note: string;
+          operator_id: string | null;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "internal_notes";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      can_read_current_conversation: {
+        Args: { _conversation_id: string };
+        Returns: boolean;
+      };
+      admin_approve_restore_recovery: {
+        Args: { _event_id: string; _expected_version: number; _reason: string };
+        Returns: number;
+      };
+      admin_verify_restore_personal_data: {
+        Args: {
+          _event_id: string;
+          _evidence_hash: string;
+          _evidence_source: string;
+          _expected_version: number;
+          _reason: string;
+        };
+        Returns: number;
+      };
+      add_support_ticket_message: {
+        Args: { _body: string; _idempotency_key: string; _ticket_id: string };
+        Returns: { created_at: string; id: string }[];
+      };
+      admin_add_support_ticket_message: {
+        Args: { _body: string; _idempotency_key: string; _ticket_id: string; _visibility: string };
+        Returns: { created_at: string; id: string }[];
+      };
+      admin_create_support_incident: {
+        Args: {
+          _details: string;
+          _idempotency_key: string;
+          _incident_type: string;
+          _owner_admin_id: string | null;
+          _severity: string;
+          _ticket_ids: string[];
+          _title: string;
+        };
+        Returns: { escalation_status: string; id: string; status: string; version: number }[];
+      };
+      admin_record_support_incident_delivery: {
+        Args: {
+          _delivery_status: string;
+          _expected_version: number;
+          _failure_code?: string | null;
+          _incident_id: string;
+        };
+        Returns: { escalation_status: string; id: string; version: number }[];
+      };
+      admin_set_support_operations_config: {
+        Args: {
+          _business_owner_admin_id: string | null;
+          _deputy_admin_id: string | null;
+          _escalation_channel: string;
+          _expected_version: number;
+          _public_support_contact: string;
+          _support_hours: string;
+          _technical_contact: string;
+        };
+        Returns: number;
+      };
+      admin_set_support_operations_config_v2: {
+        Args: {
+          _business_owner_admin_id: string | null;
+          _deputy_admin_id: string | null;
+          _escalation_channel: string;
+          _expected_version: number;
+          _public_support_contact: string;
+          _support_day_end: string | null;
+          _support_day_start: string | null;
+          _support_timezone: string | null;
+          _support_weekdays: number[] | null;
+          _technical_contact: string;
+        };
+        Returns: number;
+      };
+      admin_set_support_operations_config_v3: {
+        Args: {
+          _business_owner_admin_id: string | null;
+          _deputy_admin_id: string | null;
+          _escalation_channel: string;
+          _expected_version: number;
+          _public_support_contact: string;
+          _support_closure_dates: string[] | null;
+          _support_timezone: string | null;
+          _support_windows: Json | null;
+          _technical_contact: string;
+        };
+        Returns: number;
+      };
+      admin_update_support_incident: {
+        Args: {
+          _action?: string | null;
+          _expected_version: number;
+          _incident_id: string;
+          _owner_admin_id: string | null;
+          _status: string;
+        };
+        Returns: {
+          acknowledged_at: string | null;
+          id: string;
+          resolved_at: string | null;
+          status: string;
+          version: number;
+        }[];
+      };
+      admin_update_support_ticket: {
+        Args: {
+          _assignee_admin_id: string | null;
+          _expected_version: number;
+          _status: string;
+          _ticket_id: string;
+        };
+        Returns: {
+          assignee_admin_id: string | null;
+          id: string;
+          status: string;
+          updated_at: string;
+          version: number;
+        }[];
+      };
+      accept_client_consent: {
+        Args: { _document_id: string };
+        Returns: { accepted_at: string; document_id: string }[];
+      };
       acquire_conversation_lock: {
         Args: { _conversation_id: string };
         Returns: Json;
+      };
+      create_support_ticket: {
+        Args: {
+          _category: string;
+          _description: string;
+          _idempotency_key: string;
+          _subject: string;
+        };
+        Returns: { created_at: string; id: string; status: string }[];
+      };
+      get_public_support_contact: { Args: never; Returns: string | null };
+      get_restore_recovery_access_state: {
+        Args: never;
+        Returns: {
+          blocked: boolean;
+          event_id: string | null;
+          event_version: number | null;
+          status: string | null;
+        }[];
+      };
+      get_admin_restore_recovery_state: {
+        Args: never;
+        Returns: {
+          approved_at: string | null;
+          approved_by: string | null;
+          event_id: string;
+          event_version: number;
+          evidence_recorded_at: string | null;
+          evidence_source: string | null;
+          external_authority_id: string;
+          external_lock_id: string;
+          owner_admin_id: string;
+          reason_code: string | null;
+          reopened_at: string | null;
+          requirement_name: string | null;
+          requirement_status: string | null;
+          source_snapshot_at: string;
+          source_snapshot_id: string;
+          status: string;
+        }[];
+      };
+      get_support_operations_config: {
+        Args: never;
+        Returns: {
+          business_owner_admin_id: string | null;
+          deputy_admin_id: string | null;
+          escalation_channel: string | null;
+          public_support_contact: string | null;
+          support_hours: string | null;
+          technical_contact: string | null;
+          version: number;
+        }[];
+      };
+      get_support_operations_config_v2: {
+        Args: never;
+        Returns: {
+          business_owner_admin_id: string | null;
+          deputy_admin_id: string | null;
+          escalation_adapter_state: string;
+          escalation_channel: string | null;
+          public_support_contact: string | null;
+          schedule_state: string;
+          support_day_end: string | null;
+          support_day_start: string | null;
+          support_timezone: string | null;
+          support_weekdays: number[] | null;
+          technical_contact: string | null;
+          version: number;
+        }[];
+      };
+      get_support_operations_config_v3: {
+        Args: never;
+        Returns: {
+          business_owner_admin_id: string | null;
+          deputy_admin_id: string | null;
+          escalation_adapter_state: string;
+          escalation_channel: string | null;
+          public_support_contact: string | null;
+          schedule_state: string;
+          support_closure_dates: string[];
+          support_schedule_version: number;
+          support_timezone: string | null;
+          support_windows: Json | null;
+          technical_contact: string | null;
+          version: number;
+        }[];
       };
       adjust_operator_credits: {
         Args: { _amount: number; _operator_id: string; _reason: string };
@@ -2304,8 +3384,12 @@ export type Database = {
         Args: { _amount: number; _reason: string; _user_id: string };
         Returns: Json;
       };
+      admin_adjust_operator_points: {
+        Args: { _amount: number; _operator_id: string; _reason: string };
+        Returns: Json;
+      };
       admin_reassign_conversation: {
-        Args: { _conversation_id: string; _operator_id: string };
+        Args: { _conversation_id: string; _operator_id: string; _reason: string };
         Returns: Json;
       };
       admin_set_conversation_status: {
@@ -2315,12 +3399,24 @@ export type Database = {
         };
         Returns: Json;
       };
+      admin_set_registration_state: {
+        Args: { _allow: boolean; _reason: string };
+        Returns: Json;
+      };
       admin_update_report_status: {
         Args: {
           _report_id: string;
           _status: Database["public"]["Enums"]["report_status"];
         };
         Returns: Json;
+      };
+      admin_backfill_client_levels: {
+        Args: { _after_message_id?: string; _limit?: number };
+        Returns: {
+          has_more: boolean;
+          next_message_id: string | null;
+          scanned: number;
+        }[];
       };
       archive_client_pii: {
         Args: { _client_id: string; _confirm: string; _reason: string };
@@ -2340,6 +3436,14 @@ export type Database = {
           preview_path: string;
           source_path: string;
         }[];
+      };
+      create_registration_admission_for_server: {
+        Args: {
+          _age_confirmed: boolean;
+          _email: string;
+          _terms_accepted: boolean;
+        };
+        Returns: Json;
       };
       begin_character_media_processing_for_server: {
         Args: { _actor_user_id: string; _asset_id: string };
@@ -2389,8 +3493,95 @@ export type Database = {
         Returns: Json;
       };
       claim_new_conversation: { Args: { _work_item_id: string }; Returns: Json };
+      claim_client_media_finalize_for_server: {
+        Args: { _actor_user_id: string; _upload_id: string };
+        Returns: {
+          bucket_id: string;
+          claim_token: string | null;
+          content_type: string;
+          preview_path: string | null;
+          source_path: string;
+          status: string;
+          upload_id: string;
+        }[];
+      };
+      claim_expired_client_media_cleanup_for_server: {
+        Args: { _limit?: number };
+        Returns: {
+          bucket_id: string;
+          claim_token: string;
+          preview_path: string | null;
+          source_path: string;
+          upload_id: string;
+        }[];
+      };
+      claim_client_profile_image_cleanup_for_server: {
+        Args: { _limit?: number };
+        Returns: {
+          bucket_id: string;
+          claim_token: string;
+          object_path: string;
+          owner_user_id: string;
+          queue_id: string;
+        }[];
+      };
+      authorize_client_profile_image_cleanup_for_server: {
+        Args: { _claim_token: string; _queue_id: string };
+        Returns: string;
+      };
+      complete_client_media_cleanup_for_server: {
+        Args: { _claim_token: string; _upload_id: string };
+        Returns: undefined;
+      };
+      complete_client_profile_image_cleanup_for_server: {
+        Args: { _claim_token: string; _queue_id: string };
+        Returns: string;
+      };
+      fail_client_media_cleanup_for_server: {
+        Args: { _claim_token: string; _error_code: string; _upload_id: string };
+        Returns: undefined;
+      };
+      fail_client_profile_image_cleanup_for_server: {
+        Args: { _claim_token: string; _error_code: string; _queue_id: string };
+        Returns: undefined;
+      };
+      fail_client_media_finalize_for_server: {
+        Args: { _claim_token: string; _error_code: string; _upload_id: string };
+        Returns: undefined;
+      };
+      finalize_client_media_upload_for_server: {
+        Args: {
+          _actor_user_id: string;
+          _byte_size: number;
+          _content_type: string;
+          _finalize_claim_token?: string | null;
+          _idempotency_key: string;
+          _upload_id: string;
+        };
+        Returns: Json;
+      };
+      mark_client_media_finalize_artifact_for_cleanup_for_server: {
+        Args: { _claim_token: string; _error_code: string; _upload_id: string };
+        Returns: undefined;
+      };
+      renew_client_media_finalize_claim_for_server: {
+        Args: { _claim_token: string; _upload_id: string };
+        Returns: boolean;
+      };
+      get_media_cleanup_backlog_for_server: { Args: never; Returns: Json };
       cleanup_expired_conversation_locks: { Args: never; Returns: number };
       complete_client_onboarding: { Args: { _payload: Json }; Returns: Json };
+      create_credit_request: {
+        Args: { _idempotency_key: string; _package_id: string };
+        Returns: {
+          credits: number;
+          id: string;
+          package_id: string;
+          package_name: string;
+          requested_at: string;
+          status: string;
+        }[];
+      };
       complete_free_view_once_attachment: {
         Args: { _attachment_id: string };
         Returns: Json;
@@ -2535,6 +3726,7 @@ export type Database = {
           height: number;
           id: string;
           ingest_status: string;
+          is_global: boolean;
           locked_derivative_error_code: string;
           locked_derivative_status: string;
           locked_derivatives_generated_at: string;
@@ -2542,6 +3734,8 @@ export type Database = {
           locked_price_credits: number;
           media_tag_id: string;
           media_tag_name: string;
+          media_tags: Json;
+          character_ids: string[];
           paid_open_price_credits: number;
           preview_available: boolean;
           processing_attempts: number;
@@ -2552,6 +3746,14 @@ export type Database = {
           width: number;
         }[];
       };
+      get_admin_advanced_analytics_for_server: {
+        Args: { _end_date: string; _start_date: string };
+        Returns: Json;
+      };
+      get_admin_dashboard_analytics_for_server: {
+        Args: { _day_keys: string[]; _month_start: string; _since: string };
+        Returns: Json;
+      };
       get_admin_media_catalog: {
         Args: { _conversation_id: string };
         Returns: {
@@ -2561,6 +3763,7 @@ export type Database = {
           height: number;
           id: string;
           ingest_status: string;
+          is_global: boolean;
           is_locked_reservable: boolean;
           is_reservable: boolean;
           is_reserved_by_me: boolean;
@@ -2570,6 +3773,10 @@ export type Database = {
           my_reservation_access_mode: string;
           my_reservation_expires_at: string;
           my_reservation_id: string;
+          media_tag_id: string;
+          media_tag_name: string;
+          media_tags: Json;
+          character_ids: string[];
           paid_open_price_credits: number;
           status: string;
           width: number;
@@ -2640,6 +3847,28 @@ export type Database = {
           outreach_sent_count: number;
         }[];
       };
+      get_admin_operational_wait_summary: {
+        Args: never;
+        Returns: {
+          oldest_wait_seconds: number;
+          over_target_count: number;
+          target_seconds: number;
+          waiting_count: number;
+        }[];
+      };
+      get_admin_completion_exceptions: {
+        Args: never;
+        Returns: {
+          account_deletion_blocked_count: number;
+          account_deletion_failure_count: number;
+          allocation_issue_count: number;
+          conversation_deletion_blocked_count: number;
+          conversation_deletion_failure_count: number;
+          gift_reward_failure_count: number;
+          gift_unallocated_event_count: number;
+          media_cleanup_failure_count: number;
+        }[];
+      };
       get_admin_operator_client_reports: {
         Args: never;
         Returns: {
@@ -2666,6 +3895,10 @@ export type Database = {
           presence_status: string;
           stale_returned_count: number;
         }[];
+      };
+      get_admin_gift_statuses: {
+        Args: never;
+        Returns: { is_gift: boolean; sticker_id: string }[];
       };
       get_admin_sticker_catalog: {
         Args: never;
@@ -2711,6 +3944,25 @@ export type Database = {
           short_description: string;
         }[];
       };
+      get_character_live_availability: {
+        Args: { _character_ids: string[] };
+        Returns: {
+          availability_status: Database["public"]["Enums"]["availability_status"];
+          character_id: string;
+        }[];
+      };
+      get_client_consent_requirements: {
+        Args: never;
+        Returns: {
+          accepted_at: string | null;
+          consent_key: string;
+          document_url: string;
+          id: string;
+          required: boolean;
+          title: string;
+          version: string;
+        }[];
+      };
       get_conversation_read_summary: {
         Args: { _conversation_id: string };
         Returns: Json;
@@ -2725,6 +3977,23 @@ export type Database = {
           scope: string;
           sort_order: number;
           sticker_id: string;
+        }[];
+      };
+      get_conversation_presence: {
+        Args: { _conversation_id: string };
+        Returns: {
+          display_name: string;
+          is_typing: boolean;
+          online_at: string;
+          role: string;
+          user_id: string;
+        }[];
+      };
+      get_conversation_read_access: {
+        Args: { _conversation_id: string };
+        Returns: {
+          access_version: number;
+          allowed: boolean;
         }[];
       };
       get_discovery_characters: {
@@ -2745,6 +4014,19 @@ export type Database = {
           is_recycled: boolean;
           name: string;
           short_description: string;
+        }[];
+      };
+      get_character_leads: {
+        Args: { _limit?: number };
+        Returns: {
+          character_id: string;
+          character_name: string;
+          client_id: string;
+          client_name: string;
+          created_at: string;
+          id: string;
+          last_liked_at: string;
+          source: string;
         }[];
       };
       get_discovery_characters_base: {
@@ -2768,6 +4050,22 @@ export type Database = {
         }[];
       };
       get_message_attachment_access: {
+        Args: { _attachment_ids: string[] };
+        Returns: {
+          access_mode: string;
+          available_purchase_id: string | null;
+          attachment_id: string;
+          is_unlocked: boolean;
+          price_credits_snapshot: number;
+          render_state: string;
+          required_gift_id: string | null;
+          required_gift_name: string | null;
+          required_gift_price_credits: number | null;
+          session_expires_at: string;
+          view_mode: string;
+        }[];
+      };
+      get_message_attachment_access_before_wp01_5: {
         Args: { _attachment_ids: string[] };
         Returns: {
           access_mode: string;
@@ -2800,6 +4098,14 @@ export type Database = {
         Args: never;
         Returns: Database["public"]["Enums"]["app_role"];
       };
+      get_conversation_gifts: {
+        Args: { _conversation_id: string };
+        Returns: {
+          gift_id: string;
+          name: string;
+          price_credits: number;
+        }[];
+      };
       get_operator_conversation_client_profile: {
         Args: { _conversation_id: string };
         Returns: {
@@ -2824,6 +4130,7 @@ export type Database = {
           height: number;
           id: string;
           ingest_status: string;
+          is_global: boolean;
           is_locked_reservable: boolean;
           is_reservable: boolean;
           is_reserved_by_me: boolean;
@@ -2832,6 +4139,8 @@ export type Database = {
           locked_price_credits: number;
           media_tag_id: string;
           media_tag_name: string;
+          media_tags: Json;
+          character_ids: string[];
           my_reservation_access_mode: string;
           my_reservation_expires_at: string;
           my_reservation_id: string;
@@ -2938,6 +4247,10 @@ export type Database = {
         Args: { _attachment_id: string; _idempotency_key: string };
         Returns: Json;
       };
+      open_attachment_gift_purchase: {
+        Args: { _attachment_id: string; _idempotency_key: string; _purchase_id: string };
+        Returns: Json;
+      };
       operator_can_access_character: {
         Args: { _character_id: string };
         Returns: boolean;
@@ -2958,6 +4271,54 @@ export type Database = {
       release_operator_conversation: {
         Args: { _conversation_id: string; _reason?: string };
         Returns: Json;
+      };
+      request_account_deletion: {
+        Args: { _idempotency_key: string };
+        Returns: { id: string; requested_at: string; status: string }[];
+      };
+      get_my_account_deletion_status: {
+        Args: never;
+        Returns: {
+          active_system_completed_at: string | null;
+          cancellation_deadline: string | null;
+          confirmed_at: string | null;
+          content_deletion_due_at: string | null;
+          failure_code: string | null;
+          id: string;
+          requested_at: string;
+          status: string;
+        }[];
+      };
+      cancel_account_deletion: {
+        Args: { _request_id: string };
+        Returns: { cancelled_at: string; id: string; status: string }[];
+      };
+      execute_account_retention_minimization_for_server: {
+        Args: { _claim_token: string; _request_id: string };
+        Returns: Json;
+      };
+      block_account_retention_minimization_for_server: {
+        Args: { _claim_token: string; _evidence: Json; _request_id: string };
+        Returns: undefined;
+      };
+      request_conversation_deletion: {
+        Args: {
+          _confirmed?: boolean;
+          _conversation_id: string;
+          _idempotency_key: string;
+          _reason: string;
+        };
+        Returns: { id: string; requested_at: string; status: string }[];
+      };
+      resolve_credit_request: {
+        Args: { _decision: string; _note?: string; _request_id: string };
+        Returns: {
+          balance_after: number | null;
+          id: string;
+          resolved_at: string;
+          status: string;
+          transaction_id: string | null;
+        }[];
       };
       report_client_as_operator: {
         Args: {
@@ -2985,11 +4346,28 @@ export type Database = {
         };
         Returns: Json;
       };
+      set_admin_media_asset_assignments: {
+        Args: {
+          _asset_id: string;
+          _character_ids: string[];
+          _is_global?: boolean;
+          _media_tag_ids: string[];
+        };
+        Returns: Json;
+      };
       resolve_admin_sticker_object_path_for_server: {
         Args: { _actor_user_id: string; _sticker_id: string };
         Returns: string;
       };
       resolve_character_media_preview_path_for_server: {
+        Args: {
+          _actor_user_id: string;
+          _target_id: string;
+          _target_kind: string;
+        };
+        Returns: string;
+      };
+      resolve_character_media_preview_path_before_wp01_5: {
         Args: {
           _actor_user_id: string;
           _target_id: string;
@@ -3005,12 +4383,28 @@ export type Database = {
         };
         Returns: string;
       };
+      resolve_conversation_sticker_object_path_before_wp01_5: {
+        Args: {
+          _actor_user_id: string;
+          _conversation_id: string;
+          _sticker_id: string;
+        };
+        Returns: string;
+      };
       resolve_sticker_object_path_for_server: {
+        Args: { _actor_user_id: string; _message_sticker_id: string };
+        Returns: string;
+      };
+      resolve_sticker_object_path_before_wp01_5: {
         Args: { _actor_user_id: string; _message_sticker_id: string };
         Returns: string;
       };
       restore_character_media_asset: {
         Args: { _asset_id: string };
+        Returns: Json;
+      };
+      run_handling_allocation: {
+        Args: { _max_assignments?: number };
         Returns: Json;
       };
       return_stale_work_items_to_new: { Args: never; Returns: number };
@@ -3048,6 +4442,20 @@ export type Database = {
             Args: {
               _caption: string;
               _expected_cycle_id: string;
+              _reservation_id: string;
+            };
+            Returns: Json;
+          };
+      send_operator_gift_media_message:
+        | {
+            Args: { _caption?: string; _gift_id: string; _reservation_id: string };
+            Returns: Json;
+          }
+        | {
+            Args: {
+              _caption: string;
+              _expected_cycle_id: string;
+              _gift_id: string;
               _reservation_id: string;
             };
             Returns: Json;
@@ -3101,6 +4509,14 @@ export type Database = {
             };
             Returns: Json;
           };
+      purchase_attachment_gift: {
+        Args: { _attachment_id: string; _gift_id: string; _idempotency_key: string };
+        Returns: Json;
+      };
+      remove_character_like: {
+        Args: { _character_id: string; _expected_subject: string };
+        Returns: Json;
+      };
       set_character_favorite: {
         Args: { _character_id: string; _is_favorite: boolean };
         Returns: Json;
@@ -3116,6 +4532,20 @@ export type Database = {
       };
       set_sticker_active: {
         Args: { _is_active: boolean; _sticker_id: string };
+        Returns: undefined;
+      };
+      set_conversation_presence: {
+        Args: {
+          _active: boolean;
+          _conversation_id: string;
+          _display_name: string;
+          _role: string;
+          _typing: boolean;
+        };
+        Returns: undefined;
+      };
+      set_sticker_gift_status: {
+        Args: { _is_gift: boolean; _sticker_id: string };
         Returns: undefined;
       };
       set_sticker_price: {
@@ -3161,6 +4591,56 @@ export type Database = {
       update_admin_media_tag: {
         Args: { _name: string; _sort_order?: number; _tag_id: string };
         Returns: Json;
+      };
+      update_character_lead_status: {
+        Args: { _lead_id: string; _status: string };
+        Returns: {
+          id: string;
+          interest_active: boolean;
+          status: string;
+          updated_at: string;
+        }[];
+      };
+      update_operator_conversation_status: {
+        Args: {
+          _conversation_id: string;
+          _status: Database["public"]["Enums"]["conversation_status"];
+        };
+        Returns: {
+          assigned_operator_id: string | null;
+          character_id: string;
+          client_hidden_at: string | null;
+          client_id: string;
+          client_unread_count: number;
+          created_at: string;
+          handling_next_sequence: number;
+          handling_state_initialized: boolean;
+          handling_state_updated_at: string | null;
+          id: string;
+          inactivity_expires_at: string | null;
+          last_business_message_at: string | null;
+          last_handling_message_sequence: number | null;
+          last_message_at: string | null;
+          last_message_preview: string | null;
+          needs_handling: boolean | null;
+          operator_unread_count: number;
+          pending_since: string | null;
+          status: Database["public"]["Enums"]["conversation_status"];
+          updated_at: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "conversations";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
+      update_client_profile_images: {
+        Args: { _profile_image_url?: string | null; _profile_image_urls: string[] };
+        Returns: {
+          profile_image_url: string | null;
+          profile_image_urls: string[];
+        }[];
       };
     };
     Enums: {

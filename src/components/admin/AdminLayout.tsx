@@ -4,6 +4,8 @@ import {
   BarChart3,
   Coins,
   Flag,
+  LifeBuoy,
+  HeartHandshake,
   LayoutDashboard,
   LogOut,
   MessageCircle,
@@ -27,9 +29,11 @@ type NavTo =
   | "/admin/operators"
   | "/admin/characters"
   | "/admin/conversations"
+  | "/admin/leads"
   | "/admin/credits"
   | "/admin/analytics"
   | "/admin/reports"
+  | "/admin/support"
   | "/admin/audit-logs"
   | "/admin/settings"
   | "/admin/stickers";
@@ -42,8 +46,10 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
   { to: "/admin/stickers", label: "Stickers", icon: Sticker },
   { to: "/admin/conversations", label: "שיחות", icon: MessageCircle },
+  { to: "/admin/leads", label: "Leads", icon: HeartHandshake },
   { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },
+  { to: "/admin/support", label: "תמיכה ואירועים", icon: LifeBuoy },
   { to: "/admin/audit-logs", label: "יומן פעולות", icon: ScrollText },
   { to: "/admin/settings", label: "הגדרות", icon: Settings },
   { to: "/admin/analytics", label: "אנליטיקות", icon: BarChart3 },
@@ -198,7 +204,9 @@ export function StatusBadge({ status }: { status: string }) {
   };
   const current = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
   return (
-    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", current.cls)}>
+    <span
+      className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", current.cls)}
+    >
       {current.label}
     </span>
   );

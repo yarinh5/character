@@ -249,7 +249,7 @@ describe("admin analytics read states", () => {
     const bar = await screen.findByTitle("2026-10-01: 0 פעולות");
     expect(bar).toHaveStyle({ height: "0%" });
     expect(screen.getAllByText("קרדיטים שנצרכו").length).toBeGreaterThan(0);
-    expect(screen.getByText(/עד 10,000 רשומות לכל מקור/)).toBeInTheDocument();
+    expect(screen.getByText(/אגרגציה מלאה בצד השרת/)).toBeInTheDocument();
   });
 
   it("isolates cached and late data across admin replacement and logout", async () => {
