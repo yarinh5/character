@@ -45,6 +45,16 @@ async function ensureReactivatable(userId: string) {
   if (!data) throw new Error("משתמש לא נמצא");
   if (data.deleted_at || data.pii_archived_at)
     throw new Error("archived_user_cannot_be_reactivated");
+  const { data: deletion, error: deletionError } = await supabaseAdmin
+    .from("account_deletion_requests")
+    .select("id")
+    .eq("user_id", userId)
+    .not("confirmed_at", "is", null)
+    .is("cancelled_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (deletionError) throw new Error(deletionError.message);
+  if (deletion) throw new Error("confirmed_deletion_cannot_be_reactivated");
 }
 
 export const adminListUsers = createServerFn({ method: "GET" })

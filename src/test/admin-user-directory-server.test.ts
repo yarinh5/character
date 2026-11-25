@@ -332,6 +332,18 @@ describe("admin user directory server boundary", () => {
             },
           }),
         };
+      if (table === "account_deletion_requests")
+        return {
+          select: () => ({
+            eq: () => ({
+              not: () => ({
+                is: () => ({
+                  limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+                }),
+              }),
+            }),
+          }),
+        };
       throw new Error(`Unexpected service-role table: ${table}`);
     });
     io.authUpdate.mockImplementation(async () => {
@@ -414,6 +426,51 @@ describe("admin user directory server boundary", () => {
           context: context(),
         }),
       ).rejects.toThrow("archived");
+      expect(io.authUpdate).not.toHaveBeenCalled();
+      expect(io.audit).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([setStatus, update])(
+    "never reactivates an account with a confirmed deletion request",
+    async (action) => {
+      const cancelledFilter = vi.fn(() => ({
+        limit: () => ({ maybeSingle: async () => ({ data: { id: "request-a" }, error: null }) }),
+      }));
+      const confirmedFilter = vi.fn(() => ({ is: cancelledFilter }));
+      io.from.mockImplementation((table: string) => {
+        if (table === "user_roles")
+          return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+        if (table === "profiles")
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { deleted_at: null, pii_archived_at: null },
+                  error: null,
+                }),
+              }),
+            }),
+            update: () => ({ eq: async () => ({ error: null }) }),
+          };
+        if (table === "account_deletion_requests")
+          return {
+            select: () => ({
+              eq: () => ({
+                not: confirmedFilter,
+              }),
+            }),
+          };
+        throw new Error(`Unexpected service-role table: ${table}`);
+      });
+      await expect(
+        action({
+          data: { user_id: "00000000-0000-4000-8000-000000000002", status: "active" },
+          context: context(),
+        }),
+      ).rejects.toThrow("deletion");
+      expect(confirmedFilter).toHaveBeenCalledWith("confirmed_at", "is", null);
+      expect(cancelledFilter).toHaveBeenCalledWith("cancelled_at", null);
       expect(io.authUpdate).not.toHaveBeenCalled();
       expect(io.audit).not.toHaveBeenCalled();
     },

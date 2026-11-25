@@ -28,6 +28,72 @@ export type Database = {
   };
   public: {
     Tables: {
+      account_deletion_requests: {
+        Row: {
+          access_blocked_at: string | null;
+          active_system_completed_at: string | null;
+          cancellation_deadline: string | null;
+          cancelled_at: string | null;
+          completed_at: string | null;
+          completion_evidence: Json;
+          confirmed_at: string | null;
+          content_deletion_due_at: string | null;
+          failure_code: string | null;
+          id: string;
+          idempotency_key: string;
+          irreversible_started_at: string | null;
+          requested_at: string;
+          retention_policy_version: string | null;
+          status: string;
+          updated_at: string;
+          user_id: string;
+          verification_expires_at: string | null;
+          verified_at: string | null;
+        };
+        Insert: {
+          access_blocked_at?: string | null;
+          active_system_completed_at?: string | null;
+          cancellation_deadline?: string | null;
+          cancelled_at?: string | null;
+          completed_at?: string | null;
+          completion_evidence?: Json;
+          confirmed_at?: string | null;
+          content_deletion_due_at?: string | null;
+          failure_code?: string | null;
+          id?: string;
+          idempotency_key: string;
+          irreversible_started_at?: string | null;
+          requested_at?: string;
+          retention_policy_version?: string | null;
+          status?: string;
+          updated_at?: string;
+          user_id: string;
+          verification_expires_at?: string | null;
+          verified_at?: string | null;
+        };
+        Update: {
+          access_blocked_at?: string | null;
+          active_system_completed_at?: string | null;
+          cancellation_deadline?: string | null;
+          cancelled_at?: string | null;
+          completed_at?: string | null;
+          completion_evidence?: Json;
+          confirmed_at?: string | null;
+          content_deletion_due_at?: string | null;
+          failure_code?: string | null;
+          id?: string;
+          idempotency_key?: string;
+          irreversible_started_at?: string | null;
+          requested_at?: string;
+          retention_policy_version?: string | null;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+          verification_expires_at?: string | null;
+          verified_at?: string | null;
+        };
+        Relationships: [];
+      };
       analytics_events: {
         Row: {
           actor_user_id: string | null;
