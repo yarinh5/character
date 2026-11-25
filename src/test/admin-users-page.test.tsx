@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.stubGlobal(
@@ -12,7 +12,14 @@ vi.stubGlobal(
   },
 );
 
-const io = vi.hoisted(() => ({ list: vi.fn(), navigate: vi.fn() }));
+const io = vi.hoisted(() => ({
+  list: vi.fn(),
+  navigate: vi.fn(),
+  sendReset: vi.fn(),
+  clipboard: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+}));
 
 vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: unknown) => options }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
@@ -27,8 +34,9 @@ vi.mock("@/lib/admin-users.functions", () => ({
 }));
 vi.mock("@/lib/impersonation.functions", () => ({
   adminImpersonate: vi.fn(),
-  adminSendPasswordReset: vi.fn(),
+  adminSendPasswordReset: io.sendReset,
 }));
+vi.mock("sonner", () => ({ toast: { success: io.success, error: io.error } }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { auth: { getSession: vi.fn() } } }));
 vi.mock("@/components/common/ImpersonationBanner", () => ({ startImpersonation: vi.fn() }));
 vi.mock("@/components/admin/AdminLayout", () => ({
@@ -64,6 +72,14 @@ function mount() {
 }
 
 beforeEach(() => {
+  io.sendReset.mockReset().mockResolvedValue({ action_link: "https://example.test/reset" });
+  io.clipboard.mockReset().mockResolvedValue(undefined);
+  io.success.mockReset();
+  io.error.mockReset();
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: io.clipboard },
+    configurable: true,
+  });
   io.list
     .mockReset()
     .mockImplementation(({ data }: { data: { search: string; before_user_id: string | null } }) => {
@@ -111,5 +127,15 @@ describe("admin users directory", () => {
     expect(screen.getByText("User 0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "טען משתמשים נוספים" }));
     expect(await screen.findByText("User 104")).toBeInTheDocument();
+  });
+
+  it("never reports a reset link as copied when clipboard access fails", async () => {
+    io.clipboard.mockRejectedValueOnce(new Error("clipboard denied"));
+    mount();
+    expect(await screen.findByText("User 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "שליחת קישור איפוס סיסמה עבור User 0" }));
+    expect(io.sendReset).toHaveBeenCalled();
+    await waitFor(() => expect(io.error).toHaveBeenCalledWith("clipboard denied"));
+    expect(io.success).not.toHaveBeenCalled();
   });
 });

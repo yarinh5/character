@@ -372,7 +372,7 @@ function SendResetButton({ user }: { user: Row }) {
     try {
       const res = await send({ data: { user_id: user.user_id } });
       if (res.action_link) {
-        await navigator.clipboard.writeText(res.action_link).catch(() => {});
+        await navigator.clipboard.writeText(res.action_link);
         toast.success("קישור איפוס הועתק ללוח");
       } else {
         toast.success("נשלח אימייל איפוס סיסמה");
