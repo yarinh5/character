@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { SkipLink } from "@/components/common/SkipLink";
 
 const NAV = [
   { to: "/app/characters", label: "דמויות", icon: Users },
@@ -29,6 +30,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background flex" dir="rtl">
+      <SkipLink />
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
         <div className="h-16 px-6 flex items-center border-b border-border">
@@ -62,7 +64,9 @@ export function ClientLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
+      <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 pb-20 md:pb-0">
+        {children}
+      </main>
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">

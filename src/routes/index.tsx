@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useAuth, rolePath } from "@/lib/auth";
+import { SkipLink } from "@/components/common/SkipLink";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,12 +32,15 @@ function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SkipLink />
       <Header />
-      <Hero />
-      <HowItWorks />
-      <Features />
-      <FAQ />
-      <CTA />
+      <main id="main-content" tabIndex={-1}>
+        <Hero />
+        <HowItWorks />
+        <Features />
+        <FAQ />
+        <CTA />
+      </main>
       <Footer />
     </div>
   );

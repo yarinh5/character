@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, rolePath } from "@/lib/auth";
+import { SkipLink } from "@/components/common/SkipLink";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "התחברות — Character Chat OS" }] }),
@@ -53,69 +54,76 @@ function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-hero px-4 py-12">
-      <div className="w-full max-w-md">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-primary">
-            <MessageCircle className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-bold">Character Chat</span>
-        </Link>
-        <Card className="shadow-elegant">
-          <CardHeader>
-            <h1 className="text-2xl font-semibold leading-none tracking-tight">התחברות</h1>
-            <CardDescription>ברוכים השבים. הזינו את פרטיכם.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">אימייל</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  dir="ltr"
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">סיסמה</Label>
-                  <Link to="/forgot-password" className="text-sm text-primary hover:underline">
-                    שכחת סיסמה?
-                  </Link>
+    <>
+      <SkipLink />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="flex min-h-screen items-center justify-center bg-gradient-hero px-4 py-12"
+      >
+        <div className="w-full max-w-md">
+          <Link to="/" className="mb-8 flex items-center justify-center gap-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-primary">
+              <MessageCircle className="h-5 w-5 text-primary-foreground" />
+            </div>
+            <span className="text-xl font-bold">Character Chat</span>
+          </Link>
+          <Card className="shadow-elegant">
+            <CardHeader>
+              <h1 className="text-2xl font-semibold leading-none tracking-tight">התחברות</h1>
+              <CardDescription>ברוכים השבים. הזינו את פרטיכם.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">אימייל</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    dir="ltr"
+                  />
                 </div>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "מתחבר..." : "התחבר"}
-              </Button>
-            </form>
-            <p className="mt-6 text-center text-sm text-muted-foreground">
-              אין לך חשבון?{" "}
-              <Link to="/register" className="font-medium text-primary hover:underline">
-                הרשמה
-              </Link>
-            </p>
-            {publicSupportContact && (
-              <p className="mt-3 text-center text-sm text-muted-foreground">
-                לא ניתן להתחבר? ערוץ התמיכה שהוגדר: <span dir="ltr">{publicSupportContact}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">סיסמה</Label>
+                    <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                      שכחת סיסמה?
+                    </Link>
+                  </div>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={submitting}>
+                  {submitting ? "מתחבר..." : "התחבר"}
+                </Button>
+              </form>
+              <p className="mt-6 text-center text-sm text-muted-foreground">
+                אין לך חשבון?{" "}
+                <Link to="/register" className="font-medium text-primary hover:underline">
+                  הרשמה
+                </Link>
               </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+              {publicSupportContact && (
+                <p className="mt-3 text-center text-sm text-muted-foreground">
+                  לא ניתן להתחבר? ערוץ התמיכה שהוגדר: <span dir="ltr">{publicSupportContact}</span>
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </>
   );
 }

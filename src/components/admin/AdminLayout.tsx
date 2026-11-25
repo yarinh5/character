@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
+import { SkipLink } from "@/components/common/SkipLink";
 
 type NavTo =
   | "/admin"
@@ -113,6 +114,7 @@ function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col" dir="rtl">
+      <SkipLink />
       <ImpersonationBanner />
       <div className="flex flex-1 min-h-0">
         <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
@@ -144,7 +146,11 @@ function AdminShell({ children }: { children: ReactNode }) {
           </nav>
         </aside>
 
-        <main className="flex-1 min-w-0 pb-24 md:pb-0 flex flex-col">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-w-0 pb-24 md:pb-0 flex flex-col"
+        >
           <header className="h-14 border-b border-border bg-card flex items-center justify-end px-4 gap-2 shrink-0">
             <NotificationBell />
           </header>

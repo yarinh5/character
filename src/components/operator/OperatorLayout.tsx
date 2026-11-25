@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
 import { useOperatorNewSlaSummary } from "@/hooks/useOperatorNewQueue";
+import { SkipLink } from "@/components/common/SkipLink";
 
 export type OperatorRecord = {
   id: string;
@@ -259,6 +260,7 @@ function OperatorShell({
 
   return (
     <div className="min-h-screen bg-background flex flex-col" dir="rtl">
+      <SkipLink />
       <ImpersonationBanner />
       <div className="flex flex-1 min-h-0">
         <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
@@ -322,7 +324,11 @@ function OperatorShell({
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 pb-20 md:pb-0 flex flex-col">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-w-0 pb-20 md:pb-0 flex flex-col"
+        >
           <header className="h-14 border-b border-border bg-card flex items-center justify-between md:justify-end px-4 gap-2 shrink-0">
             <Button variant="ghost" size="sm" className="md:hidden gap-2" onClick={handleLogout}>
               <LogOut className="h-4 w-4" />

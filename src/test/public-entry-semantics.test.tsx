@@ -63,4 +63,27 @@ describe("public entry-page semantics", () => {
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("name", "password");
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("autocomplete", "current-password");
   });
+
+  it.each([
+    ["home", LandingPage],
+    ["login", LoginPage],
+  ])("provides a keyboard skip target on the %s page", (_name, Page) => {
+    render(<Page />);
+    expect(screen.getByRole("link", { name: "דלג לתוכן הראשי" })).toHaveAttribute(
+      "href",
+      "#main-content",
+    );
+    expect(document.getElementById("main-content")).toMatchObject({
+      tagName: "MAIN",
+      tabIndex: -1,
+    });
+  });
+
+  it("connects the shared skip link to each protected workspace landmark", () => {
+    for (const layout of ["client/ClientLayout", "operator/OperatorLayout", "admin/AdminLayout"]) {
+      const source = readFileSync(resolve(process.cwd(), `src/components/${layout}.tsx`), "utf8");
+      expect(source).toContain("<SkipLink />");
+      expect(source).toMatch(/<main\s+id="main-content"\s+tabIndex=\{-1\}/);
+    }
+  });
 });
