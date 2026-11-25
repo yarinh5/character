@@ -22,7 +22,21 @@ INSERT INTO public.operators (id, user_id, full_name) VALUES
 INSERT INTO public.operator_client_reports (id, operator_id, client_id, reason) VALUES
   ('00000000-0000-4000-8000-000000112201', '00000000-0000-4000-8000-000000112101', '00000000-0000-4000-8000-000000112003', 'Fixture report');
 
-SELECT plan(17);
+SELECT plan(19);
+
+SELECT is(
+  (SELECT count(*) FROM public.notifications
+   WHERE user_id = '00000000-0000-4000-8000-000000112001'
+     AND type = 'new_report'
+     AND metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'),
+  1::bigint, 'An operator report creates one admin notification'
+);
+SELECT is(
+  (SELECT count(*) FROM public.notifications
+   WHERE user_id = '00000000-0000-4000-8000-000000112002'
+     AND metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'),
+  0::bigint, 'The operator report does not notify the reporting operator'
+);
 
 SET LOCAL ROLE anon;
 SET LOCAL "request.jwt.claim.role" = 'anon';

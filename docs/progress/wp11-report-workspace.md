@@ -235,3 +235,7 @@ targeted within one business day; this does not create automatic 24/7 technical 
   one. Existing customer-report behavior is unchanged.
 - Focused UI and SQL-contract tests were added. PostgreSQL/pgTAP live and Product acceptance remain
   **NOT RUN** for this revision; offline checks alone do not close WP11 or Product.
+- R10 notification gap: a separate forward migration now routes newly submitted operator reports to
+  admins through the existing `new_report` preference and notification channel. The notification
+  contains a report ID and generic text, not the client's notes or identity. This is covered by a
+  structural regression and a written pgTAP case, but live delivery remains **NOT RUN**.

@@ -13,6 +13,13 @@ const priorSnapshot = await readFile(
   new URL("../../../migrations/20260926232222_fix_v3_4_archived_client_scope.sql", import.meta.url),
   "utf8",
 );
+const notifications = await readFile(
+  new URL(
+    "../../../migrations/20261125151000_wp11_operator_report_notification.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 const update = migration.match(
   /CREATE FUNCTION public\.admin_update_operator_client_report\([\s\S]*?\n\$\$;/,
@@ -133,4 +140,18 @@ test("snapshot counts unresolved operator reports and otherwise retains its cont
       "\n      (SELECT COUNT(*)::INTEGER FROM public.operator_client_reports report\n       WHERE report.status IN ('open', 'in_progress')) AS open_operator_report_count,",
     );
   assert.equal(snapshot.replaceAll("\r\n", "\n"), expected);
+});
+
+test("new operator reports notify admins through the existing report channel", () => {
+  assert.match(
+    notifications,
+    /CREATE FUNCTION private\.notify_admin_on_operator_client_report\(\)/,
+  );
+  assert.match(notifications, /AFTER INSERT ON public\.operator_client_reports/);
+  assert.match(notifications, /WHERE role = 'admin'/);
+  assert.match(notifications, /public\.create_notification\(/);
+  assert.match(notifications, /'new_report'/);
+  assert.match(notifications, /'\/admin\/reports'/);
+  assert.match(notifications, /'dedupe_key', 'operator-client-report:' \|\| NEW\.id::TEXT/);
+  assert.doesNotMatch(notifications, /NEW\.notes|NEW\.reason|NEW\.client_id/);
 });
