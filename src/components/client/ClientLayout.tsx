@@ -1,11 +1,26 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Users, MessageCircle, User, LogOut, Coins, Star, LifeBuoy } from "lucide-react";
+import {
+  Users,
+  MessageCircle,
+  User,
+  LogOut,
+  Coins,
+  Star,
+  LifeBuoy,
+  MoreHorizontal,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { SkipLink } from "@/components/common/SkipLink";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const NAV = [
   { to: "/app/characters", label: "דמויות", icon: Users },
@@ -69,14 +84,17 @@ export function ClientLayout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-        <div className="grid grid-cols-6">
-          {NAV.map(({ to, label, icon: Icon }) => (
+      <nav
+        aria-label="ניווט לקוח במובייל"
+        className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40"
+      >
+        <div className="grid grid-cols-5">
+          {NAV.slice(0, 4).map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-3 text-xs",
+                "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 text-xs",
                 isActive(to) ? "text-primary" : "text-muted-foreground",
               )}
             >
@@ -84,13 +102,36 @@ export function ClientLayout({ children }: { children: ReactNode }) {
               {label}
             </Link>
           ))}
-          <button
-            onClick={handleLogout}
-            className="flex flex-col items-center justify-center gap-1 py-3 text-xs text-muted-foreground"
-          >
-            <LogOut className="h-5 w-5" />
-            יציאה
-          </button>
+          <DropdownMenu dir="rtl">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 text-xs",
+                  NAV.slice(4).some(({ to }) => isActive(to))
+                    ? "text-primary"
+                    : "text-muted-foreground",
+                )}
+              >
+                <MoreHorizontal className="h-5 w-5" />
+                עוד
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="w-44">
+              {NAV.slice(4).map(({ to, label, icon: Icon }) => (
+                <DropdownMenuItem key={to} asChild>
+                  <Link to={to} className="min-h-11">
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </Link>
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem className="min-h-11" onSelect={() => void handleLogout()}>
+                <LogOut className="h-4 w-4" />
+                יציאה
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </nav>
     </div>
