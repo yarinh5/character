@@ -199,6 +199,8 @@ describe("admin user directory server boundary", () => {
   ])(
     "does not report deletion when %s fails",
     async (_step, lookupError, profileError, operatorError, missing) => {
+      io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+      io.role.mockResolvedValueOnce({ data: null, error: null });
       const profileLookup = vi.fn().mockResolvedValue({
         data: lookupError || missing ? null : { email: "user@example.test" },
         error: lookupError,
@@ -349,6 +351,8 @@ describe("admin user directory server boundary", () => {
   });
 
   it("does not mutate a user when the Auth ban for soft delete fails", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     io.from.mockImplementation((table: string) => {
       if (table === "user_roles")
         return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
@@ -370,6 +374,18 @@ describe("admin user directory server boundary", () => {
       }),
     ).rejects.toThrow("auth unavailable");
     expect(io.from).not.toHaveBeenCalledWith("operators");
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects deletion of another admin before any mutation", async () => {
+    await expect(
+      softDelete({
+        data: { user_id: "00000000-0000-4000-8000-000000000002" },
+        context: context(),
+      }),
+    ).rejects.toThrow("admin");
+    expect(io.authUpdate).not.toHaveBeenCalled();
+    expect(io.from).not.toHaveBeenCalledWith("profiles");
     expect(io.audit).not.toHaveBeenCalled();
   });
 

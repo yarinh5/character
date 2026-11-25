@@ -229,6 +229,14 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן למחוק את עצמך");
     }
+    const { data: adminRole, error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.user_id)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (roleError) throw new Error(roleError.message);
+    if (adminRole) throw new Error("admin_account_requires_separate_deprovisioning");
     const { data: profile, error: lookupError } = await supabaseAdmin
       .from("profiles")
       .select("email")
