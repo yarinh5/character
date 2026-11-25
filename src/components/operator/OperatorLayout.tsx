@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   Radio,
+  MoreHorizontal,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,6 +19,12 @@ import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
 import { useOperatorNewSlaSummary } from "@/hooks/useOperatorNewQueue";
 import { SkipLink } from "@/components/common/SkipLink";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export type OperatorRecord = {
   id: string;
@@ -356,14 +363,17 @@ function OperatorShell({
           <div className="flex-1 min-h-0">{children}</div>
         </main>
 
-        <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40">
-          <div className="grid grid-cols-6">
-            {NAV.map(({ to, label, icon: Icon, exact }) => (
+        <nav
+          aria-label="ניווט עובד במובייל"
+          className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40"
+        >
+          <div className="grid grid-cols-5">
+            {NAV.slice(0, 4).map(({ to, label, icon: Icon, exact }) => (
               <Link
                 key={to}
                 to={to}
                 className={cn(
-                  "relative flex flex-col items-center justify-center gap-1 py-3 text-xs",
+                  "relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 text-xs",
                   isActive(to, exact) ? "text-primary" : "text-muted-foreground",
                 )}
               >
@@ -376,6 +386,32 @@ function OperatorShell({
                 )}
               </Link>
             ))}
+            <DropdownMenu dir="rtl">
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 text-xs",
+                    NAV.slice(4).some(({ to, exact }) => isActive(to, exact))
+                      ? "text-primary"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                  עוד
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end" className="w-44">
+                {NAV.slice(4).map(({ to, label, icon: Icon }) => (
+                  <DropdownMenuItem key={to} asChild>
+                    <Link to={to} className="min-h-11">
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </nav>
       </div>

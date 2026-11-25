@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { forwardRef, type AnchorHTMLAttributes, type ReactNode } from "react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
@@ -14,10 +15,18 @@ const io = vi.hoisted(() => ({
   navigate: vi.fn(),
   removeChannel: vi.fn(),
   rpcAwaited: vi.fn(),
+  critical: 0,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Link: forwardRef<
+    HTMLAnchorElement,
+    AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; children: ReactNode }
+  >(({ to, children, ...props }, ref) => (
+    <a ref={ref} href={to} {...props}>
+      {children}
+    </a>
+  )),
   useNavigate: () => io.navigate,
   useRouterState: () => "/operator",
 }));
@@ -28,7 +37,12 @@ vi.mock("@/components/common/NotificationBell", () => ({ NotificationBell: () =>
 vi.mock("@/components/common/ImpersonationBanner", () => ({ ImpersonationBanner: () => null }));
 vi.mock("@/hooks/useOperatorNewQueue", () => ({
   useOperatorNewSlaSummary: () => ({
-    summary: { total_new: 0, warning_count: 0, critical_count: 0, oldest_wait_seconds: 0 },
+    summary: {
+      total_new: 0,
+      warning_count: 0,
+      critical_count: io.critical,
+      oldest_wait_seconds: 0,
+    },
   }),
 }));
 vi.mock("@/integrations/supabase/client", () => ({
@@ -93,9 +107,33 @@ beforeEach(() => {
   io.navigate.mockReset();
   io.removeChannel.mockReset();
   io.rpcAwaited.mockReset();
+  io.critical = 0;
 });
 
 describe("operator route guard", () => {
+  it("keeps NEW and its alert visible in one mobile navigation row", async () => {
+    io.critical = 2;
+    render(
+      <RequireOperator>
+        <OperatorProbe />
+      </RequireOperator>,
+    );
+    const nav = await screen.findByRole("navigation", { name: "ניווט עובד במובייל" });
+    expect(nav.firstElementChild).toHaveClass("grid-cols-5");
+    expect(nav.firstElementChild?.children).toHaveLength(5);
+    expect(within(nav).getByRole("link", { name: /NEW/ })).toHaveAttribute("href", "/operator/new");
+    expect(within(nav).getByText("2")).toBeInTheDocument();
+    await userEvent.click(within(nav).getByRole("button", { name: "עוד" }));
+    expect(await screen.findByRole("menuitem", { name: "ביצועים" })).toHaveAttribute(
+      "href",
+      "/operator/analytics",
+    );
+    expect(screen.getByRole("menuitem", { name: "הגדרות" })).toHaveAttribute(
+      "href",
+      "/operator/settings",
+    );
+  });
+
   it("executes the lazy operator heartbeat request after the operator loads", async () => {
     render(
       <RequireOperator>
