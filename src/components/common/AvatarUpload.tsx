@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -227,6 +228,7 @@ export function AvatarUpload({
               </div>
               <input
                 type="range"
+                aria-label="זום"
                 min="1"
                 max="3"
                 step="0.05"
@@ -235,9 +237,9 @@ export function AvatarUpload({
                 className="w-full accent-primary"
               />
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">
+            <DialogDescription className="text-xs leading-5 text-muted-foreground">
               התמונה תישמר כ־avatar מרובע/עגול ותוצג בפרופיל ובצ׳אט לאחר שמירת הפרופיל.
-            </p>
+            </DialogDescription>
           </div>
           <DialogFooter className="gap-2 sm:justify-start">
             <Button type="button" variant="outline" onClick={clearSelection} disabled={busy}>

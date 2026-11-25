@@ -65,6 +65,20 @@ beforeEach(() => {
 });
 
 describe("AvatarUpload lifecycle contract", () => {
+  it("names the crop controls for assistive technology", async () => {
+    const { container } = render(
+      <AvatarUpload bucket="user-avatars" folder="user-a" value={null} onChange={vi.fn()} />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["image"], "avatar.png", { type: "image/png" })] },
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "חיתוך תמונת פרופיל" });
+    expect(dialog).toHaveAccessibleDescription();
+    expect(screen.getByRole("slider", { name: "זום" })).toBeInTheDocument();
+  });
+
   it("preserves the existing user-avatar upload and crop behavior by default", async () => {
     const onChange = vi.fn();
     const { container } = render(
