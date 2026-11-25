@@ -48,3 +48,9 @@
 - DB, migrations, RLS, RPC signatures, dependencies, flags and route tree: none changed. Local/QA/Production application and deploy: not executed.
 - Locked dependency installation reported 42 vulnerabilities (2 low, 20 moderate, 14 high, 6 critical). Dependency remediation is outside this allowlist.
 - Implemented and component-tested on the feature branch does not mean merged, live-connected or product-delivered. WP11 as a whole is not complete; browser and authorized live integration evidence require a separate approved gate.
+
+## 2026-11-25 mobile navigation follow-up
+
+- The six-tab operator mobile bar crowded the 375px viewport. Four primary routes now remain visible, including NEW and its SLA alert; Analytics and Settings are in a keyboard-accessible More menu. The desktop sidebar is unchanged.
+- The focused route-guard test covers the five-column bar, visible NEW alert and both menu destinations. Full UI Vitest passed 674/674, typecheck and client/SSR build passed, and scoped ESLint had no errors. Commit: `e735178`.
+- Browser layout and authenticated live navigation remain unverified; this does not close Product acceptance.
