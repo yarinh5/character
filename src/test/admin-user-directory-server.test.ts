@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const io = vi.hoisted(() => ({ from: vi.fn(), role: vi.fn(), rpc: vi.fn() }));
+const io = vi.hoisted(() => ({ from: vi.fn(), role: vi.fn(), rpc: vi.fn(), authUpdate: vi.fn() }));
 
 vi.mock("@tanstack/react-start", () => ({
   createServerFn: () => {
@@ -21,16 +21,19 @@ vi.mock("@tanstack/react-start", () => ({
   },
 }));
 vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
-vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { from: io.from } }));
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: { from: io.from, auth: { admin: { updateUserById: io.authUpdate } } },
+}));
 vi.mock("@/lib/audit.server", () => ({ logAudit: vi.fn() }));
 
-import { adminListUsers } from "@/lib/admin-users.functions";
+import { adminListUsers, adminUpdateUser } from "@/lib/admin-users.functions";
 
 type Input = {
   data: Record<string, unknown>;
   context: { userId: string; supabase: { rpc: typeof io.rpc } };
 };
 const list = adminListUsers as unknown as (input: Input) => Promise<unknown>;
+const update = adminUpdateUser as unknown as (input: Input) => Promise<unknown>;
 const context = () => ({ userId: "admin-a", supabase: { rpc: io.rpc } });
 
 beforeEach(() => {
@@ -41,6 +44,7 @@ beforeEach(() => {
   });
   io.role.mockReset().mockResolvedValue({ data: { role: "admin" }, error: null });
   io.rpc.mockReset().mockResolvedValue({ data: [], error: null });
+  io.authUpdate.mockReset().mockResolvedValue({ error: null });
 });
 
 describe("admin user directory server boundary", () => {
@@ -90,5 +94,22 @@ describe("admin user directory server boundary", () => {
     await expect(list({ data: {}, context: context() })).rejects.toThrow(
       "invalid_user_directory_page",
     );
+  });
+
+  it("rejects self role changes before any email or profile write", async () => {
+    const adminId = "00000000-0000-4000-8000-000000000001";
+    await expect(
+      update({
+        data: {
+          user_id: adminId,
+          role: "client",
+          email: "changed@example.test",
+          display_name: "Changed",
+        },
+        context: { userId: adminId, supabase: { rpc: io.rpc } },
+      }),
+    ).rejects.toThrow("לא ניתן לשנות את התפקיד של עצמך מכאן");
+    expect(io.from).toHaveBeenCalledExactlyOnceWith("user_roles");
+    expect(io.authUpdate).not.toHaveBeenCalled();
   });
 });

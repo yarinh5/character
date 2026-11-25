@@ -159,6 +159,10 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
 
+    if (data.role && data.user_id === context.userId) {
+      throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
+    }
+
     if (data.email) {
       const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
         email: data.email,
@@ -183,10 +187,6 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     }
 
     if (data.role) {
-      if (data.user_id === context.userId) {
-        throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
-      }
-
       await setSingleRole(data.user_id, data.role);
 
       if (data.role === "operator") {
