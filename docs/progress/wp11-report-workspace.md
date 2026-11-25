@@ -239,3 +239,8 @@ targeted within one business day; this does not create automatic 24/7 technical 
   admins through the existing `new_report` preference and notification channel. The notification
   contains a report ID and generic text, not the client's notes or identity. This is covered by a
   structural regression and a written pgTAP case, but live delivery remains **NOT RUN**.
+
+## 2026-11-25 remaining WP11 report-history gap
+
+- The admin reports workspace makes one unpaged client-report read and one unpaged operator-report RPC read. Its counts and search describe only loaded rows, and there is no continuation control. The audit-log workspace already has cursor pagination, but that does not expose older reports here.
+- A future fix must page both report sources with stable ordering, preserve admin-only reads and status-update invalidation, and distinguish a page failure from an empty history. This is a verified code gap, not evidence of a live row cap or of Product acceptance.
