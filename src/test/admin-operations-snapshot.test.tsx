@@ -176,6 +176,10 @@ describe("admin operations snapshot read states", () => {
       "href",
       "/admin/characters",
     );
+    expect(screen.getByRole("link", { name: "לפרטי חריגים" })).toHaveAttribute(
+      "href",
+      "/admin/exceptions",
+    );
   });
 
   it("shows the independent seven-minute operational metric from the server summary", async () => {

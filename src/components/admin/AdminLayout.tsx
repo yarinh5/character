@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
+  AlertTriangle,
   BarChart3,
   Coins,
   Flag,
@@ -34,6 +35,7 @@ type NavTo =
   | "/admin/credits"
   | "/admin/analytics"
   | "/admin/reports"
+  | "/admin/exceptions"
   | "/admin/support"
   | "/admin/audit-logs"
   | "/admin/settings"
@@ -50,6 +52,7 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/leads", label: "Leads", icon: HeartHandshake },
   { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },
+  { to: "/admin/exceptions", label: "חריגים", icon: AlertTriangle },
   { to: "/admin/support", label: "תמיכה ואירועים", icon: LifeBuoy },
   { to: "/admin/audit-logs", label: "יומן פעולות", icon: ScrollText },
   { to: "/admin/settings", label: "הגדרות", icon: Settings },

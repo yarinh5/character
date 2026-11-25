@@ -302,8 +302,8 @@ function AdminOperationsSnapshotContent({ adminId }: { adminId: string }) {
               title="חריגים פתוחים"
               subtitle="מקורות שרת; ללא אומדן בדפדפן"
               icon={AlertTriangle}
-              to="/admin/reports"
-              linkLabel="לטיפול בחריגים"
+              to="/admin/exceptions"
+              linkLabel="לפרטי חריגים"
             >
               {exceptionsLoading && !exceptions ? (
                 <Skeleton className="col-span-full h-12 w-full" />
@@ -366,7 +366,7 @@ function OperationsGroup({
   title: string;
   subtitle?: string;
   icon: LucideIcon;
-  to: "/admin/operators" | "/admin/reports" | "/admin/characters";
+  to: "/admin/operators" | "/admin/reports" | "/admin/characters" | "/admin/exceptions";
   linkLabel: string;
   children: React.ReactNode;
 }) {

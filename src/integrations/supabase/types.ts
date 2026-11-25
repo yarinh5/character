@@ -3904,6 +3904,22 @@ export type Database = {
           media_cleanup_failure_count: number;
         }[];
       };
+      get_admin_completion_exception_cases: {
+        Args: {
+          _kind?: string | null;
+          _before_occurred_at?: string | null;
+          _before_kind?: string | null;
+          _before_id?: string | null;
+          _page_size?: number;
+        };
+        Returns: {
+          kind: string;
+          id: string;
+          occurred_at: string;
+          code: string | null;
+          subject_id: string;
+        }[];
+      };
       get_admin_operator_client_reports: {
         Args: never;
         Returns: {

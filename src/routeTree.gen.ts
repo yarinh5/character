@@ -46,6 +46,7 @@ import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
 import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
+import { Route as AdminExceptionsRouteImport } from './routes/admin.exceptions'
 import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
 import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
@@ -244,6 +245,11 @@ const AdminInvitesRoute = AdminInvitesRouteImport.update({
   path: '/invites',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminExceptionsRoute = AdminExceptionsRouteImport.update({
+  id: '/exceptions',
+  path: '/exceptions',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminCreditsRoute = AdminCreditsRouteImport.update({
   id: '/credits',
   path: '/credits',
@@ -329,6 +335,7 @@ export interface FileRoutesByFullPath {
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/exceptions': typeof AdminExceptionsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
@@ -376,6 +383,7 @@ export interface FileRoutesByTo {
   '/admin/characters': typeof AdminCharactersRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/exceptions': typeof AdminExceptionsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
@@ -428,6 +436,7 @@ export interface FileRoutesById {
   '/admin/clients': typeof AdminClientsRoute
   '/admin/conversations': typeof AdminConversationsRouteWithChildren
   '/admin/credits': typeof AdminCreditsRoute
+  '/admin/exceptions': typeof AdminExceptionsRoute
   '/admin/invites': typeof AdminInvitesRoute
   '/admin/leads': typeof AdminLeadsRoute
   '/admin/operators': typeof AdminOperatorsRoute
@@ -481,6 +490,7 @@ export interface FileRouteTypes {
     | '/admin/clients'
     | '/admin/conversations'
     | '/admin/credits'
+    | '/admin/exceptions'
     | '/admin/invites'
     | '/admin/leads'
     | '/admin/operators'
@@ -528,6 +538,7 @@ export interface FileRouteTypes {
     | '/admin/characters'
     | '/admin/clients'
     | '/admin/credits'
+    | '/admin/exceptions'
     | '/admin/invites'
     | '/admin/leads'
     | '/admin/operators'
@@ -579,6 +590,7 @@ export interface FileRouteTypes {
     | '/admin/clients'
     | '/admin/conversations'
     | '/admin/credits'
+    | '/admin/exceptions'
     | '/admin/invites'
     | '/admin/leads'
     | '/admin/operators'
@@ -888,6 +900,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminInvitesRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/exceptions': {
+      id: '/admin/exceptions'
+      path: '/exceptions'
+      fullPath: '/admin/exceptions'
+      preLoaderRoute: typeof AdminExceptionsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/credits': {
       id: '/admin/credits'
       path: '/credits'
@@ -995,6 +1014,7 @@ interface AdminRouteChildren {
   AdminClientsRoute: typeof AdminClientsRoute
   AdminConversationsRoute: typeof AdminConversationsRouteWithChildren
   AdminCreditsRoute: typeof AdminCreditsRoute
+  AdminExceptionsRoute: typeof AdminExceptionsRoute
   AdminInvitesRoute: typeof AdminInvitesRoute
   AdminLeadsRoute: typeof AdminLeadsRoute
   AdminOperatorsRoute: typeof AdminOperatorsRoute
@@ -1013,6 +1033,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminClientsRoute: AdminClientsRoute,
   AdminConversationsRoute: AdminConversationsRouteWithChildren,
   AdminCreditsRoute: AdminCreditsRoute,
+  AdminExceptionsRoute: AdminExceptionsRoute,
   AdminInvitesRoute: AdminInvitesRoute,
   AdminLeadsRoute: AdminLeadsRoute,
   AdminOperatorsRoute: AdminOperatorsRoute,

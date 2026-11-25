@@ -91,3 +91,9 @@ Realtime and browser integration remain **NOT VERIFIED**.
   evidence, failed/unallocated Gift rewards, failed media cleanup and blocked/failed deletion
   workflows. Failure of this aggregate does not hide the established snapshot or wait metric, and
   the display does not label Client Credits as monetary revenue.
+
+## 2026-11-25 exception case drilldown
+
+- Cause: the operations snapshot showed eight exception counts, but its action link opened general reports, which contained none of those cases. The counters alone could not identify the affected records.
+- A forward-only, admin-gated RPC now returns bounded case pages for the same eight source conditions as the aggregate. It exposes only kind, case ID, occurrence time, structured code and subject ID; private evidence, free text and customer content remain server-side. The new Admin Exceptions view offers category filtering, stable cursor pagination and links to existing admin conversation views where applicable. It makes no claim that viewing a case resolves it.
+- The snapshot and admin navigation now lead to the new view. Focused UI tests cover identity gating, pagination, filtering, later-page failure and malformed replies; final focused tests passed 4/4 and the earlier full UI run passed 679/679 before the additional malformed-reply test. DB Offline tests passed 103/103, typecheck, scoped lint and client/SSR build passed. The written pgTAP case, migration apply and live authorization/aggregation equivalence remain NOT RUN. Product acceptance remains open.
