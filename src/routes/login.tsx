@@ -62,7 +62,7 @@ function LoginPage() {
         className="flex min-h-screen items-center justify-center bg-gradient-hero px-4 py-12"
       >
         <div className="w-full max-w-md">
-          <Link to="/" className="mb-8 flex items-center justify-center gap-2">
+          <Link to="/" className="mb-8 flex min-h-11 items-center justify-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-primary">
               <MessageCircle className="h-5 w-5 text-primary-foreground" />
             </div>
@@ -82,6 +82,7 @@ function LoginPage() {
                     name="email"
                     type="email"
                     autoComplete="email"
+                    className="min-h-11"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -91,7 +92,10 @@ function LoginPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="password">סיסמה</Label>
-                    <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                    <Link
+                      to="/forgot-password"
+                      className="inline-flex min-h-11 items-center text-sm text-primary hover:underline"
+                    >
                       שכחת סיסמה?
                     </Link>
                   </div>
@@ -100,18 +104,22 @@ function LoginPage() {
                     name="password"
                     type="password"
                     autoComplete="current-password"
+                    className="min-h-11"
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
-                <Button type="submit" className="w-full" disabled={submitting}>
+                <Button type="submit" className="min-h-11 w-full" disabled={submitting}>
                   {submitting ? "מתחבר..." : "התחבר"}
                 </Button>
               </form>
               <p className="mt-6 text-center text-sm text-muted-foreground">
                 אין לך חשבון?{" "}
-                <Link to="/register" className="font-medium text-primary hover:underline">
+                <Link
+                  to="/register"
+                  className="inline-flex min-h-11 items-center font-medium text-primary hover:underline"
+                >
                   הרשמה
                 </Link>
               </p>

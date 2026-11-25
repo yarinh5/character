@@ -11,7 +11,11 @@ const io = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children, to, className }: { children: ReactNode; to: string; className?: string }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
   useNavigate: () => io.navigate,
 }));
 vi.mock("@/lib/auth", () => ({
@@ -62,6 +66,26 @@ describe("public entry-page semantics", () => {
     expect(screen.getByLabelText("אימייל")).toHaveAttribute("autocomplete", "email");
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("name", "password");
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("autocomplete", "current-password");
+  });
+
+  it("preserves mobile-sized entry controls on home and login", () => {
+    render(<LandingPage />);
+    for (const label of ["התחברות", "התחל עכשיו", "התחברות לחשבון קיים", "צור חשבון בחינם"]) {
+      for (const link of screen.getAllByRole("link", { name: label })) {
+        expect(link).toHaveClass("min-h-11");
+      }
+    }
+    for (const label of ["תנאי שימוש", "מדיניות פרטיות", "הצהרת שירות"]) {
+      expect(screen.getByRole("link", { name: label })).toHaveClass("min-h-11");
+    }
+
+    render(<LoginPage />);
+    expect(screen.getByLabelText("אימייל")).toHaveClass("min-h-11");
+    expect(screen.getByLabelText("סיסמה")).toHaveClass("min-h-11");
+    expect(screen.getByRole("button", { name: "התחבר" })).toHaveClass("min-h-11");
+    for (const label of ["שכחת סיסמה?", "הרשמה"]) {
+      expect(screen.getByRole("link", { name: label })).toHaveClass("min-h-11");
+    }
   });
 
   it.each([
