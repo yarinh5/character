@@ -24,7 +24,9 @@ function previewText(value: unknown, max = 90) {
 function metadataValue(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
   const value = (metadata as Record<string, unknown>)[key];
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : null;
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? String(value)
+    : null;
 }
 
 async function ensureAdmin(userId: string) {
@@ -58,7 +60,11 @@ async function getClientContext(userId: string) {
   if (!profile) throw new Error("לקוח לא נמצא");
 
   const roleSet = new Set((roles ?? []).map((row) => row.role as AppRole));
-  if (roleSet.has("admin") || roleSet.has("operator") || (!roleSet.has("client") && !clientProfile)) {
+  if (
+    roleSet.has("admin") ||
+    roleSet.has("operator") ||
+    (!roleSet.has("client") && !clientProfile)
+  ) {
     throw new Error("המשתמש אינו לקוח פעיל לניהול במסך הלקוחות");
   }
 
@@ -104,92 +110,39 @@ export const adminListClients = createServerFn({ method: "GET" })
     z
       .object({
         include_archived: z.boolean().default(false),
+        search: z.string().trim().max(120).default(""),
+        status: z.enum(["all", "active", "inactive"]).default("all"),
+        created_from: z.string().datetime({ offset: true }).nullable().default(null),
+        created_before: z.string().datetime({ offset: true }).nullable().default(null),
+        before_created_at: z.string().datetime({ offset: true }).nullable().default(null),
+        before_user_id: z.string().uuid().nullable().default(null),
+        page_size: z.number().int().min(1).max(101).default(101),
+      })
+      .refine((value) => (value.before_created_at === null) === (value.before_user_id === null), {
+        message: "invalid_client_cursor",
+      })
+      .refine((value) => (value.created_from === null) === (value.created_before === null), {
+        message: "invalid_client_date_range",
       })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
-
-    const [{ data: roles, error: rolesError }, { data: clientProfiles, error: clientsError }] = await Promise.all([
-      supabaseAdmin.from("user_roles").select("user_id, role"),
-      supabaseAdmin.from("client_profiles").select("user_id"),
-    ]);
-    if (rolesError) throw new Error(rolesError.message);
-    if (clientsError) throw new Error(clientsError.message);
-
-    const clientCandidates = new Set<string>();
-    const elevatedUsers = new Set<string>();
-    (roles ?? []).forEach((role) => {
-      if (role.role === "client") clientCandidates.add(role.user_id);
-      if (role.role === "operator" || role.role === "admin") elevatedUsers.add(role.user_id);
+    const { data: rows, error } = await context.supabase.rpc("admin_list_clients_page", {
+      _include_archived: data.include_archived,
+      _search: data.search,
+      _status: data.status,
+      _created_from: data.created_from,
+      _created_before: data.created_before,
+      _before_created_at: data.before_created_at,
+      _before_user_id: data.before_user_id,
+      _page_size: data.page_size,
     });
-    (clientProfiles ?? []).forEach((profile) => clientCandidates.add(profile.user_id));
-
-    const ids = [...clientCandidates].filter((userId) => !elevatedUsers.has(userId));
-    if (!ids.length) return [];
-
-    let profileQuery = supabaseAdmin
-      .from("profiles")
-      .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at, pii_archived_at")
-      .in("user_id", ids)
-      .order("created_at", { ascending: false });
-
-    profileQuery = data.include_archived
-      ? profileQuery.not("deleted_at", "is", null)
-      : profileQuery.is("deleted_at", null);
-
-    const { data: profiles, error } = await profileQuery;
     if (error) throw new Error(error.message);
-
-    const profileIds = (profiles ?? []).map((profile) => profile.user_id);
-    const [{ data: wallets }, { data: conversations }] = await Promise.all([
-      profileIds.length
-        ? supabaseAdmin.from("credit_wallets").select("user_id, balance").in("user_id", profileIds)
-        : Promise.resolve({ data: [] as { user_id: string; balance: number }[] }),
-      profileIds.length
-        ? supabaseAdmin
-            .from("conversations")
-            .select("client_id, status, last_message_at")
-            .in("client_id", profileIds)
-        : Promise.resolve({ data: [] as { client_id: string; status: string; last_message_at: string | null }[] }),
-    ]);
-
-    const walletMap = new Map((wallets ?? []).map((wallet) => [wallet.user_id, wallet.balance]));
-    const statsMap = new Map<string, { conversations: number; active: number; last_message_at: string | null }>();
-    (conversations ?? []).forEach((conversation) => {
-      const current = statsMap.get(conversation.client_id) ?? {
-        conversations: 0,
-        active: 0,
-        last_message_at: null,
-      };
-      current.conversations += 1;
-      if (conversation.status !== "closed") current.active += 1;
-      if (
-        conversation.last_message_at &&
-        (!current.last_message_at || new Date(conversation.last_message_at) > new Date(current.last_message_at))
-      ) {
-        current.last_message_at = conversation.last_message_at;
-      }
-      statsMap.set(conversation.client_id, current);
-    });
-
-    return (profiles ?? []).map((profile) => {
-      const stats = statsMap.get(profile.user_id);
-      return {
-        user_id: profile.user_id,
-        email: profile.email,
-        display_name: profile.display_name,
-        avatar_url: profile.avatar_url,
-        status: profile.deleted_at ? "archived" : profile.status,
-        created_at: profile.created_at,
-        deleted_at: profile.deleted_at,
-        pii_archived_at: profile.pii_archived_at,
-        credits_balance: walletMap.get(profile.user_id) ?? 0,
-        conversations_count: stats?.conversations ?? 0,
-        active_conversations_count: stats?.active ?? 0,
-        last_message_at: stats?.last_message_at ?? null,
-      };
-    });
+    if (!Array.isArray(rows) || rows.length > data.page_size) {
+      throw new Error("invalid_client_directory_page");
+    }
+    return rows;
   });
 
 export const adminGetClientDetails = createServerFn({ method: "GET" })
@@ -199,40 +152,46 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
     await ensureAdmin(context.userId);
     await getClientContext(data.user_id);
 
-    const [profile, clientProfile, wallet, conversations, transactions, messageCounts] = await Promise.all([
-      supabaseAdmin
-        .from("profiles")
-        .select("user_id, email, display_name, avatar_url, status, created_at, deleted_at, pii_archived_at")
-        .eq("user_id", data.user_id)
-        .maybeSingle(),
-      supabaseAdmin
-        .from("client_profiles")
-        .select("age, gender, interests, conversation_preferences, created_at, updated_at")
-        .eq("user_id", data.user_id)
-        .maybeSingle(),
-      supabaseAdmin
-        .from("credit_wallets")
-        .select("balance, lifetime_earned, lifetime_spent, updated_at")
-        .eq("user_id", data.user_id)
-        .maybeSingle(),
-      supabaseAdmin
-        .from("conversations")
-        .select("id, status, last_message_at, last_message_preview, created_at, characters(id, name, avatar_url)")
-        .eq("client_id", data.user_id)
-        .order("last_message_at", { ascending: false, nullsFirst: false })
-        .limit(12),
-      supabaseAdmin
-        .from("credit_transactions")
-        .select("id, amount, balance_after, type, reason, created_at, created_by")
-        .eq("user_id", data.user_id)
-        .order("created_at", { ascending: false })
-        .limit(20),
-      supabaseAdmin
-        .from("messages")
-        .select("sender_type")
-        .eq("sender_id", data.user_id)
-        .limit(1000),
-    ]);
+    const [profile, clientProfile, wallet, conversations, transactions, messageCounts] =
+      await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select(
+            "user_id, email, display_name, avatar_url, status, created_at, deleted_at, pii_archived_at",
+          )
+          .eq("user_id", data.user_id)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("client_profiles")
+          .select("age, gender, interests, conversation_preferences, created_at, updated_at")
+          .eq("user_id", data.user_id)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("credit_wallets")
+          .select("balance, lifetime_earned, lifetime_spent, updated_at")
+          .eq("user_id", data.user_id)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("conversations")
+          .select(
+            "id, status, last_message_at, last_message_preview, created_at, characters(id, name, avatar_url)",
+            { count: "exact" },
+          )
+          .eq("client_id", data.user_id)
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(12),
+        supabaseAdmin
+          .from("credit_transactions")
+          .select("id, amount, balance_after, type, reason, created_at, created_by")
+          .eq("user_id", data.user_id)
+          .order("created_at", { ascending: false })
+          .limit(20),
+        supabaseAdmin
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("sender_id", data.user_id)
+          .eq("sender_type", "client"),
+      ]);
 
     if (profile.error) throw new Error(profile.error.message);
     if (clientProfile.error) throw new Error(clientProfile.error.message);
@@ -240,70 +199,85 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
     if (conversations.error) throw new Error(conversations.error.message);
     if (transactions.error) throw new Error(transactions.error.message);
     if (messageCounts.error) throw new Error(messageCounts.error.message);
+    if (conversations.count === null || messageCounts.count === null) {
+      throw new Error("client_activity_count_unavailable");
+    }
 
     const conversationRows = conversations.data ?? [];
     const conversationIds = conversationRows.map((conversation) => conversation.id);
-    const conversationMap = new Map(conversationRows.map((conversation: any) => [conversation.id, conversation]));
+    const conversationMap = new Map(
+      conversationRows.map((conversation) => [conversation.id, conversation] as const),
+    );
 
-    const [messages, deletedConversations, reports, auditLogs, analyticsEvents] = await Promise.all([
-      conversationIds.length
-        ? supabaseAdmin
-            .from("messages")
-            .select("id, conversation_id, sender_type, content, created_at, operator_id, operators(full_name)")
-            .in("conversation_id", conversationIds)
-            .order("created_at", { ascending: false })
-            .limit(60)
-        : Promise.resolve({ data: [] as any[], error: null }),
-      conversationIds.length
-        ? supabaseAdmin
-            .from("client_conversation_deletions")
-            .select("conversation_id, deleted_at")
-            .eq("client_id", data.user_id)
-            .in("conversation_id", conversationIds)
-            .order("deleted_at", { ascending: false })
-            .limit(20)
-        : Promise.resolve({ data: [] as any[], error: null }),
-      supabaseAdmin
-        .from("reports")
-        .select("id, conversation_id, reason, status, details, created_at")
-        .eq("reporter_id", data.user_id)
-        .order("created_at", { ascending: false })
-        .limit(20),
-      supabaseAdmin
-        .from("audit_logs")
-        .select("id, action, actor_user_id, metadata, created_at")
-        .eq("entity_type", "user")
-        .eq("entity_id", data.user_id)
-        .order("created_at", { ascending: false })
-        .limit(40),
-      (supabaseAdmin as any)
-        .from("analytics_events")
-        .select("id, event_name, metadata, conversation_id, character_id, created_at")
-        .eq("actor_user_id", data.user_id)
-        .in("event_name", [
-          "signup_completed",
-          "onboarding_completed",
-          "character_viewed",
-          "conversation_started",
-          "first_message_sent",
-          "insufficient_credits_shown",
-          "packages_viewed",
-          "low_credits_reached",
-          "report_created",
-        ])
-        .order("created_at", { ascending: false })
-        .limit(40),
-    ]);
+    const [messages, deletedConversations, reports, auditLogs, analyticsEvents] = await Promise.all(
+      [
+        conversationIds.length
+          ? supabaseAdmin
+              .from("messages")
+              .select(
+                "id, conversation_id, sender_type, content, created_at, operator_id, operators(full_name)",
+              )
+              .in("conversation_id", conversationIds)
+              .order("created_at", { ascending: false })
+              .limit(60)
+          : Promise.resolve({ data: [], error: null }),
+        conversationIds.length
+          ? supabaseAdmin
+              .from("client_conversation_deletions")
+              .select("conversation_id, deleted_at")
+              .eq("client_id", data.user_id)
+              .in("conversation_id", conversationIds)
+              .order("deleted_at", { ascending: false })
+              .limit(20)
+          : Promise.resolve({ data: [], error: null }),
+        supabaseAdmin
+          .from("reports")
+          .select("id, conversation_id, reason, status, details, created_at")
+          .eq("reporter_id", data.user_id)
+          .order("created_at", { ascending: false })
+          .limit(20),
+        supabaseAdmin
+          .from("audit_logs")
+          .select("id, action, actor_user_id, metadata, created_at")
+          .eq("entity_type", "user")
+          .eq("entity_id", data.user_id)
+          .order("created_at", { ascending: false })
+          .limit(40),
+        supabaseAdmin
+          .from("analytics_events")
+          .select("id, event_name, metadata, conversation_id, character_id, created_at")
+          .eq("actor_user_id", data.user_id)
+          .in("event_name", [
+            "signup_completed",
+            "onboarding_completed",
+            "character_viewed",
+            "conversation_started",
+            "first_message_sent",
+            "insufficient_credits_shown",
+            "packages_viewed",
+            "low_credits_reached",
+            "report_created",
+          ])
+          .order("created_at", { ascending: false })
+          .limit(40),
+      ],
+    );
 
     const actorIds = [
       ...(transactions.data ?? []).map((transaction) => transaction.created_by).filter(Boolean),
       ...(auditLogs.data ?? []).map((log) => log.actor_user_id).filter(Boolean),
     ] as string[];
     const { data: actorProfiles } = actorIds.length
-      ? await supabaseAdmin.from("profiles").select("user_id, display_name, email").in("user_id", [...new Set(actorIds)])
+      ? await supabaseAdmin
+          .from("profiles")
+          .select("user_id, display_name, email")
+          .in("user_id", [...new Set(actorIds)])
       : { data: [] as { user_id: string; display_name: string | null; email: string | null }[] };
     const actorMap = new Map(
-      (actorProfiles ?? []).map((actor) => [actor.user_id, actor.display_name || actor.email || actor.user_id.slice(0, 8)]),
+      (actorProfiles ?? []).map((actor) => [
+        actor.user_id,
+        actor.display_name || actor.email || actor.user_id.slice(0, 8),
+      ]),
     );
 
     const timeline: ClientTimelineEvent[] = [];
@@ -318,7 +292,7 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
       });
     }
 
-    conversationRows.forEach((conversation: any) => {
+    conversationRows.forEach((conversation) => {
       timeline.push({
         id: `conversation-${conversation.id}`,
         type: "chat",
@@ -329,9 +303,11 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
       });
     });
 
-    (messages.data ?? []).forEach((message: any) => {
-      const conversation = conversationMap.get(message.conversation_id) as any;
-      const characterName = conversation?.characters?.name ? ` · ${conversation.characters.name}` : "";
+    (messages.data ?? []).forEach((message) => {
+      const conversation = conversationMap.get(message.conversation_id);
+      const characterName = conversation?.characters?.name
+        ? ` · ${conversation.characters.name}`
+        : "";
       const content = previewText(message.content);
       timeline.push({
         id: `message-${message.id}`,
@@ -340,19 +316,23 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
         description:
           message.sender_type === "client"
             ? [content, characterName.trim()].filter(Boolean).join(" · ") || null
-            : [`${message.operators?.full_name ?? "עובד"}`, content, characterName.trim()].filter(Boolean).join(" · "),
+            : [`${message.operators?.full_name ?? "עובד"}`, content, characterName.trim()]
+                .filter(Boolean)
+                .join(" · "),
         created_at: message.created_at,
         conversation_id: message.conversation_id,
       });
     });
 
-    (deletedConversations.data ?? []).forEach((deletion: any) => {
-      const conversation = conversationMap.get(deletion.conversation_id) as any;
+    (deletedConversations.data ?? []).forEach((deletion) => {
+      const conversation = conversationMap.get(deletion.conversation_id);
       timeline.push({
         id: `client-delete-${deletion.conversation_id}-${deletion.deleted_at}`,
         type: "chat",
         title: "שיחה הוסתרה מצד הלקוח",
-        description: conversation?.characters?.name ? `דמות: ${conversation.characters.name}` : null,
+        description: conversation?.characters?.name
+          ? `דמות: ${conversation.characters.name}`
+          : null,
         created_at: deletion.deleted_at,
         conversation_id: deletion.conversation_id,
       });
@@ -396,17 +376,26 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
         id: `audit-${log.id}`,
         type: "admin",
         title: labels[log.action] ?? log.action,
-        description: [status ? `ערך: ${status}` : null, actor ? `בוצע על ידי: ${actor}` : null].filter(Boolean).join(" · ") || null,
+        description:
+          [status ? `ערך: ${status}` : null, actor ? `בוצע על ידי: ${actor}` : null]
+            .filter(Boolean)
+            .join(" · ") || null,
         created_at: log.created_at,
       });
     });
 
-    (reports.data ?? []).forEach((report: any) => {
+    (reports.data ?? []).forEach((report) => {
       timeline.push({
         id: `report-${report.id}`,
         type: "report",
         title: "דיווח נוצר",
-        description: [`סיבה: ${report.reason}`, `סטטוס: ${report.status}`, previewText(report.details)].filter(Boolean).join(" · "),
+        description: [
+          `סיבה: ${report.reason}`,
+          `סטטוס: ${report.status}`,
+          previewText(report.details),
+        ]
+          .filter(Boolean)
+          .join(" · "),
         created_at: report.created_at,
         conversation_id: report.conversation_id,
       });
@@ -423,7 +412,7 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
       low_credits_reached: "יתרת קרדיטים נמוכה",
       report_created: "דיווח נוצר",
     };
-    ((analyticsEvents as any).data ?? []).forEach((event: any) => {
+    (analyticsEvents.data ?? []).forEach((event) => {
       timeline.push({
         id: `analytics-${event.id}`,
         type: "analytics",
@@ -437,7 +426,7 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
     return {
       profile: profile.data,
       client_profile: clientProfile.data,
-      wallet: wallet.data ?? { balance: 0, lifetime_earned: 0, lifetime_spent: 0, updated_at: null },
+      wallet: wallet.data,
       conversations: conversations.data ?? [],
       transactions: transactions.data ?? [],
       timeline: timeline
@@ -445,8 +434,8 @@ export const adminGetClientDetails = createServerFn({ method: "GET" })
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(0, 80),
       activity: {
-        conversations_count: conversations.count ?? (conversations.data ?? []).length,
-        client_messages_count: (messageCounts.data ?? []).filter((message) => message.sender_type === "client").length,
+        conversations_count: conversations.count,
+        client_messages_count: messageCounts.count,
       },
     };
   });
@@ -475,7 +464,10 @@ export const adminUpdateClient = createServerFn({ method: "POST" })
     if (data.display_name !== undefined) profileUpdate.display_name = data.display_name;
     if (data.status !== undefined) profileUpdate.status = data.status;
     if (Object.keys(profileUpdate).length) {
-      const { error } = await supabaseAdmin.from("profiles").update(profileUpdate).eq("user_id", data.user_id);
+      const { error } = await supabaseAdmin
+        .from("profiles")
+        .update(profileUpdate)
+        .eq("user_id", data.user_id);
       if (error) throw new Error(error.message);
     }
 
@@ -513,16 +505,17 @@ export const adminUpdateClient = createServerFn({ method: "POST" })
 
 export const adminSetClientStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) =>
-    z.object({ user_id: z.string().uuid(), is_active: z.boolean() }).parse(d),
-  )
+  .inputValidator((d) => z.object({ user_id: z.string().uuid(), is_active: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
     const { profile } = await getClientContext(data.user_id);
     if (profile.deleted_at) throw new Error("לקוח מאורכב לא ניתן להפעלה מהירה");
 
     const status = data.is_active ? "active" : "blocked";
-    const { error } = await supabaseAdmin.from("profiles").update({ status }).eq("user_id", data.user_id);
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ status })
+      .eq("user_id", data.user_id);
     if (error) throw new Error(error.message);
     await setAuthBan(data.user_id, !data.is_active);
     await logAudit(context.userId, "client.status_changed", "user", data.user_id, { status });
@@ -581,7 +574,8 @@ export const adminArchiveClientPii = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
-    if (data.user_id === context.userId) throw new Error("לא ניתן לבצע אנונימיזציית PII לחשבון שלך");
+    if (data.user_id === context.userId)
+      throw new Error("לא ניתן לבצע אנונימיזציית PII לחשבון שלך");
     await getClientContext(data.user_id);
 
     const { data: result, error } = await context.supabase.rpc("archive_client_pii", {
@@ -606,7 +600,10 @@ export const adminAdjustClientCredits = createServerFn({ method: "POST" })
     z
       .object({
         user_id: z.string().uuid(),
-        amount: z.number().int().refine((value) => value !== 0, "amount_must_be_non_zero"),
+        amount: z
+          .number()
+          .int()
+          .refine((value) => value !== 0, "amount_must_be_non_zero"),
         reason: z.string().trim().min(3).max(300),
       })
       .parse(d),

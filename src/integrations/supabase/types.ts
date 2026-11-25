@@ -3409,6 +3409,32 @@ export type Database = {
         Args: { _amount: number; _reason: string; _user_id: string };
         Returns: Json;
       };
+      admin_list_clients_page: {
+        Args: {
+          _include_archived: boolean;
+          _search: string;
+          _status: string;
+          _created_from: string | null;
+          _created_before: string | null;
+          _before_created_at: string | null;
+          _before_user_id: string | null;
+          _page_size: number;
+        };
+        Returns: {
+          user_id: string;
+          email: string | null;
+          display_name: string | null;
+          avatar_url: string | null;
+          status: string;
+          created_at: string;
+          deleted_at: string | null;
+          pii_archived_at: string | null;
+          credits_balance: number | null;
+          conversations_count: number;
+          active_conversations_count: number;
+          last_message_at: string | null;
+        }[];
+      };
       admin_adjust_operator_points: {
         Args: { _amount: number; _operator_id: string; _reason: string };
         Returns: Json;

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -78,7 +78,7 @@ type ClientRow = {
   pii_archived_at: string | null;
   created_at: string;
   deleted_at: string | null;
-  credits_balance: number;
+  credits_balance: number | null;
   conversations_count: number;
   active_conversations_count: number;
   last_message_at: string | null;
@@ -97,7 +97,7 @@ type ClientDetails = {
     lifetime_earned: number;
     lifetime_spent: number;
     updated_at: string | null;
-  };
+  } | null;
   conversations: Array<{
     id: string;
     status: string;
@@ -156,6 +156,7 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
   const navigate = useNavigate();
   const listClients = useServerFn(adminListClients);
   const [search, setSearch] = useState("");
+  const [committedSearch, setCommittedSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "inactive" | "today">("all");
   const [showArchived, setShowArchived] = useState(false);
   const [selected, setSelected] = useState<ClientRow | null>(null);
@@ -167,11 +168,42 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
   const [resetClient, setResetClient] = useState<ClientRow | null>(null);
   const [promoteClient, setPromoteClient] = useState<ClientRow | null>(null);
 
-  const listQuery = useQuery({
-    queryKey: ["admin-clients", adminId, showArchived],
-    queryFn: async () =>
-      (await listClients({ data: { include_archived: showArchived } })) as ClientRow[],
+  useEffect(() => {
+    const timeout = setTimeout(() => setCommittedSearch(search.trim()), 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  const todayWindow = useMemo(() => {
+    if (filter !== "today") return null;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { from: start.toISOString(), before: end.toISOString() };
+  }, [filter]);
+  const listQuery = useInfiniteQuery({
+    queryKey: ["admin-clients", adminId, showArchived, committedSearch, filter, todayWindow],
+    initialPageParam: null as { created_at: string; user_id: string } | null,
+    queryFn: ({ pageParam }) =>
+      listClients({
+        data: {
+          include_archived: showArchived,
+          search: committedSearch,
+          status: filter === "today" ? "all" : filter,
+          created_from: todayWindow?.from ?? null,
+          created_before: todayWindow?.before ?? null,
+          before_created_at: pageParam?.created_at ?? null,
+          before_user_id: pageParam?.user_id ?? null,
+          page_size: 101,
+        },
+      }),
+    getNextPageParam: (page) =>
+      page.length > 100
+        ? { created_at: page[99].created_at, user_id: page[99].user_id }
+        : undefined,
   });
+  const rows = listQuery.data?.pages.flatMap((page) => page.slice(0, 100)) ?? [];
+  const searchPending = search.trim() !== committedSearch;
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["admin-clients"] });
@@ -179,33 +211,15 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
     qc.invalidateQueries({ queryKey: ["admin-client-credit-rows"] });
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (listQuery.data ?? []).filter((client) => {
-      if (
-        q &&
-        !(client.email?.toLowerCase().includes(q) || client.display_name?.toLowerCase().includes(q))
-      ) {
-        return false;
-      }
-      if (filter === "active" && client.status !== "active") return false;
-      if (filter === "inactive" && client.status !== "blocked") return false;
-      if (filter === "today") {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        if (new Date(client.created_at) < today) return false;
-      }
-      return true;
-    });
-  }, [filter, listQuery.data, search]);
-  const filtersActive = Boolean(search.trim() || filter !== "all");
+  const filtersActive = Boolean(committedSearch || filter !== "all");
   const resetFilters = () => {
     setSearch("");
     setFilter("all");
   };
-  const initialLoading = listQuery.isLoading && listQuery.data === undefined;
+  const initialLoading = listQuery.isPending && listQuery.data === undefined;
   const initialError = listQuery.isError && listQuery.data === undefined;
-  const refreshError = listQuery.isError && listQuery.data !== undefined;
+  const refreshError =
+    listQuery.isError && listQuery.data !== undefined && !listQuery.isFetchNextPageError;
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8" dir="rtl">
@@ -218,6 +232,7 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
             <Input
               type="search"
               aria-label="חיפוש לפי שם או אימייל"
+              maxLength={120}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="חיפוש לפי שם או אימייל"
@@ -280,27 +295,37 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
               </Button>
             </div>
           )}
-          {!initialLoading && !initialError && (listQuery.data?.length ?? 0) === 0 && (
-            <p className="text-center text-muted-foreground py-12">אין לקוחות עדיין</p>
+          {listQuery.isFetchNextPageError && (
+            <p className="m-4 text-sm text-destructive" role="alert">
+              טעינת לקוחות נוספים נכשלה. הרשימה שכבר נטענה נשמרה.
+            </p>
           )}
-          {!initialLoading &&
+          {searchPending && (
+            <p className="p-4 text-sm" role="status">
+              מעדכן חיפוש...
+            </p>
+          )}
+          {!searchPending &&
+            !initialLoading &&
             !initialError &&
-            (listQuery.data?.length ?? 0) > 0 &&
-            filtered.length === 0 && (
+            rows.length === 0 &&
+            (filtersActive ? (
               <div className="py-12 text-center">
                 <p className="text-muted-foreground">לא נמצאו לקוחות התואמים למסננים</p>
                 <Button variant="outline" className="mt-3" onClick={resetFilters}>
                   איפוס מסננים
                 </Button>
               </div>
-            )}
-          {!initialLoading && !initialError && filtered.length > 0 && (
+            ) : (
+              <p className="text-center text-muted-foreground py-12">אין לקוחות עדיין</p>
+            ))}
+          {!searchPending && !initialLoading && !initialError && rows.length > 0 && (
             <div>
               <p className="px-4 py-2 text-xs text-muted-foreground">
-                {filtered.length} מתוך {listQuery.data?.length ?? 0} לקוחות ברשימה שנטענה
+                {rows.length} לקוחות שנטענו{listQuery.hasNextPage ? "; קיימים לקוחות נוספים" : ""}
               </p>
               <div className="divide-y">
-                {filtered.map((client) => (
+                {rows.map((client) => (
                   <article
                     key={client.user_id}
                     aria-label={client.display_name ?? client.email ?? "לקוח"}
@@ -330,7 +355,11 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
                       )}
                     </div>
                     <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted-foreground min-w-[420px]">
-                      <span>{client.credits_balance.toLocaleString("he-IL")} קרדיטים</span>
+                      <span>
+                        {client.credits_balance === null
+                          ? "יתרה לא זמינה"
+                          : `${client.credits_balance.toLocaleString("he-IL")} קרדיטים`}
+                      </span>
                       <span>{client.conversations_count} שיחות</span>
                       <span>{client.active_conversations_count} פעילות</span>
                       <span>
@@ -362,7 +391,7 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
                         variant="ghost"
                         onClick={() => setCreditsClient(client)}
                         title="ניהול קרדיטים"
-                        disabled={Boolean(client.deleted_at)}
+                        disabled={Boolean(client.deleted_at) || client.credits_balance === null}
                       >
                         <Coins className="h-4 w-4" />
                       </Button>
@@ -398,6 +427,17 @@ function ClientWorkspace({ adminId }: { adminId: string }) {
                   </article>
                 ))}
               </div>
+            </div>
+          )}
+          {!searchPending && listQuery.hasNextPage && (
+            <div className="p-4 text-center">
+              <Button
+                variant="outline"
+                disabled={listQuery.isFetchingNextPage}
+                onClick={() => void listQuery.fetchNextPage()}
+              >
+                {listQuery.isFetchingNextPage ? "טוען לקוחות..." : "טען לקוחות נוספים"}
+              </Button>
             </div>
           )}
         </CardContent>
@@ -651,7 +691,9 @@ function ClientDetailsDialog({
                   <Button
                     variant="outline"
                     onClick={() => onCredits(detailClient)}
-                    disabled={isArchived}
+                    disabled={
+                      isArchived || data.wallet === null || detailClient.credits_balance === null
+                    }
                   >
                     <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
                   </Button>
@@ -701,7 +743,10 @@ function ClientDetailsDialog({
                     />
                   }
                 />
-                <Info label="יתרת קרדיטים" value={data.wallet.balance.toLocaleString("he-IL")} />
+                <Info
+                  label="יתרת קרדיטים"
+                  value={data.wallet ? data.wallet.balance.toLocaleString("he-IL") : "לא זמינה"}
+                />
                 <Info
                   label="תאריך הרשמה"
                   value={
@@ -1173,7 +1218,10 @@ function CreditsDialog({
         <DialogHeader>
           <DialogTitle>ניהול קרדיטים</DialogTitle>
           <DialogDescription>
-            יתרה נוכחית: {client.credits_balance.toLocaleString("he-IL")} קרדיטים
+            יתרה נוכחית:{" "}
+            {client.credits_balance === null
+              ? "לא זמינה"
+              : `${client.credits_balance.toLocaleString("he-IL")} קרדיטים`}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -1201,7 +1249,12 @@ function CreditsDialog({
           </div>
           <div>
             <Label htmlFor="client-credit-reason">Reason</Label>
-            <Textarea id="client-credit-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
+            <Textarea
+              id="client-credit-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              rows={3}
+            />
           </div>
         </div>
         <DialogFooter>

@@ -36,4 +36,5 @@ jobs:
         run: npm run lint:changed
       - run: npm run typecheck
       - run: npm test
+      - run: node --test supabase/tests/database/v4_3/*.offline.test.mjs
       - run: npm run build
