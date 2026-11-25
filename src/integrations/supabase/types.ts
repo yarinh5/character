@@ -2262,31 +2262,55 @@ export type Database = {
           client_id: string;
           conversation_id: string | null;
           created_at: string;
+          global_action_note: string | null;
           id: string;
           notes: string | null;
           operator_id: string;
           reason: string;
+          resolution_note: string | null;
+          resolved_at: string | null;
+          resolved_by: string | null;
           source: string;
+          status: string;
+          updated_at: string;
+          updated_by: string | null;
+          version: number;
         };
         Insert: {
           client_id: string;
           conversation_id?: string | null;
           created_at?: string;
+          global_action_note?: string | null;
           id?: string;
           notes?: string | null;
           operator_id: string;
           reason: string;
+          resolution_note?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
           source?: string;
+          status?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version?: number;
         };
         Update: {
           client_id?: string;
           conversation_id?: string | null;
           created_at?: string;
+          global_action_note?: string | null;
           id?: string;
           notes?: string | null;
           operator_id?: string;
           reason?: string;
+          resolution_note?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
           source?: string;
+          status?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version?: number;
         };
         Relationships: [
           {
@@ -3271,6 +3295,7 @@ export type Database = {
           id: string;
           status: string;
           updated_at: string;
+          updated_by: string | null;
           version: number;
         }[];
       };
@@ -3407,6 +3432,16 @@ export type Database = {
         Args: {
           _report_id: string;
           _status: Database["public"]["Enums"]["report_status"];
+        };
+        Returns: Json;
+      };
+      admin_update_operator_client_report: {
+        Args: {
+          _report_id: string;
+          _expected_version: number;
+          _status: string;
+          _resolution_note: string;
+          _global_action_note?: string | null;
         };
         Returns: Json;
       };
@@ -3872,16 +3907,23 @@ export type Database = {
       get_admin_operator_client_reports: {
         Args: never;
         Returns: {
-          client_display_name: string;
+          client_display_name: string | null;
           client_id: string;
-          conversation_id: string;
+          conversation_id: string | null;
           created_at: string;
+          global_action_note: string | null;
           id: string;
-          notes: string;
+          notes: string | null;
           operator_id: string;
           operator_name: string;
           reason: string;
+          resolution_note: string | null;
+          resolved_at: string | null;
+          resolved_by: string | null;
           source: string;
+          status: string;
+          updated_at: string;
+          version: number;
         }[];
       };
       get_admin_operator_presence_overview: {

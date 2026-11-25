@@ -9,6 +9,7 @@ import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -47,6 +48,15 @@ async function readReports() {
   return data ?? [];
 }
 type Report = Awaited<ReturnType<typeof readReports>>[number];
+type WorkerReport =
+  Database["public"]["Functions"]["get_admin_operator_client_reports"]["Returns"][number];
+type WorkerStatus = "open" | "in_progress" | "decided" | "closed";
+const workerStatuses: Record<WorkerStatus, string> = {
+  open: "פתוח",
+  in_progress: "בטיפול",
+  decided: "הוכרע",
+  closed: "נסגר",
+};
 
 function ReportsPage() {
   const { session, user, role, loading } = useAuth();
@@ -81,6 +91,31 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
   const locks = useRef(new Set<string>());
   const [, redraw] = useState(0);
   const [actionError, setActionError] = useState("");
+  const [workerSelection, setWorkerSelection] = useState<{
+    report: WorkerReport;
+    instance: number;
+  } | null>(null);
+  const currentWorker = useRef<typeof workerSelection>(null);
+  const workerTrigger = useRef<HTMLButtonElement | null>(null);
+  const workerSerial = useRef(0);
+  const workerLocks = useRef(new Set<string>());
+  const [workerDraftStatus, setWorkerDraftStatus] = useState<WorkerStatus>("open");
+  const [resolutionNote, setResolutionNote] = useState("");
+  const [globalActionNote, setGlobalActionNote] = useState("");
+  const [workerActionError, setWorkerActionError] = useState("");
+  const [workerActionSuccess, setWorkerActionSuccess] = useState("");
+  const chooseWorker = (report: WorkerReport | null) => {
+    const next = report ? { report, instance: ++workerSerial.current } : null;
+    currentWorker.current = next;
+    setWorkerSelection(next);
+    setWorkerDraftStatus(
+      report && report.status in workerStatuses ? (report.status as WorkerStatus) : "open",
+    );
+    setResolutionNote(report?.resolution_note ?? "");
+    setGlobalActionNote(report?.global_action_note ?? "");
+    setWorkerActionError("");
+    setWorkerActionSuccess("");
+  };
   const choose = (report: Report | null) => {
     const next = report ? { report, instance: ++serial.current } : null;
     selection.current = next;
@@ -212,6 +247,73 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     (locks.current.has(selected.report.id) ||
       locks.current.has("client:" + selected.report.reporter_id)),
   );
+  const workerBusy = Boolean(workerSelection && workerLocks.current.has(workerSelection.report.id));
+  const saveWorker = async () => {
+    const current = currentWorker.current;
+    if (!alive.current || !current || workerLocks.current.has(current.report.id)) return;
+    const { report, instance } = current;
+    const status = workerDraftStatus;
+    const note = resolutionNote.trim();
+    const globalAction = globalActionNote.trim() || null;
+    if ((status === "decided" || status === "closed") && !note) {
+      setWorkerActionError("יש להזין נימוק לפני הכרעה או סגירה.");
+      return;
+    }
+    workerLocks.current.add(report.id);
+    redraw((n) => n + 1);
+    setWorkerActionError("");
+    setWorkerActionSuccess("");
+    const sameDialog = () => alive.current && currentWorker.current?.instance === instance;
+    try {
+      const { data, error } = await supabase.rpc("admin_update_operator_client_report", {
+        _report_id: report.id,
+        _expected_version: report.version,
+        _status: status,
+        _resolution_note: note,
+        _global_action_note: globalAction,
+      });
+      if (
+        error ||
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        data.report_id !== report.id ||
+        data.status !== status ||
+        data.version !== report.version + 1
+      )
+        throw new Error("unverified");
+      if (!alive.current) return;
+      const updated = {
+        ...report,
+        status,
+        resolution_note: note || null,
+        global_action_note: globalAction,
+        version: report.version + 1,
+      };
+      qc.setQueryData<WorkerReport[]>(["admin-operator-client-reports", adminId], (previous) =>
+        previous?.map((item) => (item.id === report.id ? updated : item)),
+      );
+      void qc.invalidateQueries({ queryKey: ["admin-operator-client-reports", adminId] });
+      void qc.invalidateQueries({ queryKey: ["admin-operations-snapshot"] });
+      void qc.invalidateQueries({ queryKey: ["audit-logs", adminId] });
+      if (sameDialog()) {
+        const next = { report: updated, instance };
+        currentWorker.current = next;
+        setWorkerSelection(next);
+        setWorkerActionSuccess("הטיפול בדיווח נשמר");
+        toast.success("הטיפול בדיווח נשמר");
+      }
+    } catch {
+      if (sameDialog()) {
+        const message = "לא ניתן לאמת את עדכון הדיווח. רעננו ובדקו את מצבו לפני ניסיון נוסף.";
+        setWorkerActionError(message);
+        toast.error(message);
+      }
+    } finally {
+      workerLocks.current.delete(report.id);
+      if (alive.current) redraw((n) => n + 1);
+    }
+  };
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-4" dir="rtl">
       <PageHeader title="דיווחים" description="טיפול בדיווחים מלקוחות" />
@@ -350,13 +452,29 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                   <div className="divide-y">
                     {filteredWorkers.map((r) => (
                       <article key={r.id} className="py-4 text-sm space-y-2 break-words">
-                        <h3 className="font-medium">{r.reason}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium">{r.reason}</h3>
+                          <span className="text-xs text-muted-foreground">
+                            {workerStatuses[r.status as WorkerStatus] ?? r.status}
+                          </span>
+                        </div>
                         <p>
                           עובד: {r.operator_name} · לקוח: {r.client_display_name ?? r.client_id}
                         </p>
                         <p className="text-xs">{new Date(r.created_at).toLocaleString("he-IL")}</p>
                         {r.notes && <p className="whitespace-pre-wrap">{r.notes}</p>}
                         <ConversationLink id={r.conversation_id} />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={"טיפול ב" + r.reason}
+                          onClick={(event) => {
+                            workerTrigger.current = event.currentTarget;
+                            chooseWorker(r);
+                          }}
+                        >
+                          טיפול
+                        </Button>
                       </article>
                     ))}
                   </div>
@@ -366,6 +484,74 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
           </CardContent>
         </Card>
       </section>
+      {workerSelection && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !workerBusy) chooseWorker(null);
+          }}
+        >
+          <DialogContent
+            dir="rtl"
+            className="max-w-lg max-h-[85vh] overflow-y-auto"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (alive.current) workerTrigger.current?.focus();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>טיפול בדיווח עובד</DialogTitle>
+              <DialogDescription>עדכון מצב הדיווח ותיעוד ההחלטה.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p>סיבה: {workerSelection.report.reason}</p>
+              <p>עובד: {workerSelection.report.operator_name}</p>
+              <Select
+                dir="rtl"
+                disabled={workerBusy}
+                value={workerDraftStatus}
+                onValueChange={(value) => {
+                  if (value in workerStatuses) setWorkerDraftStatus(value as WorkerStatus);
+                }}
+              >
+                <SelectTrigger aria-label="סטטוס דיווח עובד">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(workerStatuses).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Textarea
+                aria-label="נימוק החלטה"
+                placeholder="נימוק החלטה"
+                maxLength={2000}
+                disabled={workerBusy}
+                value={resolutionNote}
+                onChange={(event) => setResolutionNote(event.target.value)}
+              />
+              <Textarea
+                aria-label="פעולה גלובלית שבוצעה"
+                placeholder="פעולה גלובלית שבוצעה, אם הייתה"
+                maxLength={2000}
+                disabled={workerBusy}
+                value={globalActionNote}
+                onChange={(event) => setGlobalActionNote(event.target.value)}
+              />
+              {workerActionError && <p role="alert">{workerActionError}</p>}
+              {workerActionSuccess && <p role="status">{workerActionSuccess}</p>}
+            </div>
+            <DialogFooter>
+              <Button disabled={workerBusy} onClick={() => void saveWorker()}>
+                שמירת טיפול
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {selected && (
         <Dialog
           open

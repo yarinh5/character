@@ -223,3 +223,15 @@ targeted within one business day; this does not create automatic 24/7 technical 
   format, lint with the same seven non-failing warnings, typecheck, full Vitest **456 passed / 27
   skipped**, and client/SSR build. Focused profile/onboarding regressions pass 46/46. Live and
   business-decision boundaries above are unchanged.
+
+## 2026-11-25 local continuation: operator report moderation
+
+- Cause: operator-submitted client reports had no moderation lifecycle; the Admin screen only listed
+  them, and the operations snapshot counted every persisted row as open.
+- A forward WP11 migration adds open/in-progress/decided/closed state, bounded decision and optional
+  global-action notes, an admin-only versioned update RPC with audit, and an unresolved-only snapshot
+  count. The Admin screen now supports the transition and checks the returned report ID, status and
+  next version before claiming success. A global-action note documents an action; it does not execute
+  one. Existing customer-report behavior is unchanged.
+- Focused UI and SQL-contract tests were added. PostgreSQL/pgTAP live and Product acceptance remain
+  **NOT RUN** for this revision; offline checks alone do not close WP11 or Product.

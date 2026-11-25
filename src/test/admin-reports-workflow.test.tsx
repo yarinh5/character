@@ -23,6 +23,16 @@ const io = vi.hoisted(() => ({
   profiles: vi.fn<() => Promise<Reply>>(),
   workers: vi.fn<() => Promise<Reply>>(),
   update: vi.fn<(args: { _report_id: string; _status: string }) => Promise<Reply>>(),
+  workerUpdate:
+    vi.fn<
+      (args: {
+        _report_id: string;
+        _expected_version: number;
+        _status: string;
+        _resolution_note: string;
+        _global_action_note: string | null;
+      }) => Promise<Reply>
+    >(),
   block: vi.fn(),
   audit: vi.fn(),
   success: vi.fn(),
@@ -65,6 +75,8 @@ vi.mock("@/integrations/supabase/client", () => ({
     rpc: (name: string, args: { _report_id: string; _status: string }) => {
       if (name === "get_admin_operator_client_reports") return io.workers();
       if (name === "admin_update_report_status") return io.update(args);
+      if (name === "admin_update_operator_client_report")
+        return io.workerUpdate(args as Parameters<typeof io.workerUpdate>[0]);
       throw new Error("unexpected RPC");
     },
   },
@@ -93,6 +105,13 @@ const worker = {
   source: "chat",
   conversation_id: null,
   created_at: a.created_at,
+  status: "open",
+  resolution_note: null,
+  global_action_note: null,
+  version: 1,
+  updated_at: a.created_at,
+  resolved_at: null,
+  resolved_by: null,
 };
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -170,6 +189,10 @@ beforeEach(() => {
   io.workers.mockReset().mockResolvedValue({ data: [worker], error: null });
   io.update.mockReset().mockImplementation(async (args) => ({
     data: { report_id: args._report_id, status: args._status },
+    error: null,
+  }));
+  io.workerUpdate.mockReset().mockImplementation(async (args) => ({
+    data: { report_id: args._report_id, status: args._status, version: args._expected_version + 1 },
     error: null,
   }));
   io.block.mockReset().mockResolvedValue({ ok: true });
@@ -509,17 +532,70 @@ describe("reports workspace", () => {
     expect(screen.getByRole("textbox", { name: "חיפוש בדיווחי לקוחות" })).toHaveValue("");
   });
 
-  it("keeps worker reports read-only, searches notes, resets filters and omits absent links", async () => {
+  it("lets an admin record a decision and global action on an operator report", async () => {
     mount();
     await screen.findByText(worker.reason);
     const region = screen.getByRole("region", { name: "דיווחי עובדים" });
-    expect(within(region).queryByText("חסום מדווח")).not.toBeInTheDocument();
     expect(within(region).queryByRole("link")).not.toBeInTheDocument();
+    fireEvent.click(within(region).getByRole("button", { name: "טיפול בדיווח עובד" }));
+    await select("סטטוס דיווח עובד", "הוכרע");
+    fireEvent.change(screen.getByRole("textbox", { name: "נימוק החלטה" }), {
+      target: { value: "נבדק מול השיחה" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "פעולה גלובלית שבוצעה" }), {
+      target: { value: "חסימה מנהלית" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "שמירת טיפול" }));
+    await waitFor(() =>
+      expect(io.workerUpdate).toHaveBeenCalledWith({
+        _report_id: worker.id,
+        _expected_version: 1,
+        _status: "decided",
+        _resolution_note: "נבדק מול השיחה",
+        _global_action_note: "חסימה מנהלית",
+      }),
+    );
+    expect(await screen.findByText("הטיפול בדיווח נשמר")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "שמירת טיפול" })).toBeEnabled());
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.change(within(region).getByRole("textbox"), { target: { value: "לא נמצא" } });
     expect(within(region).getByText("אין תוצאות במסנני העובדים")).toBeInTheDocument();
     fireEvent.click(within(region).getByRole("button", { name: "איפוס מסנני עובדים" }));
     expect(within(region).getByText(worker.notes)).toBeInTheDocument();
-    expect(io.update).not.toHaveBeenCalled();
-    expect(io.block).not.toHaveBeenCalled();
+  });
+
+  it("does not claim an operator-report update succeeded without a matching server receipt", async () => {
+    io.workerUpdate.mockResolvedValueOnce({
+      data: { report_id: worker.id, status: "closed", version: 1 },
+      error: null,
+    });
+    mount();
+    await screen.findByText(worker.reason);
+    fireEvent.click(screen.getByRole("button", { name: "טיפול בדיווח עובד" }));
+    fireEvent.click(screen.getByRole("button", { name: "שמירת טיפול" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("לא ניתן לאמת");
+    expect(io.success).not.toHaveBeenCalled();
+    expect(io.workerUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses late operator-report results after admin logout", async () => {
+    const pending = deferred<Reply>();
+    io.workerUpdate.mockReturnValueOnce(pending.promise);
+    const view = mount();
+    await screen.findByText(worker.reason);
+    fireEvent.click(screen.getByRole("button", { name: "טיפול בדיווח עובד" }));
+    fireEvent.click(screen.getByRole("button", { name: "שמירת טיפול" }));
+    expect(screen.getByRole("button", { name: "שמירת טיפול" })).toBeDisabled();
+    expect(io.workerUpdate).toHaveBeenCalledTimes(1);
+
+    io.sessionId = null;
+    view.rerenderAuth();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(async () =>
+      pending.resolve({ data: { report_id: worker.id, status: "open", version: 2 }, error: null }),
+    );
+    expect(io.success).not.toHaveBeenCalled();
+    expect(io.error).not.toHaveBeenCalled();
   });
 });
