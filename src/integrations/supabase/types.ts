@@ -3923,6 +3923,7 @@ export type Database = {
           source: string;
           status: string;
           updated_at: string;
+          updated_by: string | null;
           version: number;
         }[];
       };
