@@ -54,3 +54,9 @@
 - The six-tab operator mobile bar crowded the 375px viewport. Four primary routes now remain visible, including NEW and its SLA alert; Analytics and Settings are in a keyboard-accessible More menu. The desktop sidebar is unchanged.
 - The focused route-guard test covers the five-column bar, visible NEW alert and both menu destinations. Full UI Vitest passed 674/674, typecheck and client/SSR build passed, and scoped ESLint had no errors. Commit: `e735178`.
 - Browser layout and authenticated live navigation remain unverified; this does not close Product acceptance.
+
+## 2026-11-26 directory read integrity
+
+- The server directory previously ignored errors from its five enrichment queries. A failed role read could hide operators; a failed wallet read could display a false zero balance. RED reproduced all five failures through the server boundary.
+- The server now rejects the whole refresh on any enrichment error, allowing the existing cached-data/error UI to retain the last verified rows. The list shape, filters and write paths are unchanged. Focused server/workspace tests pass 23/23; full Vitest 729/729, typecheck, changed-file lint and format check pass.
+- This does not address the existing loaded-row limit or prove live Supabase behavior. Browser and Product acceptance remain open.

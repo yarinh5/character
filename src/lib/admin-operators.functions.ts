@@ -103,40 +103,51 @@ export const adminListOperators = createServerFn({ method: "GET" })
     const ids = opsList.map((operator) => operator.id);
     const userIds = opsList.map((operator) => operator.user_id);
 
-    const [
-      { data: roles },
-      { data: assigns },
-      { data: convs },
-      { data: profs },
-      { data: wallets },
-    ] = await Promise.all([
-      userIds.length
-        ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[] }),
-      ids.length
-        ? supabaseAdmin
-            .from("character_operator_assignments")
-            .select("operator_id")
-            .in("operator_id", ids)
-        : Promise.resolve({ data: [] as { operator_id: string }[] }),
-      ids.length
-        ? supabaseAdmin
-            .from("conversations")
-            .select("assigned_operator_id, status")
-            .in("assigned_operator_id", ids)
-        : Promise.resolve({
-            data: [] as { assigned_operator_id: string | null; status: string }[],
-          }),
-      userIds.length
-        ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; email: string | null }[] }),
-      ids.length
-        ? supabaseAdmin
-            .from("operator_point_wallets")
-            .select("operator_id, balance")
-            .in("operator_id", ids)
-        : Promise.resolve({ data: [] as { operator_id: string; balance: number }[] }),
-    ]);
+    const [rolesResult, assignsResult, convsResult, profsResult, walletsResult] = await Promise.all(
+      [
+        userIds.length
+          ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
+          : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[], error: null }),
+        ids.length
+          ? supabaseAdmin
+              .from("character_operator_assignments")
+              .select("operator_id")
+              .in("operator_id", ids)
+          : Promise.resolve({ data: [] as { operator_id: string }[], error: null }),
+        ids.length
+          ? supabaseAdmin
+              .from("conversations")
+              .select("assigned_operator_id, status")
+              .in("assigned_operator_id", ids)
+          : Promise.resolve({
+              data: [] as { assigned_operator_id: string | null; status: string }[],
+              error: null,
+            }),
+        userIds.length
+          ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
+          : Promise.resolve({
+              data: [] as { user_id: string; email: string | null }[],
+              error: null,
+            }),
+        ids.length
+          ? supabaseAdmin
+              .from("operator_point_wallets")
+              .select("operator_id, balance")
+              .in("operator_id", ids)
+          : Promise.resolve({
+              data: [] as { operator_id: string; balance: number }[],
+              error: null,
+            }),
+      ],
+    );
+    for (const result of [rolesResult, assignsResult, convsResult, profsResult, walletsResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+    const roles = rolesResult.data;
+    const assigns = assignsResult.data;
+    const convs = convsResult.data;
+    const profs = profsResult.data;
+    const wallets = walletsResult.data;
 
     const rolesByUser = new Map<string, Set<AppRole>>();
     (roles ?? []).forEach((row) => {
