@@ -48,12 +48,16 @@ export const adminListAuditLogs = createServerFn({ method: "POST" })
 
     const page = (logs ?? []).slice(0, data.limit);
     const ids = Array.from(new Set(page.map((l) => l.actor_user_id).filter(Boolean))) as string[];
-    const { data: profiles } = ids.length
+    const { data: profiles, error: profileError } = ids.length
       ? await supabaseAdmin
           .from("profiles")
           .select("user_id, email, display_name")
           .in("user_id", ids)
-      : { data: [] as { user_id: string; email: string | null; display_name: string | null }[] };
+      : {
+          data: [] as { user_id: string; email: string | null; display_name: string | null }[],
+          error: null,
+        };
+    if (profileError) throw new Error(profileError.message);
     const byUser = new Map(profiles?.map((p) => [p.user_id, p]) ?? []);
 
     const items = page.map((l) => ({

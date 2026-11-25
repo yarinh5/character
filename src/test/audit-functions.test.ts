@@ -7,6 +7,7 @@ const io = vi.hoisted(() => ({
   logs: [] as Row[],
   logError: null as { message: string } | null,
   profiles: [] as Row[],
+  profileError: null as { message: string } | null,
   calls: [] as Array<[string, ...unknown[]]>,
   validator: null as null | ((value: unknown) => unknown),
 }));
@@ -56,7 +57,7 @@ vi.mock("@/integrations/supabase/client.server", () => ({
           },
           in(column: string, values: unknown[]) {
             io.calls.push(["profiles.in", column, values]);
-            return Promise.resolve({ data: io.profiles });
+            return Promise.resolve({ data: io.profiles, error: io.profileError });
           },
         };
         return query;
@@ -136,6 +137,7 @@ beforeEach(() => {
   io.logs = [];
   io.logError = null;
   io.profiles = [];
+  io.profileError = null;
   io.calls = [];
 });
 
@@ -239,6 +241,14 @@ describe("adminListAuditLogs", () => {
     io.logError = { message: "database unavailable" };
     await expect(invoke({ data: {}, context: { userId: "admin-user" } })).rejects.toThrow(
       "database unavailable",
+    );
+  });
+
+  it("does not present actor lookup failure as a missing historical profile", async () => {
+    io.logs = rows.slice(0, 1);
+    io.profileError = { message: "actor lookup failed" };
+    await expect(invoke({ data: {}, context: { userId: "admin-user" } })).rejects.toThrow(
+      "actor lookup failed",
     );
   });
 
