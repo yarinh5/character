@@ -197,24 +197,28 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (data.user_id === context.userId) {
       throw new Error("לא ניתן למחוק את עצמך");
     }
-    const { data: profile } = await supabaseAdmin
+    const { data: profile, error: lookupError } = await supabaseAdmin
       .from("profiles")
       .select("email")
       .eq("user_id", data.user_id)
       .maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    if (!profile) throw new Error("משתמש לא נמצא");
     const tag = `deleted+${Date.now()}@deleted.local`;
-    await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({
         status: "blocked",
         display_name: "משתמש מחוק",
-        email: profile?.email ? `${tag}` : tag,
+        email: tag,
       })
       .eq("user_id", data.user_id);
-    await supabaseAdmin
+    if (profileError) throw new Error(profileError.message);
+    const { error: operatorError } = await supabaseAdmin
       .from("operators")
       .update({ is_active: false, availability_status: "offline" })
       .eq("user_id", data.user_id);
+    if (operatorError) throw new Error(operatorError.message);
     await logAudit(context.userId, "user.soft_deleted", "user", data.user_id);
     return { ok: true };
   });

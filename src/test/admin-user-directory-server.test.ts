@@ -6,6 +6,7 @@ const io = vi.hoisted(() => ({
   rpc: vi.fn(),
   authUpdate: vi.fn(),
   authCreate: vi.fn(),
+  audit: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -33,9 +34,14 @@ vi.mock("@/integrations/supabase/client.server", () => ({
     auth: { admin: { updateUserById: io.authUpdate, createUser: io.authCreate } },
   },
 }));
-vi.mock("@/lib/audit.server", () => ({ logAudit: vi.fn() }));
+vi.mock("@/lib/audit.server", () => ({ logAudit: io.audit }));
 
-import { adminCreateUser, adminListUsers, adminUpdateUser } from "@/lib/admin-users.functions";
+import {
+  adminCreateUser,
+  adminListUsers,
+  adminSoftDeleteUser,
+  adminUpdateUser,
+} from "@/lib/admin-users.functions";
 
 type Input = {
   data: Record<string, unknown>;
@@ -44,6 +50,7 @@ type Input = {
 const list = adminListUsers as unknown as (input: Input) => Promise<unknown>;
 const update = adminUpdateUser as unknown as (input: Input) => Promise<unknown>;
 const create = adminCreateUser as unknown as (input: Input) => Promise<unknown>;
+const softDelete = adminSoftDeleteUser as unknown as (input: Input) => Promise<unknown>;
 const context = () => ({ userId: "admin-a", supabase: { rpc: io.rpc } });
 
 beforeEach(() => {
@@ -59,6 +66,7 @@ beforeEach(() => {
     data: { user: { id: "00000000-0000-4000-8000-000000000003" } },
     error: null,
   });
+  io.audit.mockReset();
 });
 
 describe("admin user directory server boundary", () => {
@@ -180,4 +188,39 @@ describe("admin user directory server boundary", () => {
     expect(io.from).not.toHaveBeenCalledWith("operators");
     expect(io.from).not.toHaveBeenCalledWith("client_profiles");
   });
+
+  it.each([
+    ["profile lookup", { message: "lookup failed" }, null, null, false],
+    ["profile missing", null, null, null, true],
+    ["profile update", null, { message: "profile write failed" }, null, false],
+    ["operator update", null, null, { message: "operator write failed" }, false],
+  ])(
+    "does not report deletion when %s fails",
+    async (_step, lookupError, profileError, operatorError, missing) => {
+      const profileLookup = vi.fn().mockResolvedValue({
+        data: lookupError || missing ? null : { email: "user@example.test" },
+        error: lookupError,
+      });
+      const profileWrite = vi.fn().mockResolvedValue({ error: profileError });
+      const operatorWrite = vi.fn().mockResolvedValue({ error: operatorError });
+      io.from.mockImplementation((table: string) => {
+        if (table === "user_roles")
+          return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+        if (table === "profiles")
+          return {
+            select: () => ({ eq: () => ({ maybeSingle: profileLookup }) }),
+            update: () => ({ eq: profileWrite }),
+          };
+        if (table === "operators") return { update: () => ({ eq: operatorWrite }) };
+        throw new Error(`Unexpected service-role table: ${table}`);
+      });
+      await expect(
+        softDelete({
+          data: { user_id: "00000000-0000-4000-8000-000000000002" },
+          context: context(),
+        }),
+      ).rejects.toThrow();
+      expect(io.audit).not.toHaveBeenCalled();
+    },
+  );
 });
