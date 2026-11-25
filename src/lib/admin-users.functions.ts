@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Database } from "@/integrations/supabase/types";
 import { logAudit } from "@/lib/audit.server";
 
 type AppRole = "admin" | "operator" | "client";
@@ -17,46 +19,13 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
-async function setSingleRole(userId: string, role: AppRole) {
-  await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
-  const { error } = await supabaseAdmin.from("user_roles").insert({ user_id: userId, role });
+async function setSingleRole(supabase: SupabaseClient<Database>, userId: string, role: AppRole) {
+  const { data, error } = await supabase.rpc("admin_set_user_role", {
+    _user_id: userId,
+    _new_role: role,
+  });
   if (error) throw new Error(error.message);
-}
-
-async function ensureClientProfile(userId: string) {
-  const { data } = await supabaseAdmin
-    .from("client_profiles")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!data) {
-    const { error } = await supabaseAdmin.from("client_profiles").insert({ user_id: userId });
-    if (error) throw new Error(error.message);
-  }
-}
-
-async function ensureOperatorRecord(userId: string, fallbackName: string) {
-  const { data: existing } = await supabaseAdmin
-    .from("operators")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!existing) {
-    const { error } = await supabaseAdmin.from("operators").insert({
-      user_id: userId,
-      full_name: fallbackName,
-      is_active: true,
-      availability_status: "available",
-    });
-    if (error) throw new Error(error.message);
-    return;
-  }
-
-  const { error } = await supabaseAdmin
-    .from("operators")
-    .update({ is_active: true, availability_status: "available" })
-    .eq("id", existing.id);
-  if (error) throw new Error(error.message);
+  if (data !== true) throw new Error("role_change_not_confirmed");
 }
 
 export const adminListUsers = createServerFn({ method: "GET" })
@@ -121,19 +90,13 @@ export const adminCreateUser = createServerFn({ method: "POST" })
 
     const userId = created.user.id;
 
-    await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({ display_name: data.full_name })
       .eq("user_id", userId);
+    if (profileError) throw new Error(profileError.message);
 
-    await setSingleRole(userId, data.role);
-
-    if (data.role === "operator") {
-      await ensureOperatorRecord(userId, data.full_name);
-    }
-    if (data.role === "client") {
-      await ensureClientProfile(userId);
-    }
+    await setSingleRole(context.supabase, userId, data.role);
 
     await logAudit(context.userId, "user.created", "user", userId, {
       role: data.role,
@@ -187,29 +150,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     }
 
     if (data.role) {
-      await setSingleRole(data.user_id, data.role);
-
-      if (data.role === "operator") {
-        const { data: profile } = await supabaseAdmin
-          .from("profiles")
-          .select("display_name, email")
-          .eq("user_id", data.user_id)
-          .maybeSingle();
-        await ensureOperatorRecord(data.user_id, profile?.display_name ?? profile?.email ?? "עובד");
-      }
-
-      if (data.role === "client") {
-        const { error } = await supabaseAdmin
-          .from("operators")
-          .update({ is_active: false, availability_status: "offline" })
-          .eq("user_id", data.user_id);
-        if (error) throw new Error(error.message);
-        await ensureClientProfile(data.user_id);
-      }
-
-      await logAudit(context.userId, "user.role_changed", "user", data.user_id, {
-        role: data.role,
-      });
+      await setSingleRole(context.supabase, data.user_id, data.role);
     }
 
     return { ok: true };

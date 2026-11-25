@@ -3454,6 +3454,10 @@ export type Database = {
           role: "admin" | "operator" | "client" | null;
         }[];
       };
+      admin_set_user_role: {
+        Args: { _user_id: string; _new_role: Database["public"]["Enums"]["app_role"] };
+        Returns: boolean;
+      };
       admin_adjust_operator_points: {
         Args: { _amount: number; _operator_id: string; _reason: string };
         Returns: Json;
