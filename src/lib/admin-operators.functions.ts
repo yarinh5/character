@@ -60,7 +60,7 @@ async function syncAssignments(operatorId: string, characterIds: string[]) {
 async function getOperatorAdminContext(operatorId: string) {
   const { data: operator, error } = await supabaseAdmin
     .from("operators")
-    .select("id, user_id")
+    .select("id, user_id, deleted_at")
     .eq("id", operatorId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -337,6 +337,7 @@ export const adminUpdateOperator = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
+    if (operator.deleted_at) throw new Error("archived_operator_update_forbidden");
     if (!data.is_active && (operator.user_id === context.userId || isAdminUser)) {
       throw new Error("לא ניתן להשבית חשבון אדמין");
     }

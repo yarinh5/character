@@ -7,6 +7,7 @@ const io = vi.hoisted(() => ({
   audit: vi.fn(),
   operatorInsert: vi.fn(),
   operatorUpdate: vi.fn(),
+  operatorRecord: vi.fn(),
   clientProfileRead: vi.fn(),
   roleDelete: vi.fn(),
   roleInsert: vi.fn(),
@@ -41,6 +42,7 @@ import {
   adminConvertOperatorToClient,
   adminCreateOperatorUser,
   adminPromoteClientToOperator,
+  adminUpdateOperator,
 } from "@/lib/admin-operators.functions";
 
 const adminId = "00000000-0000-4000-8000-000000000001";
@@ -50,6 +52,7 @@ const context = { userId: adminId, supabase: { rpc: io.rpc } };
 const create = adminCreateOperatorUser as unknown as (input: unknown) => Promise<unknown>;
 const promote = adminPromoteClientToOperator as unknown as (input: unknown) => Promise<unknown>;
 const convert = adminConvertOperatorToClient as unknown as (input: unknown) => Promise<unknown>;
+const update = adminUpdateOperator as unknown as (input: unknown) => Promise<unknown>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,6 +68,7 @@ beforeEach(() => {
       select: () => ({ single: async () => ({ data: { id: operatorId }, error: null }) }),
     }),
   });
+  io.operatorRecord.mockReturnValue({ id: operatorId, user_id: userId, deleted_at: null });
   io.clientProfileRead.mockReturnValue({
     eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
   });
@@ -97,7 +101,9 @@ beforeEach(() => {
           eq: () => ({
             maybeSingle: async () => ({
               data: fields.includes("user_id")
-                ? { id: operatorId, user_id: userId }
+                ? fields.includes("deleted_at")
+                  ? io.operatorRecord()
+                  : { id: operatorId, user_id: userId }
                 : { id: operatorId },
               error: null,
             }),
@@ -188,5 +194,42 @@ describe("operator role transitions", () => {
       "role_change_not_confirmed",
     );
     expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("does not reactivate an archived operator through ordinary update", async () => {
+    io.operatorRecord.mockReturnValue({
+      id: operatorId,
+      user_id: userId,
+      deleted_at: "2026-11-26T00:00:00Z",
+    });
+    await expect(
+      update({
+        data: {
+          operator_id: operatorId,
+          full_name: "Operator",
+          is_active: true,
+          availability_status: "available",
+        },
+        context,
+      }),
+    ).rejects.toThrow("archived");
+    expect(io.operatorUpdate).not.toHaveBeenCalled();
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("still updates an active operator", async () => {
+    await expect(
+      update({
+        data: {
+          operator_id: operatorId,
+          full_name: "Operator",
+          is_active: true,
+          availability_status: "available",
+        },
+        context,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(io.operatorUpdate).toHaveBeenCalledOnce();
+    expect(io.audit).toHaveBeenCalledOnce();
   });
 });
