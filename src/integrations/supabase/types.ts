@@ -3435,6 +3435,25 @@ export type Database = {
           last_message_at: string | null;
         }[];
       };
+      admin_list_users_page: {
+        Args: {
+          _search: string;
+          _role: string;
+          _status: string;
+          _before_created_at: string | null;
+          _before_user_id: string | null;
+          _page_size: number;
+        };
+        Returns: {
+          user_id: string;
+          email: string | null;
+          display_name: string | null;
+          avatar_url: string | null;
+          status: string;
+          created_at: string;
+          role: "admin" | "operator" | "client" | null;
+        }[];
+      };
       admin_adjust_operator_points: {
         Args: { _amount: number; _operator_id: string; _reason: string };
         Returns: Json;

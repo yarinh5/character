@@ -61,38 +61,36 @@ async function ensureOperatorRecord(userId: string, fallbackName: string) {
 
 export const adminListUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d) =>
+    z
+      .object({
+        search: z.string().trim().max(120).default(""),
+        role: z.enum(["all", "admin", "operator", "client"]).default("all"),
+        status: z.enum(["all", "active", "blocked"]).default("all"),
+        before_created_at: z.string().datetime({ offset: true }).nullable().default(null),
+        before_user_id: z.string().uuid().nullable().default(null),
+        page_size: z.number().int().min(1).max(101).default(101),
+      })
+      .refine((value) => (value.before_created_at === null) === (value.before_user_id === null), {
+        message: "invalid_user_cursor",
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
-
-    const { data: profiles, error } = await supabaseAdmin
-      .from("profiles")
-      .select("user_id, email, display_name, avatar_url, status, created_at")
-      .order("created_at", { ascending: false });
+    const { data: rows, error } = await context.supabase.rpc("admin_list_users_page", {
+      _search: data.search,
+      _role: data.role,
+      _status: data.status,
+      _before_created_at: data.before_created_at,
+      _before_user_id: data.before_user_id,
+      _page_size: data.page_size,
+    });
     if (error) throw new Error(error.message);
-
-    const ids = (profiles ?? []).map((profile) => profile.user_id);
-    const { data: roles } = ids.length
-      ? await supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", ids)
-      : { data: [] as { user_id: string; role: AppRole }[] };
-
-    const order: Record<AppRole, number> = { admin: 1, operator: 2, client: 3 };
-    const roleByUser = new Map<string, AppRole>();
-    for (const row of roles ?? []) {
-      const current = roleByUser.get(row.user_id);
-      if (!current || order[row.role as AppRole] < order[current]) {
-        roleByUser.set(row.user_id, row.role as AppRole);
-      }
+    if (!Array.isArray(rows) || rows.length > data.page_size) {
+      throw new Error("invalid_user_directory_page");
     }
-
-    return (profiles ?? []).map((profile) => ({
-      user_id: profile.user_id,
-      email: profile.email,
-      display_name: profile.display_name,
-      avatar_url: profile.avatar_url,
-      status: profile.status,
-      created_at: profile.created_at,
-      role: (roleByUser.get(profile.user_id) ?? "client") as AppRole,
-    }));
+    return rows;
   });
 
 const RoleEnum = z.enum(["admin", "operator", "client"]);
@@ -137,7 +135,10 @@ export const adminCreateUser = createServerFn({ method: "POST" })
       await ensureClientProfile(userId);
     }
 
-    await logAudit(context.userId, "user.created", "user", userId, { role: data.role, email: data.email });
+    await logAudit(context.userId, "user.created", "user", userId, {
+      role: data.role,
+      email: data.email,
+    });
 
     return { user_id: userId };
   });
@@ -206,7 +207,9 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
         await ensureClientProfile(data.user_id);
       }
 
-      await logAudit(context.userId, "user.role_changed", "user", data.user_id, { role: data.role });
+      await logAudit(context.userId, "user.role_changed", "user", data.user_id, {
+        role: data.role,
+      });
     }
 
     return { ok: true };
@@ -239,7 +242,9 @@ export const adminSetStatus = createServerFn({ method: "POST" })
       .update({ status: data.status })
       .eq("user_id", data.user_id);
     if (error) throw new Error(error.message);
-    await logAudit(context.userId, "user.status_changed", "user", data.user_id, { status: data.status });
+    await logAudit(context.userId, "user.status_changed", "user", data.user_id, {
+      status: data.status,
+    });
     return { ok: true };
   });
 

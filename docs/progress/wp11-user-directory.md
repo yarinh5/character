@@ -1,0 +1,6 @@
+# WP11 admin user directory (2026-11-26)
+
+- Cause: `/admin/users` read profiles and role rows without pagination, so API row limits could hide older users and local filters could report false absence. A missing role was silently labeled `client`.
+- Change: a forward-only, admin-gated RPC applies search, role and status filters before a stable `(created_at, user_id)` page. The server calls it with the authenticated admin JWT, and the UI loads 100 rows at a time with one lookahead row. A missing role is shown as unassigned; it is not implicitly written as `client`. Later-page errors preserve loaded rows and allow retry.
+- Checks: focused server and UI tests cover the authenticated boundary, invalid inputs, missing role, continuation, server search and later-page failure. Typecheck and changed-file lint passed. A pgTAP case was added for authorization, role precedence, filters and cursor ties.
+- Remaining acceptance: the migration and pgTAP have **not** run against PostgreSQL; live admin route and Product integration are unverified. This is an Offline implementation, not WP11 or Product PASS.
