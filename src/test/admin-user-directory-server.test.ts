@@ -39,6 +39,7 @@ vi.mock("@/lib/audit.server", () => ({ logAudit: io.audit }));
 import {
   adminCreateUser,
   adminListUsers,
+  adminSetStatus,
   adminSoftDeleteUser,
   adminUpdateUser,
 } from "@/lib/admin-users.functions";
@@ -51,6 +52,7 @@ const list = adminListUsers as unknown as (input: Input) => Promise<unknown>;
 const update = adminUpdateUser as unknown as (input: Input) => Promise<unknown>;
 const create = adminCreateUser as unknown as (input: Input) => Promise<unknown>;
 const softDelete = adminSoftDeleteUser as unknown as (input: Input) => Promise<unknown>;
+const setStatus = adminSetStatus as unknown as (input: Input) => Promise<unknown>;
 const context = () => ({ userId: "admin-a", supabase: { rpc: io.rpc } });
 
 beforeEach(() => {
@@ -220,6 +222,183 @@ describe("admin user directory server boundary", () => {
           context: context(),
         }),
       ).rejects.toThrow();
+      expect(io.audit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("bans a user in Auth before reporting a blocked profile", async () => {
+    const writes: string[] = [];
+    io.authUpdate.mockImplementation(async () => {
+      writes.push("auth-ban");
+      return { error: null };
+    });
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles")
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { deleted_at: null, pii_archived_at: null },
+                error: null,
+              }),
+            }),
+          }),
+          update: () => ({
+            eq: async () => {
+              writes.push("profile-block");
+              return { error: null };
+            },
+          }),
+        };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    await expect(
+      setStatus({
+        data: { user_id: "00000000-0000-4000-8000-000000000002", status: "blocked" },
+        context: context(),
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
+      ban_duration: "876000h",
+    });
+    expect(writes).toEqual(["auth-ban", "profile-block"]);
+  });
+
+  it("does not claim a status change if Auth rejects the ban", async () => {
+    io.authUpdate.mockResolvedValueOnce({ error: { message: "auth unavailable" } });
+    await expect(
+      setStatus({
+        data: { user_id: "00000000-0000-4000-8000-000000000002", status: "blocked" },
+        context: context(),
+      }),
+    ).rejects.toThrow("auth unavailable");
+    expect(io.from).toHaveBeenCalledExactlyOnceWith("user_roles");
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("uses the Auth ban for blocked status in the edit form", async () => {
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles") return { update: () => ({ eq: async () => ({ error: null }) }) };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    await expect(
+      update({
+        data: { user_id: "00000000-0000-4000-8000-000000000002", status: "blocked" },
+        context: context(),
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
+      ban_duration: "876000h",
+    });
+  });
+
+  it("blocks self-status changes before touching Auth or profile", async () => {
+    const adminId = "00000000-0000-4000-8000-000000000001";
+    await expect(
+      setStatus({
+        data: { user_id: adminId, status: "blocked" },
+        context: { userId: adminId, supabase: { rpc: io.rpc } },
+      }),
+    ).rejects.toThrow();
+    expect(io.authUpdate).not.toHaveBeenCalled();
+    expect(io.from).toHaveBeenCalledExactlyOnceWith("user_roles");
+  });
+
+  it("unbans only after an active profile write succeeds", async () => {
+    const writes: string[] = [];
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles")
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { deleted_at: null, pii_archived_at: null },
+                error: null,
+              }),
+            }),
+          }),
+          update: () => ({
+            eq: async () => {
+              writes.push("profile-active");
+              return { error: null };
+            },
+          }),
+        };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    io.authUpdate.mockImplementation(async () => {
+      writes.push("auth-unban");
+      return { error: null };
+    });
+    await expect(
+      setStatus({
+        data: { user_id: "00000000-0000-4000-8000-000000000002", status: "active" },
+        context: context(),
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
+      ban_duration: "none",
+    });
+    expect(writes).toEqual(["profile-active", "auth-unban"]);
+  });
+
+  it("does not mutate a user when the Auth ban for soft delete fails", async () => {
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles")
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { email: "user@example.test" }, error: null }),
+            }),
+          }),
+        };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    io.authUpdate.mockResolvedValueOnce({ error: { message: "auth unavailable" } });
+    await expect(
+      softDelete({
+        data: { user_id: "00000000-0000-4000-8000-000000000002" },
+        context: context(),
+      }),
+    ).rejects.toThrow("auth unavailable");
+    expect(io.from).not.toHaveBeenCalledWith("operators");
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it.each([setStatus, update])(
+    "never reactivates an archived account through a generic user action",
+    async (action) => {
+      io.from.mockImplementation((table: string) => {
+        if (table === "user_roles")
+          return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+        if (table === "profiles")
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { deleted_at: "2026-11-26T00:00:00Z", pii_archived_at: null },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        throw new Error(`Unexpected service-role table: ${table}`);
+      });
+      await expect(
+        action({
+          data: { user_id: "00000000-0000-4000-8000-000000000002", status: "active" },
+          context: context(),
+        }),
+      ).rejects.toThrow("archived");
+      expect(io.authUpdate).not.toHaveBeenCalled();
       expect(io.audit).not.toHaveBeenCalled();
     },
   );

@@ -28,6 +28,25 @@ async function setSingleRole(supabase: SupabaseClient<Database>, userId: string,
   if (data !== true) throw new Error("role_change_not_confirmed");
 }
 
+async function setAuthBan(userId: string, blocked: boolean) {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    ban_duration: blocked ? "876000h" : "none",
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function ensureReactivatable(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("deleted_at, pii_archived_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("משתמש לא נמצא");
+  if (data.deleted_at || data.pii_archived_at)
+    throw new Error("archived_user_cannot_be_reactivated");
+}
+
 export const adminListUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
@@ -125,6 +144,12 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.role && data.user_id === context.userId) {
       throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
     }
+    if (data.status && data.user_id === context.userId) {
+      throw new Error("לא ניתן לשנות את הסטטוס של עצמך מכאן");
+    }
+    if (data.status === "active") await ensureReactivatable(data.user_id);
+
+    if (data.status === "blocked") await setAuthBan(data.user_id, true);
 
     if (data.email) {
       const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
@@ -152,6 +177,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.role) {
       await setSingleRole(context.supabase, data.user_id, data.role);
     }
+    if (data.status === "active") await setAuthBan(data.user_id, false);
 
     return { ok: true };
   });
@@ -178,11 +204,17 @@ export const adminSetStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await ensureAdmin(context.userId);
+    if (data.user_id === context.userId) {
+      throw new Error("לא ניתן לשנות את הסטטוס של עצמך מכאן");
+    }
+    if (data.status === "active") await ensureReactivatable(data.user_id);
+    if (data.status === "blocked") await setAuthBan(data.user_id, true);
     const { error } = await supabaseAdmin
       .from("profiles")
       .update({ status: data.status })
       .eq("user_id", data.user_id);
     if (error) throw new Error(error.message);
+    if (data.status === "active") await setAuthBan(data.user_id, false);
     await logAudit(context.userId, "user.status_changed", "user", data.user_id, {
       status: data.status,
     });
@@ -204,6 +236,7 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
       .maybeSingle();
     if (lookupError) throw new Error(lookupError.message);
     if (!profile) throw new Error("משתמש לא נמצא");
+    await setAuthBan(data.user_id, true);
     const tag = `deleted+${Date.now()}@deleted.local`;
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
