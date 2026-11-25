@@ -60,3 +60,9 @@
 - The server directory previously ignored errors from its five enrichment queries. A failed role read could hide operators; a failed wallet read could display a false zero balance. RED reproduced all five failures through the server boundary.
 - The server now rejects the whole refresh on any enrichment error, allowing the existing cached-data/error UI to retain the last verified rows. The list shape, filters and write paths are unchanged. Focused server/workspace tests pass 23/23; full Vitest 729/729, typecheck, changed-file lint and format check pass.
 - This does not address the existing loaded-row limit or prove live Supabase behavior. Browser and Product acceptance remain open.
+
+## 2026-11-26 role transition consistency
+
+- The operator create, client promotion and operator conversion server paths still replaced roles with a service-role `delete` followed by `insert`, ignoring the delete result. The existing `admin_set_user_role` RPC already implements the role and auxiliary-row transition transactionally under the authenticated admin identity.
+- All three paths now use that RPC. Create updates the operator row inserted by the RPC instead of inserting a duplicate; conversion no longer repeats the operator/client-profile writes. Promotion requires exactly one existing `client` role before the RPC, rejecting another admin or conflicting role rows. A rejected or unconfirmed RPC stops before the action audit. Focused server tests cover the three paths and these failure forms.
+- Auth user creation, profile-name changes, operator presentation fields and assignment sync are outside the role transaction. They can still partially succeed if a later step fails. The client-role precheck is not atomic with the RPC. Focused server/workspace tests pass 23/23; full Vitest 736/736, typecheck, lint and format check pass. The new RPC and these flows have **NOT RUN** against live PostgreSQL/Auth, so WP11/Product acceptance remains open.

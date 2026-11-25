@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Database } from "@/integrations/supabase/types";
 import { logAudit } from "@/lib/audit.server";
 
 type AppRole = "admin" | "operator" | "client";
@@ -17,10 +19,13 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
-async function setSingleRole(userId: string, role: AppRole) {
-  await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
-  const { error } = await supabaseAdmin.from("user_roles").insert({ user_id: userId, role });
+async function setSingleRole(supabase: SupabaseClient<Database>, userId: string, role: AppRole) {
+  const { data, error } = await supabase.rpc("admin_set_user_role", {
+    _user_id: userId,
+    _new_role: role,
+  });
   if (error) throw new Error(error.message);
+  if (data !== true) throw new Error("role_change_not_confirmed");
 }
 
 async function syncAssignments(operatorId: string, characterIds: string[]) {
@@ -217,23 +222,24 @@ export const adminCreateOperatorUser = createServerFn({ method: "POST" })
     if (error || !created.user) throw new Error(error?.message ?? "יצירת משתמש נכשלה");
 
     const userId = created.user.id;
-    await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({ display_name: data.full_name })
       .eq("user_id", userId);
-    await setSingleRole(userId, "operator");
+    if (profileError) throw new Error(profileError.message);
+    await setSingleRole(context.supabase, userId, "operator");
 
     const { data: operator, error: opError } = await supabaseAdmin
       .from("operators")
-      .insert({
-        user_id: userId,
+      .update({
         full_name: data.full_name,
         is_active: data.is_active,
         availability_status: data.is_active ? "available" : "offline",
       })
+      .eq("user_id", userId)
       .select("id")
       .single();
-    if (opError) throw new Error(opError.message);
+    if (opError || !operator) throw new Error(opError?.message ?? "רשומת עובד לא נמצאה");
 
     await syncAssignments(operator.id, data.character_ids);
     await logAudit(context.userId, "operator.created", "operator", operator.id, {
@@ -269,46 +275,42 @@ export const adminPromoteClientToOperator = createServerFn({ method: "POST" })
     if (!profile) throw new Error("לא נמצא משתמש רשום עם האימייל הזה");
     if (profile.user_id === context.userId) throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
 
-    await supabaseAdmin
+    const { data: roles, error: rolesError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", profile.user_id);
+    if (rolesError) throw new Error(rolesError.message);
+    if (roles?.length !== 1 || roles[0].role !== "client") {
+      throw new Error("client_role_required");
+    }
+
+    await setSingleRole(context.supabase, profile.user_id, "operator");
+    const { error: displayNameError } = await supabaseAdmin
       .from("profiles")
       .update({ display_name: data.full_name })
       .eq("user_id", profile.user_id);
-    await setSingleRole(profile.user_id, "operator");
+    if (displayNameError) throw new Error(displayNameError.message);
 
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from("operators")
       .select("id")
       .eq("user_id", profile.user_id)
       .maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (!existing) throw new Error("רשומת עובד לא נמצאה");
 
-    let operatorId = existing?.id;
-    if (operatorId) {
-      const { error } = await supabaseAdmin
-        .from("operators")
-        .update({
-          full_name: data.full_name,
-          is_active: data.is_active,
-          availability_status: data.is_active ? "available" : "offline",
-          deleted_at: null,
-        })
-        .eq("id", operatorId);
-      if (error) throw new Error(error.message);
-    } else {
-      const { data: created, error } = await supabaseAdmin
-        .from("operators")
-        .insert({
-          user_id: profile.user_id,
-          full_name: data.full_name,
-          is_active: data.is_active,
-          availability_status: data.is_active ? "available" : "offline",
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      operatorId = created.id;
-    }
+    const operatorId = existing.id;
+    const { error: updateError } = await supabaseAdmin
+      .from("operators")
+      .update({
+        full_name: data.full_name,
+        is_active: data.is_active,
+        availability_status: data.is_active ? "available" : "offline",
+      })
+      .eq("id", operatorId);
+    if (updateError) throw new Error(updateError.message);
 
-    await syncAssignments(operatorId!, data.character_ids);
+    await syncAssignments(operatorId, data.character_ids);
     await logAudit(context.userId, "user.promoted_to_operator", "user", profile.user_id, {
       operator_id: operatorId,
       email: data.email,
@@ -373,20 +375,7 @@ export const adminConvertOperatorToClient = createServerFn({ method: "POST" })
       throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
     if (isAdminUser) throw new Error("לא ניתן להפוך אדמין ללקוח מעמוד העובדים");
 
-    await setSingleRole(operator.user_id, "client");
-    await supabaseAdmin
-      .from("operators")
-      .update({ is_active: false, availability_status: "offline" })
-      .eq("id", operator.id);
-
-    const { data: clientProfile } = await supabaseAdmin
-      .from("client_profiles")
-      .select("id")
-      .eq("user_id", operator.user_id)
-      .maybeSingle();
-    if (!clientProfile) {
-      await supabaseAdmin.from("client_profiles").insert({ user_id: operator.user_id });
-    }
+    await setSingleRole(context.supabase, operator.user_id, "client");
 
     await logAudit(context.userId, "user.converted_to_client", "user", operator.user_id, {
       operator_id: operator.id,
