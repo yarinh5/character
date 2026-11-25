@@ -38,6 +38,14 @@ export const adminImpersonate = createServerFn({ method: "POST" })
       throw new Error("לא ניתן להתחזות לעצמך");
     }
     const target = await getActiveTarget(data.user_id);
+    const { data: targetAdminRole, error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.user_id)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (roleError) throw new Error(roleError.message);
+    if (targetAdminRole) throw new Error("admin_impersonation_forbidden");
 
     const { data: link, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",

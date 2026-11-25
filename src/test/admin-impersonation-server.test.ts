@@ -89,9 +89,12 @@ describe("admin user link generation", () => {
   });
 
   it("preserves authorized active-user links", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
     await expect(impersonate(input())).resolves.toEqual(
       expect.objectContaining({ email: "user@example.test" }),
     );
+    io.role.mockReset().mockResolvedValue({ data: { role: "admin" }, error: null });
     await expect(reset(input())).resolves.toEqual(expect.objectContaining({ ok: true }));
     expect(io.generateLink).toHaveBeenNthCalledWith(1, {
       type: "magiclink",
@@ -101,5 +104,19 @@ describe("admin user link generation", () => {
       type: "recovery",
       email: "user@example.test",
     });
+  });
+
+  it("does not issue an impersonation link for another admin", async () => {
+    await expect(impersonate(input())).rejects.toThrow("admin");
+    expect(io.generateLink).not.toHaveBeenCalled();
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the target admin-role lookup fails", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: { message: "role lookup failed" } });
+    await expect(impersonate(input())).rejects.toThrow("role lookup failed");
+    expect(io.generateLink).not.toHaveBeenCalled();
+    expect(io.audit).not.toHaveBeenCalled();
   });
 });
