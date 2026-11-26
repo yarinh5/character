@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { withAccountDeletionHttp } from "../../supabase/functions/_shared/account-deletion-http";
 import {
   confirmAccountDeletion,
   confirmAccountDeletionCancellation,
@@ -8,6 +9,69 @@ import {
   runDeletionWorkflowStep,
   type DeletionWorkflowIo,
 } from "../../supabase/functions/process-deletion-workflows/orchestration";
+
+describe("account deletion browser transport", () => {
+  const url = "https://api.example.test/functions/v1/account-deletion-request";
+  const origin = "https://app.example.test";
+
+  it("answers an allowed preflight without reaching the privileged handler", async () => {
+    const handle = vi.fn();
+    const endpoint = withAccountDeletionHttp(
+      handle,
+      () => ` https://other.example.test, ${origin}`,
+    );
+    const response = await endpoint(
+      new Request(url, { method: "OPTIONS", headers: { Origin: origin } }),
+    );
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    expect(response.headers.get("Access-Control-Allow-Methods")).toBe("POST, OPTIONS");
+    expect(response.headers.get("Access-Control-Allow-Headers")?.split(", ")).toEqual(
+      expect.arrayContaining(["authorization", "x-client-info", "apikey", "content-type"]),
+    );
+    expect(response.headers.get("Vary")).toBe("Origin");
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://app.example.test.foreign.test", "null"])(
+    "rejects another browser origin before running the handler: %s",
+    async (foreign) => {
+      const handle = vi.fn();
+      const endpoint = withAccountDeletionHttp(handle, () => origin);
+      for (const method of ["OPTIONS", "POST"]) {
+        const response = await endpoint(new Request(url, { method, headers: { Origin: foreign } }));
+        expect(response.status).toBe(403);
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      }
+      expect(handle).not.toHaveBeenCalled();
+    },
+  );
+
+  it("exposes the real auth error to an allowed caller without weakening it", async () => {
+    const endpoint = withAccountDeletionHttp(
+      (_request, json) => json(401, { code: "unauthorized" }),
+      () => origin,
+    );
+    const response = await endpoint(
+      new Request(url, { method: "POST", headers: { Origin: origin } }),
+    );
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ code: "unauthorized" });
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it("keeps the non-browser POST behavior and rejects preflight without an origin", async () => {
+    const handle = vi.fn().mockReturnValue(new Response(null, { status: 401 }));
+    const endpoint = withAccountDeletionHttp(handle, () => undefined);
+    const response = await endpoint(new Request(url, { method: "POST" }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect((await endpoint(new Request(url, { method: "OPTIONS" }))).status).toBe(403);
+    expect(handle).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("account deletion verification orchestration", () => {
   it("binds a one-time email proof to the request and verified identity", async () => {

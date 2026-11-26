@@ -1,19 +1,21 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  type AccountDeletionJson,
+  withAccountDeletionHttp,
+} from "../_shared/account-deletion-http.ts";
 import { confirmAccountDeletion } from "../_shared/deletion-verification-orchestration.ts";
 
-const json = (status: number, body: Record<string, unknown>) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" },
-  });
 const sha256 = async (value: string) =>
   Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-Deno.serve(async (request) => {
-  if (request.method !== "POST") return json(404, { code: "not_found" });
+Deno.serve(
+  withAccountDeletionHttp(handleRequest, () => Deno.env.get("AUTH_REDIRECT_ALLOWED_ORIGINS")),
+);
+
+async function handleRequest(request: Request, json: AccountDeletionJson) {
   const url = Deno.env.get("SUPABASE_URL");
   const publishable = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY");
   const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY");
@@ -88,4 +90,4 @@ Deno.serve(async (request) => {
     const code = error instanceof Error ? error.message : "account_deletion_verification_failed";
     return json(code === "unauthorized" ? 401 : 400, { code });
   }
-});
+}
