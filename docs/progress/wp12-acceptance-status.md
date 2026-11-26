@@ -138,6 +138,20 @@
   This closes the scoped 1,000/100 workload, not the 2,000/100 tier or formal Product acceptance.
   Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-04/REPORT.md`.
 
+- A fresh 2,000/100 boundary attempt on the same product revision stopped before measured waves:
+  2,101 synthetic accounts logged in, but only 1,998/2,100 Realtime joins reached
+  `POSTGRES_READY`; the remaining 102 returned `CHANNEL_ERROR`. Kong recorded exactly 1,998
+  HTTP 101 WebSocket handshakes. The 4,096 gateway worker-connection ceiling is a plausible
+  local bottleneck (two proxied connections per socket), **not yet a proven root cause**.
+  Realtime also logged a transient publication-initialization error. No product-code defect or
+  2,000/100 PASS is established. The boundary tier is not an automatic first-launch condition.
+  All task-owned containers, volumes and the network were removed; the cleanup script's strict
+  inventory flag stayed false because its `before` snapshot used shortened network IDs and its
+  `after` comparison used full IDs. A follow-up verified matching unrelated network prefixes
+  and names, exact unrelated container/volume IDs and zero task-port listeners. A focused
+  gateway-capacity diagnostic is needed before another boundary attempt.
+  Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-2000-100-20261126-01/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
