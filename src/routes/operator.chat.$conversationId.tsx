@@ -208,6 +208,7 @@ export function OperatorChatPage() {
   const [clientActionReason, setClientActionReason] = useState("");
   const [clientActionNotes, setClientActionNotes] = useState("");
   const [clientActionBusy, setClientActionBusy] = useState(false);
+  const clientActionOpener = useRef<HTMLButtonElement | null>(null);
   const [, setLockClock] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -792,6 +793,11 @@ export function OperatorChatPage() {
     }
   };
 
+  const openClientAction = (action: "block" | "report", opener: HTMLButtonElement) => {
+    clientActionOpener.current = opener;
+    setClientAction(action);
+  };
+
   const closeClientAction = () => {
     if (clientActionBusy) return;
     setClientAction(null);
@@ -1119,7 +1125,11 @@ export function OperatorChatPage() {
               <Button
                 variant={clientBlocked ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => (clientBlocked ? void unblockClient() : setClientAction("block"))}
+                onClick={(event) =>
+                  clientBlocked
+                    ? void unblockClient()
+                    : openClientAction("block", event.currentTarget)
+                }
                 disabled={clientActionBusy}
                 className="shrink-0"
               >
@@ -1129,7 +1139,7 @@ export function OperatorChatPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setClientAction("report")}
+                  onClick={(event) => openClientAction("report", event.currentTarget)}
                   className="shrink-0"
                 >
                   דווח
@@ -1202,15 +1212,20 @@ export function OperatorChatPage() {
                     <Button
                       variant={clientBlocked ? "secondary" : "outline"}
                       className="flex-1"
-                      onClick={() =>
-                        clientBlocked ? void unblockClient() : setClientAction("block")
+                      onClick={(event) =>
+                        clientBlocked
+                          ? void unblockClient()
+                          : openClientAction("block", event.currentTarget)
                       }
                       disabled={clientActionBusy}
                     >
                       {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
                     </Button>
                     {!clientBlocked && (
-                      <Button variant="outline" onClick={() => setClientAction("report")}>
+                      <Button
+                        variant="outline"
+                        onClick={(event) => openClientAction("report", event.currentTarget)}
+                      >
                         דווח
                       </Button>
                     )}
@@ -1405,6 +1420,7 @@ export function OperatorChatPage() {
               <>
                 <div className="flex gap-2 items-end">
                   <Textarea
+                    aria-label="הודעה ללקוח"
                     value={input}
                     onFocus={handleComposerActivity}
                     onChange={(e) => {
@@ -1530,15 +1546,21 @@ export function OperatorChatPage() {
                   <Button
                     variant={clientBlocked ? "secondary" : "outline"}
                     size="sm"
-                    onClick={() =>
-                      clientBlocked ? void unblockClient() : setClientAction("block")
+                    onClick={(event) =>
+                      clientBlocked
+                        ? void unblockClient()
+                        : openClientAction("block", event.currentTarget)
                     }
                     disabled={clientActionBusy}
                   >
                     {clientBlocked ? "שחרר חסימה" : "חסום לקוח"}
                   </Button>
                   {!clientBlocked && (
-                    <Button variant="outline" size="sm" onClick={() => setClientAction("report")}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => openClientAction("report", event.currentTarget)}
+                    >
                       דווח
                     </Button>
                   )}
@@ -1590,12 +1612,23 @@ export function OperatorChatPage() {
         onSent={handleStickerSent}
       />
       <Dialog open={clientAction !== null} onOpenChange={(open) => !open && closeClientAction()}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogContent
+          dir="rtl"
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            const opener = clientActionOpener.current;
+            clientActionOpener.current = null;
+            if (!opener?.isConnected || opener.disabled) return;
+            event.preventDefault();
+            opener.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{clientAction === "block" ? "חסימת לקוח" : "דיווח על לקוח"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <Textarea
+              aria-label="סיבה קצרה"
               value={clientActionReason}
               onChange={(event) => setClientActionReason(event.target.value)}
               placeholder="סיבה קצרה"
@@ -1603,6 +1636,7 @@ export function OperatorChatPage() {
               disabled={clientActionBusy}
             />
             <Textarea
+              aria-label="הערות פנימיות (אופציונלי)"
               value={clientActionNotes}
               onChange={(event) => setClientActionNotes(event.target.value)}
               placeholder="הערות פנימיות (אופציונלי)"

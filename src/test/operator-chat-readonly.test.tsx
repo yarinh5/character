@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { toast } from "sonner";
@@ -352,6 +352,52 @@ describe("operator chat read-only responsibility", () => {
 
     expect(screen.getByRole("button", { name: "חזרה לרשימת השיחות" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "פתיחת פרטי הלקוח והערות" })).toBeInTheDocument();
+  });
+
+  it("names the composer independently of its read-only placeholder", async () => {
+    await renderChat();
+
+    expect(screen.getByRole("textbox", { name: "הודעה ללקוח" })).toBeDisabled();
+  });
+
+  it("names both fields in the client report dialog", async () => {
+    await renderChat();
+    fireEvent.click(screen.getAllByRole("button", { name: "דווח" })[0]);
+
+    const dialog = screen.getByRole("dialog", { name: "דיווח על לקוח" });
+    expect(within(dialog).getByRole("textbox", { name: "סיבה קצרה" })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("textbox", { name: "הערות פנימיות (אופציונלי)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("returns focus to the report button when the dialog is canceled", async () => {
+    await renderChat();
+    const opener = screen.getAllByRole("button", { name: "דווח" })[0];
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole("button", { name: "ביטול" }));
+
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(rpcMock).not.toHaveBeenCalledWith("report_client_as_operator", expect.anything());
+  });
+
+  it("returns focus inside the client details sheet when its block dialog is dismissed", async () => {
+    await renderChat();
+    fireEvent.click(screen.getByRole("button", { name: "פתיחת פרטי הלקוח והערות" }));
+    const sheet = screen.getByRole("dialog", { name: "פרטי לקוח והערות" });
+    const opener = within(sheet).getByRole("button", { name: "חסום לקוח" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "חסימת לקוח" });
+
+    fireEvent.keyDown(within(dialog).getByRole("textbox", { name: "סיבה קצרה" }), {
+      key: "Escape",
+    });
+
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(sheet).toBeInTheDocument();
+    expect(rpcMock).not.toHaveBeenCalledWith("block_client_for_operator", expect.anything());
   });
 
   it("does not fail closed when its own channel is disposed", async () => {
