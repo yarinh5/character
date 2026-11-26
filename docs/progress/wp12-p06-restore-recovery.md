@@ -54,3 +54,26 @@ Release ו־Replay נשארים כבויים כברירת מחדל, ומילוי
 מידע אישי לא מאומת ואישור ישן. בדיקת orchestration מכסה אימות envelope לפני
 mutation, staging בלבד ושימור primary failure. בדיקת חוזה Offline מאמתת את
 גבולות SQL/Edge/UI. pgTAP נכתב אך לא הורץ משום שלא הופעל DB.
+
+### תרגיל שלמות FK ביעד שחזור מקומי — 2026-11-26
+
+לאחר תרגיל השחזור הסינתטי המתועד ב־`wp12-acceptance-status.md`, הופעל רק
+`supabase_db_restore-target-20261126-01` על Engine מקומי ייעודי
+`9bfee319-9d33-4def-8cc7-0e08fd977777`. לפני ההפעלה אומתו תוויות הפרויקט
+`restore-target-20261126-01`; הקונטיינר היה עצור בתחילה. `pg_isready` אישר
+מוכנות. שאילתת קטלוג ספרה 260 מפתחות זרים, כולם מסומנים `convalidated`.
+
+בתוך `BEGIN TRANSACTION READ ONLY` נבנתה לכל FK שאילתת anti-join מהעמודות
+`conkey`/`confkey`, עם טיפול ב־`MATCH SIMPLE` וב־`MATCH FULL`. היא בדקה את
+הרשומות המשוחזרות בכל הסכמות, לא רק את סימון הקטלוג. התוצאה הגולמית הייתה
+`NOTICE: FK check: 260 constraints, 0 violated`, עם `psql` exit 0 ו־`ROLLBACK`.
+הקריאה הראשונה לפני ייצוב WSL נתקלה ב־`database system is starting up`; לאחר
+בדיקת לוג ה־startup הורץ האימות בתוך holder זמני, ללא שינוי SQL. קונטיינר
+היעד הוחזר למצב `Exited` וה־holder הופסק. הפעלת Ubuntu העלתה אוטומטית את
+שירותי הפרויקט המקומי הקיים; לא בוצעה בהם פעולה ישירה, ומצב ההפצה לאחר
+השחרור אינו חלק מקבלת השחזור.
+
+זו ראיה נקודתית להעדר הפניות FK יתומות ב־snapshot המסוים. היא אינה בודקת את
+כל אילוצי CHECK/אינדקסים, אינה מחליפה אימות שחזור מלא של Auth/Storage ומידע
+שנמחק, ואינה מוכיחה reconciliation, פתיחה בטוחה, RPO של 15 דקות או RTO של
+4 שעות. WP12 ו־Product PASS נשארים פתוחים.
