@@ -360,9 +360,12 @@ WITH inserted AS (
   RETURNING id
 )
 SELECT set_config('wp02.race_cycle', (SELECT id::text FROM inserted), true);
-UPDATE public.conversations
-SET inactivity_expires_at = clock_timestamp() - interval '1 second'
-WHERE id = current_setting('wp02.race_conversation')::uuid;
+WITH expiry_anchor AS MATERIALIZED (SELECT clock_timestamp() AS observed_at)
+UPDATE public.conversations AS conversation
+SET last_business_message_at = expiry_anchor.observed_at - interval '2 seconds',
+    inactivity_expires_at = expiry_anchor.observed_at - interval '1 second'
+FROM expiry_anchor
+WHERE conversation.id = current_setting('wp02.race_conversation')::uuid;
 SELECT is(
   (private.finish_handling_cycle(
     current_setting('wp02.race_conversation')::uuid,
