@@ -246,16 +246,19 @@ export function OperatorConversationsPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="חיפוש שיחות לפי שם לקוח"
             placeholder="חיפוש לפי שם לקוח..."
-            className="pr-9"
+            className="min-h-11 pr-9"
           />
         </div>
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
             <button
               key={f.value}
+              type="button"
               onClick={() => setFilter(f.value)}
-              className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+              aria-pressed={filter === f.value}
+              className={`min-h-11 px-3 py-1.5 rounded-full text-sm border transition-colors ${
                 filter === f.value
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-input hover:bg-accent"
@@ -268,8 +271,10 @@ export function OperatorConversationsPage() {
         {characters.length > 1 && (
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => setCharacterFilter("all")}
-              className={`px-3 py-1 rounded-full text-xs border ${
+              aria-pressed={characterFilter === "all"}
+              className={`min-h-11 px-3 py-1 rounded-full text-xs border ${
                 characterFilter === "all" ? "bg-secondary border-secondary" : "border-input"
               }`}
             >
@@ -278,8 +283,10 @@ export function OperatorConversationsPage() {
             {characters.map(([id, name]) => (
               <button
                 key={id}
+                type="button"
                 onClick={() => setCharacterFilter(id)}
-                className={`px-3 py-1 rounded-full text-xs border ${
+                aria-pressed={characterFilter === id}
+                className={`min-h-11 px-3 py-1 rounded-full text-xs border ${
                   characterFilter === id ? "bg-secondary border-secondary" : "border-input"
                 }`}
               >
@@ -309,7 +316,7 @@ export function OperatorConversationsPage() {
           </p>
           <Button
             variant="outline"
-            className="mt-4"
+            className="mt-4 min-h-11"
             onClick={() => void refetch()}
             disabled={isFetching || accessChannelState !== "ready"}
           >
@@ -334,7 +341,7 @@ export function OperatorConversationsPage() {
           <div className="text-center py-16">
             <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
             <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
-            <Button variant="outline" className="mt-4" onClick={resetFilters}>
+            <Button variant="outline" className="mt-4 min-h-11" onClick={resetFilters}>
               איפוס מסננים
             </Button>
           </div>

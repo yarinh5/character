@@ -48,3 +48,9 @@ The following remain DEFERRED rather than solved by this slice:
 ## Acceptance boundary
 
 The defined frontend-only ONLINE alignment slice is implemented and verified. This record does not declare full WP03 DONE and does not declare AC08 end-to-end PASS.
+
+## Current-branch touch targets (2026-11-26)
+
+- Cause: ONLINE search inherited a 36px input, and status/character filter buttons had no 44px minimum target or pressed-state semantics. The search input had only placeholder text, not an accessible name.
+- Change: search, filter, retry and reset controls now have `min-h-11`; search has a name and both filter groups expose `aria-pressed`. Query, authorization, subscription and filtering logic are unchanged.
+- Evidence: the new regression failed on the old DOM and passed after the edit. The ONLINE list/routing/access suites passed 12/12, full Vitest 783/783, typecheck, changed-file lint/format and client/SSR build passed. Live authenticated browser measurement, mobile layout and Product acceptance remain NOT RUN.

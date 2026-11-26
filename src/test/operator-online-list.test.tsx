@@ -130,6 +130,22 @@ beforeEach(() => {
 });
 
 describe("ONLINE conversation list", () => {
+  it("keeps search and filters labelled with 44px minimum touch targets", () => {
+    renderPage();
+
+    expect(screen.getByRole("textbox", { name: "חיפוש שיחות לפי שם לקוח" })).toHaveClass(
+      "min-h-11",
+    );
+    for (const name of ["הכל", "ממתינות", "פתוחות", "נענו", "סגורות", "כל הדמויות", "מאיה"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass("min-h-11");
+    }
+    expect(screen.getByRole("button", { name: "הכל" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "ממתינות" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
   it("preserves conversation content and sorts unread before last-message activity", () => {
     renderPage();
 
