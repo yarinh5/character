@@ -176,3 +176,19 @@ client and same-client uniqueness. Evidence:
 This covers live P01 viewing and sequential DB delivery checks, not exact
 subsecond cutoff, historical seven-second rows, new concurrent send,
 the picker/admin journey, or Product PASS.
+
+## Concurrent delivery over HTTP, 2026-11-26
+
+On `6ad1622`, two independently authenticated operator sessions issued
+parallel reservations for the same global asset and client through two
+different characters. One won; the other returned the expected reservation
+conflict. Two concurrent sends of the winning reservation returned the
+same message, one original and one replay. A fresh reserve through the
+other character was denied after delivery, and the same asset was sent
+successfully to a second client. PostgreSQL showed exactly two deliveries,
+two attachments and two linked messages for two clients, without an active
+reservation or credit debit. The asset remained available.
+
+Evidence: `F:/project love/character/.codex-task/wp05-send-20261126-01/REPORT.md`.
+This is direct AC12/AC13 HTTP evidence on a disposable stack, not the formal
+Product HTTP suite or an operator picker/admin browser journey.
