@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Reply = {
   data: Record<string, unknown> | Array<Record<string, unknown>> | null;
@@ -163,6 +163,26 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (table, values, userId) => successfulWrite(table, values, userId));
   io.rpc.mockReset().mockImplementation(async (name: string, args: Record<string, unknown>) => {
+    if (name === "save_client_onboarding_step") {
+      const payload = args._payload as {
+        date_of_birth: string;
+        profile_image_url: string | null;
+        profile_image_urls: string[];
+      };
+      const dateOfBirth = payload.date_of_birth;
+      Object.assign(io.savedClient, {
+        date_of_birth: dateOfBirth,
+        computed_age: new Date().getUTCFullYear() - Number(dateOfBirth.slice(0, 4)),
+        age: new Date().getUTCFullYear() - Number(dateOfBirth.slice(0, 4)),
+        profile_image_url: payload.profile_image_url,
+        profile_image_urls:
+          payload.profile_image_urls ??
+          (payload.profile_image_url
+            ? [payload.profile_image_url]
+            : io.savedClient.profile_image_urls),
+      });
+      return { data: { onboarding_step: 3 }, error: null };
+    }
     if (name !== "update_client_profile_images") throw new Error(`Unexpected RPC: ${name}`);
     return {
       data: [
@@ -177,6 +197,15 @@ beforeEach(() => {
   io.success.mockReset();
   io.error.mockReset();
   io.avatarChange = null;
+});
+afterEach(() => {
+  for (const [table, values] of io.write.mock.calls) {
+    if (table === "client_profiles") {
+      expect(values).not.toHaveProperty("date_of_birth");
+      expect(values).not.toHaveProperty("computed_age");
+      expect(values).not.toHaveProperty("age");
+    }
+  }
 });
 
 describe("client profile editing", () => {
@@ -231,8 +260,6 @@ describe("client profile editing", () => {
       expect.objectContaining({
         first_name: "נועה",
         last_name: "כהן",
-        date_of_birth: dateOfBirth,
-        computed_age: 36,
         city_id: "city-b",
         preferred_min_age: 30,
         preferred_max_age: 45,
@@ -242,6 +269,151 @@ describe("client profile editing", () => {
       }),
       "client-a",
     );
+    expect(io.rpc).toHaveBeenCalledWith("save_client_onboarding_step", {
+      _payload: {
+        date_of_birth: dateOfBirth,
+        profile_image_url: client.profile_image_url,
+        profile_image_urls: client.profile_image_urls,
+      },
+    });
+    expect(io.rpc.mock.invocationCallOrder[0]).toBeLessThan(io.write.mock.invocationCallOrder[0]);
+  });
+
+  it("preserves the confirmed image order and primary during a DOB-only save", async () => {
+    const imageProfile = {
+      ...client,
+      profile_image_url: "primary.webp",
+      profile_image_urls: ["second.webp", "primary.webp"],
+    };
+    io.savedClient = { ...imageProfile };
+    io.read.mockImplementation(async (table, userId) =>
+      table === "client_profiles"
+        ? { data: { ...imageProfile }, error: null }
+        : loadReply(table, userId),
+    );
+    render(<Page />);
+    await loaded();
+    fireEvent.change(screen.getByLabelText("תאריך לידה"), {
+      target: { value: "1990-01-01" },
+    });
+    submit();
+
+    await waitFor(() => expect(io.success).toHaveBeenCalledWith("נשמר"));
+    expect(io.rpc).toHaveBeenCalledTimes(1);
+    expect(io.rpc).toHaveBeenCalledWith("save_client_onboarding_step", {
+      _payload: {
+        date_of_birth: "1990-01-01",
+        profile_image_url: "primary.webp",
+        profile_image_urls: ["second.webp", "primary.webp"],
+      },
+    });
+    expect(io.savedClient).toMatchObject({
+      profile_image_url: "primary.webp",
+      profile_image_urls: ["second.webp", "primary.webp"],
+    });
+    const clientWrites = io.write.mock.calls.filter(([table]) => table === "client_profiles");
+    expect(clientWrites).toHaveLength(1);
+    expect(clientWrites[0]?.[1]).not.toHaveProperty("profile_image_url");
+    expect(clientWrites[0]?.[1]).not.toHaveProperty("profile_image_urls");
+  });
+
+  it("saves a queued avatar after a DOB RPC without sending it as confirmed image state", async () => {
+    const dobSave = deferred<Reply>();
+    io.rpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === "save_client_onboarding_step"
+        ? dobSave.promise
+        : Promise.resolve({
+            data: [
+              {
+                profile_image_url: args._profile_image_url,
+                profile_image_urls: args._profile_image_urls,
+              },
+            ],
+            error: null,
+          }),
+    );
+    render(<Page />);
+    await loaded();
+    fireEvent.change(screen.getByLabelText("תאריך לידה"), {
+      target: { value: "1990-01-01" },
+    });
+    submit();
+    await waitFor(() => expect(io.rpc).toHaveBeenCalledTimes(1));
+    act(() => io.avatarChange?.(["new.webp", "kept.webp"], "new.webp"));
+    expect(io.rpc).toHaveBeenCalledTimes(1);
+    expect(io.rpc).toHaveBeenNthCalledWith(1, "save_client_onboarding_step", {
+      _payload: {
+        date_of_birth: "1990-01-01",
+        profile_image_url: null,
+        profile_image_urls: ["kept.webp"],
+      },
+    });
+
+    await act(async () => {
+      dobSave.resolve({ data: { onboarding_step: 3 }, error: null });
+    });
+    await waitFor(() => expect(io.rpc).toHaveBeenCalledTimes(2));
+    expect(io.rpc).toHaveBeenNthCalledWith(2, "update_client_profile_images", {
+      _profile_image_url: "new.webp",
+      _profile_image_urls: ["new.webp", "kept.webp"],
+    });
+    expect(io.success).toHaveBeenCalledWith("נשמר");
+  });
+
+  it("does not start ordinary writes when the DOB RPC fails, then retries the DOB", async () => {
+    const dateOfBirth = "1990-01-01";
+    let failOnce = true;
+    io.rpc.mockImplementation(async (name: string) => {
+      expect(name).toBe("save_client_onboarding_step");
+      if (failOnce) {
+        failOnce = false;
+        return { data: null, error: { message: "invalid_onboarding_age" } };
+      }
+      io.savedClient.date_of_birth = dateOfBirth;
+      return { data: { onboarding_step: 3 }, error: null };
+    });
+    render(<Page />);
+    await loaded();
+    fireEvent.change(screen.getByLabelText("תאריך לידה"), { target: { value: dateOfBirth } });
+    submit();
+    await waitFor(() => expect(io.error).toHaveBeenCalled());
+    expect(io.write).not.toHaveBeenCalled();
+    expect(io.savedClient.date_of_birth).toBe(client.date_of_birth);
+    expect(screen.getByLabelText("תאריך לידה")).toHaveValue(dateOfBirth);
+
+    submit();
+    await waitFor(() => expect(io.success).toHaveBeenCalledWith("נשמר"));
+    expect(io.rpc).toHaveBeenCalledTimes(2);
+    expect(io.savedClient.date_of_birth).toBe(dateOfBirth);
+    expect(io.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the confirmed DOB after a partial direct save and restores a custom display name", async () => {
+    const dateOfBirth = "1990-01-01";
+    let failClientOnce = true;
+    io.write.mockImplementation(async (table, values, userId) => {
+      if (table === "client_profiles" && failClientOnce) {
+        failClientOnce = false;
+        return { data: null, error: { message: "client write failed" } };
+      }
+      return successfulWrite(table, values, userId);
+    });
+    render(<Page />);
+    await loaded();
+    fireEvent.change(screen.getByLabelText("שם תצוגה"), { target: { value: "שם מיוחד" } });
+    fireEvent.change(screen.getByLabelText("תאריך לידה"), { target: { value: dateOfBirth } });
+    fireEvent.change(screen.getByLabelText("שם פרטי"), { target: { value: "נועה" } });
+    submit();
+    await waitFor(() => expect(io.error).toHaveBeenCalled());
+    expect(io.savedClient.date_of_birth).toBe(dateOfBirth);
+    expect(io.savedClient.first_name).toBe(client.first_name);
+
+    submit();
+    await waitFor(() => expect(io.success).toHaveBeenCalledWith("נשמר"));
+    expect(io.rpc).toHaveBeenCalledTimes(1);
+    expect(io.write).toHaveBeenCalledWith("profiles", { display_name: "שם מיוחד" }, "client-a");
+    expect(io.rpc.mock.invocationCallOrder[0]).toBeLessThan(io.write.mock.invocationCallOrder[0]);
+    expect(io.savedClient).toMatchObject({ date_of_birth: dateOfBirth, first_name: "נועה" });
   });
 
   it.each([
@@ -358,7 +530,6 @@ describe("client profile editing", () => {
     expect(clientWrites[0]?.[1]).toMatchObject({
       first_name: "נועה",
       last_name: "כהן",
-      date_of_birth: changedDate,
       city_id: "city-b",
       preferred_min_age: 30,
       preferred_max_age: 45,
@@ -369,15 +540,26 @@ describe("client profile editing", () => {
     expect(clientWrites[1]?.[1]).toMatchObject({
       first_name: client.first_name,
       last_name: client.last_name,
-      date_of_birth: client.date_of_birth,
-      computed_age: client.computed_age,
-      age: client.age,
       city_id: client.city_id,
       preferred_min_age: client.preferred_min_age,
       preferred_max_age: client.preferred_max_age,
       preferred_distance_km: client.preferred_distance_km,
       content_preferences: client.content_preferences,
       character_preferences: client.character_preferences,
+    });
+    expect(io.rpc).toHaveBeenNthCalledWith(1, "save_client_onboarding_step", {
+      _payload: {
+        date_of_birth: changedDate,
+        profile_image_url: client.profile_image_url,
+        profile_image_urls: client.profile_image_urls,
+      },
+    });
+    expect(io.rpc).toHaveBeenNthCalledWith(2, "save_client_onboarding_step", {
+      _payload: {
+        date_of_birth: client.date_of_birth,
+        profile_image_url: client.profile_image_url,
+        profile_image_urls: client.profile_image_urls,
+      },
     });
   });
 

@@ -391,6 +391,7 @@ function ProfileEditor() {
     saveInFlight.current = true;
     setSaving(true);
     let formSaved = false;
+    let confirmedClientBaseline = clientBaseline;
     const interests = form.interests
       .split(",")
       .map((s) => s.trim())
@@ -422,9 +423,6 @@ function ProfileEditor() {
       ...(form.last_name === (clientBaseline.last_name ?? "")
         ? {}
         : { last_name: form.last_name.trim() }),
-      ...(dateOfBirthChanged
-        ? { date_of_birth: form.date_of_birth, computed_age: computedAge, age: computedAge }
-        : {}),
       ...(form.city_id === (clientBaseline.city_id ?? "") ? {} : { city_id: form.city_id || null }),
       ...(form.preferred_min_age ===
       (clientBaseline.preferred_min_age === null ? "" : String(clientBaseline.preferred_min_age))
@@ -451,6 +449,24 @@ function ProfileEditor() {
         : { character_preferences: form.character_preferences }),
     };
     try {
+      if (dateOfBirthChanged) {
+        const { error } = await supabase.rpc("save_client_onboarding_step", {
+          _payload: {
+            date_of_birth: form.date_of_birth,
+            profile_image_url: clientBaseline.profile_image_url,
+            profile_image_urls: clientBaseline.profile_image_urls,
+          },
+        });
+        if (error) throw error;
+        if (!alive.current) return;
+        confirmedClientBaseline = {
+          ...clientBaseline,
+          date_of_birth: form.date_of_birth,
+          computed_age: computedAge,
+          age: computedAge,
+        };
+        setLoadedProfile(confirmedClientBaseline);
+      }
       // These existing writes are independent, not an atomic transaction. Wait for
       // both, including rejected requests, before unlocking a subsequent attempt.
       const results = await Promise.allSettled([
@@ -483,7 +499,7 @@ function ProfileEditor() {
         !clientResult.value.error &&
         clientResult.value.data?.user_id === userId;
       if (clientSaved) {
-        const nextClientProfile = { ...clientBaseline, ...clientPayload };
+        const nextClientProfile = { ...confirmedClientBaseline, ...clientPayload };
         setLoadedProfile(nextClientProfile);
       }
       if (!accountSaved || !clientSaved) {
