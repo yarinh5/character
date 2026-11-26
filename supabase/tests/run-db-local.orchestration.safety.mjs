@@ -11,6 +11,7 @@ import {
   executePgTapFile,
   formatDbSuiteFailure,
   preservePgTapProcessEvidence,
+  resolveLocalTestBinding,
   runValidatedDbSuite,
   validateLocalDbTarget,
   validateTapOutput,
@@ -123,6 +124,42 @@ const accepted = target();
 assert.equal(accepted.apiPort, 61421);
 assert.equal(accepted.dbPort, 61422);
 assert.equal(accepted.db.id, expectedId);
+const isolatedId = "wp12-isolated-01";
+const isolatedEngine = "9bfee319-9d33-4def-8cc7-0e08fd977777";
+assert.deepEqual(resolveLocalTestBinding({}), { projectId, engineId: null });
+const isolatedBinding = resolveLocalTestBinding({
+  PRODUCT_TEST_PROJECT_ID: isolatedId,
+  PRODUCT_TEST_ENGINE_ID: isolatedEngine,
+});
+assert.deepEqual(isolatedBinding, { projectId: isolatedId, engineId: isolatedEngine });
+for (const environment of [
+  { PRODUCT_TEST_PROJECT_ID: projectId, PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+  { PRODUCT_TEST_PROJECT_ID: isolatedId },
+  { PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+  { PRODUCT_TEST_PROJECT_ID: "../qa", PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+]) {
+  expectFailure(() => resolveLocalTestBinding(environment));
+}
+const labeledContainer = (name, id, port, containerPort, health) => ({
+  ...container(name, id, port, containerPort, health),
+  Config: { Labels: { "com.supabase.cli.project": isolatedId } },
+});
+const isolatedTarget = targetInput({
+  configBytes: config(61421, 61422, isolatedId),
+  dbContainer: labeledContainer(`supabase_db_${isolatedId}`, "a", 61422, "5432/tcp", "healthy"),
+  apiContainer: labeledContainer(`supabase_kong_${isolatedId}`, "b", 61421, "8000/tcp"),
+  binding: isolatedBinding,
+  engineId: isolatedEngine,
+});
+assert.equal(validateLocalDbTarget(isolatedTarget).projectId, isolatedId);
+expectFailure(() => validateLocalDbTarget({ ...isolatedTarget, engineId: "other-engine" }));
+expectFailure(() => validateLocalDbTarget({ ...isolatedTarget, configBytes: config() }));
+expectFailure(() =>
+  validateLocalDbTarget({
+    ...isolatedTarget,
+    dbContainer: container(`supabase_db_${isolatedId}`, "a", 61422, "5432/tcp", "healthy"),
+  }),
+);
 assert.equal(
   validateLocalDbTarget(
     targetInput({
@@ -487,7 +524,8 @@ const pgTapResult = (overrides = {}) => ({
       executePgTapFile({
         evidenceRoot,
         path: "/tmp/partial.test.sql",
-        runner: () => pgTapResult({ status: 7, stdout: "1..2\nok 1 - partial\n", stderr: "query failed\n" }),
+        runner: () =>
+          pgTapResult({ status: 7, stdout: "1..2\nok 1 - partial\n", stderr: "query failed\n" }),
         target: target(),
         testFile: "/candidate/partial.test.sql",
       }),

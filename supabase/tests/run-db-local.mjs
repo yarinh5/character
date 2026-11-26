@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +20,25 @@ import {
   validatePublishedPortBindings,
 } from "./local-docker-port-contract.mjs";
 
-const projectId = "qmgkmsarzfjnqltljkjl";
+const defaultProjectId = "qmgkmsarzfjnqltljkjl";
+export function resolveLocalTestBinding(environment) {
+  const requested = environment.PRODUCT_TEST_PROJECT_ID;
+  if (requested === undefined && environment.PRODUCT_TEST_ENGINE_ID === undefined) {
+    return { projectId: defaultProjectId, engineId: null };
+  }
+  if (
+    typeof requested !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{2,62}$/.test(requested) ||
+    requested === defaultProjectId ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(environment.PRODUCT_TEST_ENGINE_ID ?? "")
+  ) {
+    throw new Error("Refusing local database tests: isolated project and Engine pins are required");
+  }
+  return { projectId: requested, engineId: environment.PRODUCT_TEST_ENGINE_ID };
+}
+
+const binding = resolveLocalTestBinding(process.env);
+const projectId = binding.projectId;
 const dbContainerName = `supabase_db_${projectId}`;
 const apiContainerName = `supabase_kong_${projectId}`;
 const runnerDirectory = dirname(fileURLToPath(import.meta.url));
@@ -73,9 +98,9 @@ function readConfiguredPort(configText, section) {
   fail(`missing ${section}.port in supabase/config.toml`);
 }
 
-function readConfiguredProjectId(configText) {
+function readConfiguredProjectId(configText, expectedProjectId) {
   const projectMatch = configText.match(/^project_id\s*=\s*"([^"]+)"\s*$/m);
-  if (!projectMatch || projectMatch[1] !== projectId) {
+  if (!projectMatch || projectMatch[1] !== expectedProjectId) {
     fail("supabase/config.toml project identity does not match this repository");
   }
   return projectMatch[1];
@@ -105,6 +130,7 @@ function validateContainer(
   containerPort,
   healthRequired,
   targetKind,
+  selectedBinding,
 ) {
   const retryableDbState = targetKind === "db";
   if (!container || container.Name !== `/${expectedName}`) {
@@ -114,6 +140,12 @@ function validateContainer(
   }
   if (!/^[a-f0-9]{64}$/i.test(container.Id ?? "")) {
     targetFailure(`${targetKind}_id`, `${expectedName} container ID is invalid`);
+  }
+  if (
+    selectedBinding.engineId !== null &&
+    container.Config?.Labels?.["com.supabase.cli.project"] !== selectedBinding.projectId
+  ) {
+    targetFailure(`${targetKind}_project_label`, `${expectedName} project label does not match`);
   }
   if (container.State?.Running !== true) {
     targetFailure(`${targetKind}_running`, `${expectedName} is not running`, {
@@ -141,9 +173,19 @@ function validateContainer(
   return { id: container.Id, name: expectedName };
 }
 
-export function validateLocalDbTarget({ configBytes, status, dbContainer, apiContainer }) {
+export function validateLocalDbTarget({
+  configBytes,
+  status,
+  dbContainer,
+  apiContainer,
+  binding: selectedBinding = binding,
+  engineId = null,
+}) {
   const configText = Buffer.isBuffer(configBytes) ? configBytes.toString("utf8") : configBytes;
-  const configuredProjectId = readConfiguredProjectId(configText);
+  if (selectedBinding.engineId !== null && engineId !== selectedBinding.engineId) {
+    targetFailure("engine_identity", "Docker Engine does not match the isolated target pin");
+  }
+  const configuredProjectId = readConfiguredProjectId(configText, selectedBinding.projectId);
   const apiPort = readConfiguredPort(configText, "api");
   const dbPort = readConfiguredPort(configText, "db");
   if (
@@ -153,11 +195,28 @@ export function validateLocalDbTarget({ configBytes, status, dbContainer, apiCon
     fail("Supabase status ports do not match supabase/config.toml");
   return {
     projectId: configuredProjectId,
+    engineId,
     configHash: createHash("sha256").update(configBytes).digest("hex"),
     apiPort,
     dbPort,
-    api: validateContainer(apiContainer, apiContainerName, apiPort, "8000/tcp", false, "api"),
-    db: validateContainer(dbContainer, dbContainerName, dbPort, "5432/tcp", true, "db"),
+    api: validateContainer(
+      apiContainer,
+      `supabase_kong_${configuredProjectId}`,
+      apiPort,
+      "8000/tcp",
+      false,
+      "api",
+      selectedBinding,
+    ),
+    db: validateContainer(
+      dbContainer,
+      `supabase_db_${configuredProjectId}`,
+      dbPort,
+      "5432/tcp",
+      true,
+      "db",
+      selectedBinding,
+    ),
   };
 }
 
@@ -215,6 +274,9 @@ export function discoverLocalDbTarget() {
   const dbPort = readConfiguredPort(configText, "db");
   return validateLocalDbTarget({
     configBytes,
+    binding,
+    engineId:
+      binding.engineId === null ? null : command("docker", ["info", "--format", "{{.ID}}"]).trim(),
     status: readLocalStatus(),
     dbContainer: inspectContainer(dbContainerName, "db", dbPort, "5432/tcp"),
     apiContainer: inspectContainer(apiContainerName, "api", apiPort, "8000/tcp"),
@@ -362,10 +424,7 @@ function preparePgTapEvidencePath(evidenceRoot, testFile) {
   }
   pgTapEvidenceSequence += 1;
   const sequence = String(pgTapEvidenceSequence).padStart(4, "0");
-  return join(
-    directory,
-    `db-tap-${pgTapEvidenceInvocationId}-${sequence}-${fileName}.json`,
-  );
+  return join(directory, `db-tap-${pgTapEvidenceInvocationId}-${sequence}-${fileName}.json`);
 }
 
 function normalizePgTapProcessResult(result) {
@@ -406,8 +465,7 @@ export function preservePgTapProcessEvidence({
       exitCode: normalized.status,
       signal: normalized.signal,
       timedOut: normalized.error?.code === "ETIMEDOUT",
-      errorCode:
-        typeof normalized.error?.code === "string" ? normalized.error.code : null,
+      errorCode: typeof normalized.error?.code === "string" ? normalized.error.code : null,
       stdout: normalized.stdout,
       stderr: normalized.stderr,
     },
