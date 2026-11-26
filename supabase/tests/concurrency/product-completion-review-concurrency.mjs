@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { discoverConcurrencyTarget, resolveConcurrencyBinding } from "./local-target.mjs";
 
-const container = "supabase_db_qmgkmsarzfjnqltljkjl";
+const container = discoverConcurrencyTarget(resolveConcurrencyBinding()).dbId;
 const run = `product_review_${randomUUID().replaceAll("-", "")}`;
 const sessions = [];
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
@@ -38,7 +39,9 @@ class Session {
     );
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");
-    this.child.stderr.on("data", (chunk) => { this.stderr += chunk; });
+    this.child.stderr.on("data", (chunk) => {
+      this.stderr += chunk;
+    });
     this.child.on("close", (code) => {
       if (this.pending) {
         const pending = this.pending;
@@ -70,7 +73,9 @@ class Session {
   query(sql) {
     assert.equal(this.pending, null);
     if (this.child.exitCode !== null) {
-      return Promise.reject(new Error(`psql already exited ${this.child.exitCode}: ${this.stderr.slice(-2000)}`));
+      return Promise.reject(
+        new Error(`psql already exited ${this.child.exitCode}: ${this.stderr.slice(-2000)}`),
+      );
     }
     return new Promise((resolve, reject) => {
       const marker = `done_${randomUUID()}`;
@@ -200,7 +205,9 @@ async function waitForLock(observer, session) {
     if (activity?.wait_event_type === "Lock") return;
     await delay(10);
   }
-  throw new Error(`${session.name} did not reach the expected row-lock barrier: ${JSON.stringify(activity)}`);
+  throw new Error(
+    `${session.name} did not reach the expected row-lock barrier: ${JSON.stringify(activity)}`,
+  );
 }
 
 async function handlingLockOrderRace(observer, admin, timeoutWorker) {
@@ -236,7 +243,8 @@ async function handlingLockOrderRace(observer, admin, timeoutWorker) {
 }
 
 async function multiConversationScannerLockOrderRace(observer, admin, timeoutWorker) {
-  const candidates = await observer.json(`SELECT COALESCE(json_agg(row_to_json(candidate)),'[]'::json) FROM (
+  const candidates =
+    await observer.json(`SELECT COALESCE(json_agg(row_to_json(candidate)),'[]'::json) FROM (
     SELECT conversation.id,conversation.status,conversation.inactivity_expires_at,cycle.ended_at
     FROM public.conversations conversation
     JOIN public.conversation_handling_cycles cycle ON cycle.conversation_id=conversation.id
@@ -373,7 +381,9 @@ async function supportFirstResponseRace(observer, a, b) {
   const sessionSetup = `SET LOCAL ROLE authenticated;
     SET LOCAL "request.jwt.claim.role"='authenticated';
     SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};`;
-  await a.ok(`BEGIN; SELECT id FROM public.support_tickets WHERE id=${quote(ids.supportTicket)} FOR UPDATE; ${sessionSetup}`);
+  await a.ok(
+    `BEGIN; SELECT id FROM public.support_tickets WHERE id=${quote(ids.supportTicket)} FOR UPDATE; ${sessionSetup}`,
+  );
   await b.ok(`BEGIN; ${sessionSetup}`);
   const waitingResponse = b.query(
     `SELECT row_to_json(response) FROM public.admin_add_support_ticket_message(${quote(ids.supportTicket)},'second concurrent answer','client',${quote(ids.supportReplySecond)}) response; COMMIT;`,
@@ -393,7 +403,7 @@ async function supportFirstResponseRace(observer, a, b) {
     "both distinct client-visible responses are stored",
   );
   const responseTimes = await observer.json(
-      `SELECT json_build_object('first',ticket.first_human_response_at,'earliest',messages.first_created_at,'messages',messages.message_times)
+    `SELECT json_build_object('first',ticket.first_human_response_at,'earliest',messages.first_created_at,'messages',messages.message_times)
        FROM public.support_tickets ticket
        CROSS JOIN LATERAL (
          SELECT min(created_at) AS first_created_at,array_agg(created_at ORDER BY created_at) AS message_times
@@ -402,21 +412,37 @@ async function supportFirstResponseRace(observer, a, b) {
        ) messages
        WHERE ticket.id=${quote(ids.supportTicket)};`,
   );
-  assert.equal(responseTimes.first, firstCreatedAt,
-    `first response timestamp tracks the first committed message: ${JSON.stringify(responseTimes)}`);
-  assert.equal(responseTimes.first, responseTimes.earliest,
-    `the row lock preserves the first response: ${JSON.stringify(responseTimes)}`);
+  assert.equal(
+    responseTimes.first,
+    firstCreatedAt,
+    `first response timestamp tracks the first committed message: ${JSON.stringify(responseTimes)}`,
+  );
+  assert.equal(
+    responseTimes.first,
+    responseTimes.earliest,
+    `the row lock preserves the first response: ${JSON.stringify(responseTimes)}`,
+  );
 }
 
 async function cleanup(observer, baselineAnalytics) {
   const baselineIds = (baselineAnalytics ?? []).map(quote).join(",");
-  const events = baselineAnalytics === null ? [] : await observer.json(
-    `SELECT COALESCE(json_agg(json_build_object('id',id,'name',event_name)),'[]'::json)
+  const events =
+    baselineAnalytics === null
+      ? []
+      : await observer.json(
+          `SELECT COALESCE(json_agg(json_build_object('id',id,'name',event_name)),'[]'::json)
      FROM public.analytics_events WHERE id <> ALL(ARRAY[${baselineIds}]::uuid[]);`,
+        );
+  const expectedEvents = new Set([
+    "signup_completed",
+    "conversation_started",
+    "new_claimed",
+    "new_timed_out",
+  ]);
+  assert.ok(
+    events.every((event) => expectedEvents.has(event.name)),
+    `unexpected analytics event in fixture window: ${JSON.stringify(events)}`,
   );
-  const expectedEvents = new Set(["signup_completed", "conversation_started", "new_claimed", "new_timed_out"]);
-  assert.ok(events.every((event) => expectedEvents.has(event.name)),
-    `unexpected analytics event in fixture window: ${JSON.stringify(events)}`);
   await observer.ok(`\\set ON_ERROR_STOP on
     BEGIN;
     DELETE FROM public.analytics_events WHERE id IN (${events.map((event) => quote(event.id)).join(",") || "NULL"});
@@ -445,7 +471,9 @@ const second = new Session("second");
 let baselineAnalytics = null;
 try {
   await Promise.all([observer.initialize(), first.initialize(), second.initialize()]);
-  baselineAnalytics = await observer.json("SELECT COALESCE(json_agg(id),'[]'::json) FROM public.analytics_events;");
+  baselineAnalytics = await observer.json(
+    "SELECT COALESCE(json_agg(id),'[]'::json) FROM public.analytics_events;",
+  );
   await setup(observer);
   await multiConversationScannerLockOrderRace(observer, first, second);
   await handlingLockOrderRace(observer, first, second);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import childProcess from "node:child_process";
+import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import {
@@ -20,6 +21,65 @@ import {
 
 test("uses the PATH-bound Supabase CLI for the Linux-capable rehearsal", () => {
   assert.equal(SUPABASE_CLI_EXECUTABLE, "supabase");
+});
+
+test("pinned concurrency discovery rejects Engine and project-label drift", (t) => {
+  const projectId = "isolated-concurrency";
+  const engineId = "11111111-2222-4333-8444-555555555555";
+  const binding = { projectId, engineId };
+  const originalConfig = readFileSync(new URL("../../config.toml", import.meta.url));
+  const config = Buffer.from(
+    originalConfig
+      .toString()
+      .replace('project_id = "qmgkmsarzfjnqltljkjl"', `project_id = "${projectId}"`),
+  );
+  const port = (section) =>
+    Number(
+      config.toString().match(new RegExp(`\\[${section}\\][\\s\\S]*?\\nport\\s*=\\s*(\\d+)`))[1],
+    );
+  const actual = { engineId, dbLabel: projectId, apiLabel: projectId };
+  const read = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (path, ...args) =>
+    String(path).endsWith("config.toml") ? config : read(path, ...args),
+  );
+  t.mock.method(childProcess, "execFileSync", (program, args) => {
+    if (program === SUPABASE_CLI_EXECUTABLE && args[0] === "--version") return "2.95.4";
+    if (args[0] === "context") return "desktop-linux";
+    if (args[0] === "info") return actual.engineId;
+    if (args[0] === "status")
+      return JSON.stringify({
+        API_URL: `http://127.0.0.1:${port("api")}`,
+        DB_URL: `postgresql://127.0.0.1:${port("db")}/postgres`,
+      });
+    assert.equal(args[0], "inspect");
+    const db = args[1] === `supabase_db_${projectId}`;
+    assert.ok(db || args[1] === `supabase_kong_${projectId}`);
+    return JSON.stringify([
+      {
+        Name: `/${args[1]}`,
+        Id: (db ? "d" : "a").repeat(64),
+        Config: { Labels: { "com.supabase.cli.project": db ? actual.dbLabel : actual.apiLabel } },
+        State: { Running: true, Health: { Status: "healthy" } },
+        NetworkSettings: {
+          Ports: {
+            [db ? "5432/tcp" : "8000/tcp"]: [{ HostPort: String(port(db ? "db" : "api")) }],
+          },
+        },
+      },
+    ]);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(discoverReadAccessTarget(binding).projectId, projectId);
+    actual.engineId = "22222222-2222-4333-8444-555555555555";
+    assert.throws(() => discoverReadAccessTarget(binding), /pinned Docker engine drift/);
+    actual.engineId = engineId;
+    actual.dbLabel = "qmgkmsarzfjnqltljkjl";
+    assert.throws(() => discoverReadAccessTarget(binding));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });
 
 test("isolates the 117 to 118 scenario and restores the full approved baseline", () => {

@@ -21,8 +21,6 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 export const SUPABASE_CLI_EXECUTABLE = "supabase";
 const projectId = "qmgkmsarzfjnqltljkjl";
-const dbName = `supabase_db_${projectId}`;
-const apiName = `supabase_kong_${projectId}`;
 const m117 = "20261013113744";
 const m118 = "20261019071718";
 const failureMetadata = new WeakMap();
@@ -452,10 +450,14 @@ function run(command, args, options = {}) {
 function supabase(args, options = {}) {
   return run(SUPABASE_CLI_EXECUTABLE, args, { timeout: 240_000, ...options });
 }
-function inspect(name, internalPort, expectedPort, requireHealthy) {
+function inspect(name, internalPort, expectedPort, requireHealthy, selectedProjectId = null) {
   const info = JSON.parse(run("docker", ["inspect", name]))[0];
   assert.equal(info.Name, `/${name}`);
   assert.match(info.Id, /^[a-f0-9]{12,}$/i);
+  if (selectedProjectId !== null) {
+    assert.match(info.Id, /^[a-f0-9]{64}$/i);
+    assert.equal(info.Config?.Labels?.["com.supabase.cli.project"], selectedProjectId);
+  }
   assert.equal(info.State?.Running, true, `${name} must be running`);
   if (requireHealthy) assert.equal(info.State?.Health?.Status, "healthy");
   const mappings = info.NetworkSettings?.Ports?.[internalPort] ?? [];
@@ -476,10 +478,13 @@ function port(config, section) {
   assert.ok(block, `missing ${section} config`);
   return Number(block[1].match(/^\s*port\s*=\s*(\d+)\s*$/m)?.[1]);
 }
-export function discoverReadAccessTarget() {
+export function discoverReadAccessTarget(binding = { projectId, engineId: null }) {
+  const selectedProjectId = binding.projectId;
+  const dbContainerName = `supabase_db_${selectedProjectId}`;
+  const apiContainerName = `supabase_kong_${selectedProjectId}`;
   const config = readFileSync(join(root, "supabase", "config.toml"));
   const text = config.toString("utf8");
-  assert.match(text, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
+  assert.equal(text.match(/^project_id\s*=\s*"([^"]+)"\s*$/m)?.[1], selectedProjectId);
   const dbPort = port(text, "db");
   const apiPort = port(text, "api");
   const cliVersion = run(SUPABASE_CLI_EXECUTABLE, ["--version"]).trim();
@@ -540,6 +545,10 @@ export function discoverReadAccessTarget() {
       "{{.Endpoints.docker.Host}}",
     ]).trim();
     assert.equal(dockerEndpoint, productEndpoint, "Product Docker endpoint drift");
+  } else if (binding.engineId !== null) {
+    for (const key of ["DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"]) {
+      assert.ok(!process.env[key], `${key} override is not permitted with a pinned engine`);
+    }
   } else if (dockerContext === "default") {
     assert.equal(process.env.DOCKER_HOST, "unix:///var/run/docker.sock");
   } else {
@@ -548,6 +557,8 @@ export function discoverReadAccessTarget() {
 
   const dockerEngineId = run("docker", ["info", "--format", "{{.ID}}"]).trim();
   assert.match(dockerEngineId, /^[0-9a-f-]{36}$/i);
+  if (binding.engineId !== null)
+    assert.equal(dockerEngineId, binding.engineId, "pinned Docker engine drift");
   if (productBound) {
     assert.notEqual(
       dockerEngineId.toLowerCase(),
@@ -555,7 +566,7 @@ export function discoverReadAccessTarget() {
       "Product reached the shared engine",
     );
     assert.equal(dockerEngineId, expectedEngine, "Product Docker engine drift");
-  } else if (dockerContext === "default") {
+  } else if (binding.engineId === null && dockerContext === "default") {
     assert.equal(dockerEngineId, process.env.CODEX_ISOLATED_DOCKER_ENGINE_ID);
   }
   const status = JSON.parse(supabase(["status", "--output", "json"]));
@@ -568,16 +579,28 @@ export function discoverReadAccessTarget() {
     assert.equal(Number(url.port), expectedPort, `${label} endpoint drift`);
   }
   return {
-    api: inspect(apiName, "8000/tcp", apiPort, false),
+    api: inspect(
+      apiContainerName,
+      "8000/tcp",
+      apiPort,
+      false,
+      binding.engineId === null ? null : selectedProjectId,
+    ),
     apiPort,
     cliVersion,
     configHash: createHash("sha256").update(config).digest("hex"),
-    db: inspect(dbName, "5432/tcp", dbPort, true),
+    db: inspect(
+      dbContainerName,
+      "5432/tcp",
+      dbPort,
+      true,
+      binding.engineId === null ? null : selectedProjectId,
+    ),
     dbPort,
     dockerContext,
     dockerEndpoint,
     dockerEngineId,
-    projectId,
+    projectId: selectedProjectId,
   };
 }
 

@@ -1,23 +1,15 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { discoverConcurrencyTarget, resolveConcurrencyBinding } from "./local-target.mjs";
 
-const container = "supabase_db_qmgkmsarzfjnqltljkjl";
+const container = discoverConcurrencyTarget(resolveConcurrencyBinding()).dbId;
 const run = `wp01_handling_${randomUUID().replaceAll("-", "")}`;
 const sessions = [];
 const fixtures = [];
 let backfillRunId = null;
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
-
-function docker(args) {
-  return execFileSync("docker", args, {
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: 15000,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
 
 class Session {
   constructor(label) {
@@ -459,7 +451,6 @@ async function cleanup(observer) {
 const observer = new Session("observer");
 let baseline;
 try {
-  docker(["inspect", "--format", "{{.State.Running}}", container]);
   await observer.initialize();
   baseline = await observer.json(baselineSql);
   assert.equal(baseline.mode, "legacy_shadow");

@@ -1,78 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { assertConcurrencyMigrationVersions } from "./migration-inventory.mjs";
+import { discoverConcurrencyTarget, resolveConcurrencyBinding } from "./local-target.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const projectId = "qmgkmsarzfjnqltljkjl";
-const container = `supabase_db_${projectId}`;
-const apiContainer = `supabase_kong_${projectId}`;
+const binding = resolveConcurrencyBinding();
+let container;
 const run = `v4_3_claim_${randomUUID().replaceAll("-", "")}`;
 const sessions = [];
 const quote = (value) => `'${value.replaceAll("'", "''")}'`;
-
-function docker(args) {
-  return execFileSync("docker", args, {
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: 15000,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
-
-function configPort(config, section) {
-  const sectionPattern = section.replaceAll(".", "\\.");
-  const match = config.match(new RegExp(`\\[${sectionPattern}\\]([\\s\\S]*?)(?=\\n\\[|$)`));
-  assert.ok(match, `missing [${section}] local configuration`);
-  const port = match[1].match(/^\s*port\s*=\s*(\d+)\s*$/m);
-  assert.ok(port, `missing [${section}].port local configuration`);
-  return Number(port[1]);
-}
-
-function assertLoopbackUrl(value, expectedPort, label) {
-  const url = new URL(String(value));
-  assert.ok(
-    ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname),
-    `${label} must use a loopback host`,
-  );
-  assert.equal(Number(url.port), expectedPort, `${label} must match config.toml`);
-}
-
-function assertDockerPort(info, name, internalPort, expectedPort) {
-  assert.equal(info.Name, `/${name}`);
-  assert.equal(info.State.Running, true, `${name} must be running`);
-  const published = info.NetworkSettings?.Ports?.[internalPort] ?? [];
-  assert.ok(
-    published.some((entry) => Number(entry.HostPort) === expectedPort),
-    `${name} ${internalPort} must match config.toml`,
-  );
-}
-
-function assertLocalTarget() {
-  const config = readFileSync(join(repoRoot, "supabase", "config.toml"), "utf8");
-  assert.match(config, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
-  const apiPort = configPort(config, "api");
-  const dbPort = configPort(config, "db");
-  const status = JSON.parse(
-    execFileSync("supabase", ["status", "--output", "json"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 30_000,
-    }),
-  );
-  assertLoopbackUrl(status.API_URL, apiPort, "local API URL");
-  assertLoopbackUrl(status.DB_URL, dbPort, "local DB URL");
-  const db = JSON.parse(docker(["inspect", container]))[0];
-  const api = JSON.parse(docker(["inspect", apiContainer]))[0];
-  assertDockerPort(db, container, "5432/tcp", dbPort);
-  assertDockerPort(api, apiContainer, "8000/tcp", apiPort);
-  return { apiPort, dbPort, db, api };
-}
 
 class Session {
   constructor(label) {
@@ -355,9 +292,8 @@ async function verifyBaseline() {
   }
 }
 try {
-  const localTarget = assertLocalTarget();
-  const info = localTarget.db;
-  assert.equal(info.State.Health.Status, "healthy");
+  const localTarget = discoverConcurrencyTarget(binding, { healthy: true });
+  container = localTarget.dbId;
   observer = new Session("observer");
   await observer.initialize();
   await observer.ok("\\set ON_ERROR_STOP on\nSELECT 1;");

@@ -4,12 +4,14 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveConcurrencyBinding } from "./local-target.mjs";
 import {
   assertFrozenReadAccessTarget,
   discoverReadAccessTarget,
 } from "../upgrades/wp01-read-access-117-to-118.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const binding = resolveConcurrencyBinding();
 const runId = `wp01_read_revoke_${randomUUID().replaceAll("-", "")}`;
 const q = (value) => `'${String(value).replaceAll("'", "''")}'`;
 let frozenTarget;
@@ -98,7 +100,7 @@ export async function runOperationWithCleanup({ operation, cleanup }) {
 
 function assertTarget() {
   assert.ok(frozenTarget, "target must be frozen before orchestration");
-  return assertFrozenReadAccessTarget(frozenTarget, discoverReadAccessTarget());
+  return assertFrozenReadAccessTarget(frozenTarget, discoverReadAccessTarget(binding));
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -658,7 +660,7 @@ async function scenarioAuthorityRevokeVsSend(kind, revokeFirst) {
 }
 
 export async function runReadAccessConcurrency() {
-  frozenTarget = discoverReadAccessTarget();
+  frozenTarget = discoverReadAccessTarget(binding);
   const originalBaseline = fixtureGraphSnapshot();
   const sentinel = sentinelIds();
   await runOperationWithCleanup({
