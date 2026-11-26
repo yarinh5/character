@@ -114,6 +114,18 @@
   repaired revision; 2,000/100 and formal integrated Product remain open.
   Evidence: `F:/project love/character/.codex-task/wp02-capacity-race-20261126-01/REPORT.md`.
 
+- The first 1,000/100 attempt on `3965b74` stopped in fixture setup, before Realtime joins or
+  measured workload. All 1,101 Auth fixtures were created, but Kong returned 500 for the bulk
+  operator insert because its worker could not write the task container's client-body temporary
+  directory. A rollback-only 100-row SQL insertion passed. After setting only that owned
+  directory to `kong:nogroup` mode 0700, a nonmutating 32KB request reached PostgREST and
+  returned the expected 404. The run was not retried on the populated database. Its seven
+  containers, three volumes and network were removed after ownership checks; pre-existing
+  containers and volumes matched, but Docker's default bridge network ID changed across WSL
+  restart and the strict inventory comparison reported false. The corrected allocator's 1,000/100
+  and 2,000/100 load results are still unproven.
+  Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-03/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
