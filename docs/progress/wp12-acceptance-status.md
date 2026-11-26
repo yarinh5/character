@@ -1,5 +1,17 @@
 # WP12 acceptance status (2026-11-26)
 
+- Scoped AC31 local client journey (2026-11-27): the current worktree's app ran
+  against a task-only Supabase project on the dedicated local Engine, with a
+  loopback Vite server. A synthetic admin-provisioned client signed in, reached
+  `/app/characters`, loaded `/app/profile`, saved a display name verified by a
+  read-only DB query, logged out, and was redirected from the protected profile
+  route to `/login`. The task copy's Vite binary mismatch was avoided by using
+  the current worktree; no application fix was inferred from that mismatch.
+  Public registration, email verification, payments, media, and the signed
+  integrated Product run remain OPEN. The task stack, Vite server and holder
+  were stopped; final inventory was 0 task containers/volumes/networks and 0
+  task-port listeners. Evidence: `F:/project love/character/.codex-task/db-runner-isolated-1126-01/evidence-client-journey-20261127-01/README.md`.
+
 - Scoped local-evidence source comparison (2026-11-27): a mechanical CRLF-to-LF-only comparison of 498 tracked paths in `src/`, `supabase/functions/`, `supabase/tests/http/`, `supabase/migrations/` and `integration/` against the disposable task source found 494 equivalent. The four exceptions are the current integration document and artifact inventory test (changed after the task copy), formatting-only changes in `media_authorization.integration.test.ts`, and the current `src/test/http-fixture-target.test.ts` safety test missing from that task copy. All 262 shared `src` files, all 32 Edge-function files and all 183 migration files are content-equivalent; no production-code difference was found in those scopes. The per-path normalized hashes and exact exceptions are in `F:/project love/character/.codex-task/db-runner-isolated-1126-01/source-equivalence-20261127-01.json` (SHA-256 `c52a17ab6c408d4ada84ed1992557c37a61943eb0da90222deb206413fa1bb30`). This supports reusing the scoped local DB/HTTP evidence for those source bytes, but does not turn it into a signed integrated Product run or prove unexamined paths.
 
 - Current Product frontend Offline gate (2026-11-27): after the exact-inventory correction, `npm exec -- vitest run src` completed on this branch with process exit 0, 85/85 test files and 851/851 tests passed (64.10 seconds). A jsdom message, `Not implemented: navigation to another Document`, appeared but did not fail the suite. This is current-source frontend test evidence; it does not prove DB, Edge, Storage, browser journeys or integrated Product acceptance.
