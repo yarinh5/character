@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({ navigate: vi.fn() }));
@@ -26,7 +27,9 @@ vi.mock("@/lib/conversationPresence", () => ({
 vi.mock("@/lib/readStates", () => ({ fetchReadSummary: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/analyticsEvents", () => ({ trackAnalyticsEvent: vi.fn() }));
 vi.mock("@/lib/characterAvailability", () => ({
-  fetchCharacterLiveAvailability: vi.fn().mockResolvedValue(new Map([["character-a", "available"]])),
+  fetchCharacterLiveAvailability: vi
+    .fn()
+    .mockResolvedValue(new Map([["character-a", "available"]])),
 }));
 vi.mock("@/hooks/useMessageAttachmentAccessMap", () => ({
   useMessageAttachmentAccessMap: () => ({
@@ -116,26 +119,64 @@ vi.mock("@/integrations/supabase/client", () => {
 });
 
 import { Route } from "@/routes/app.chat.$conversationId";
+import { supabase } from "@/integrations/supabase/client";
 
 const Page = (Route as unknown as { component: ComponentType }).component;
 
+function renderChat() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Page />
+    </QueryClientProvider>,
+  );
+}
+
 describe("client chat accessibility regressions", () => {
   it("keeps every icon-only chat action named after hydration", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <Page />
-      </QueryClientProvider>,
-    );
+    renderChat();
 
-    expect(
-      await screen.findByRole("button", { name: "חזרה לרשימת השיחות" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "חזרה לרשימת השיחות" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "דיווח על השיחה" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "הסרת השיחה מהרשימה" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "בחירת סטיקר לשליחה" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "שליחת הודעה" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["הסרת השיחה מהרשימה", "Escape"],
+    ["הסרת השיחה מהרשימה", "Cancel"],
+    ["דיווח על השיחה", "Escape"],
+    ["דיווח על השיחה", "Cancel"],
+  ])("restores focus to %s after %s without changing the chat", async (name, method) => {
+    vi.clearAllMocks();
+    const user = userEvent.setup();
+    renderChat();
+
+    const opener = await screen.findByRole("button", { name });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    if (method === "Escape") {
+      await user.keyboard("{Escape}");
+    } else {
+      const cancel = within(dialog).getByRole("button", { name: "ביטול" });
+      cancel.focus();
+      await user.keyboard("{Enter}");
+    }
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(opener).toHaveFocus();
+    });
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "hide_conversation_for_client",
+      expect.anything(),
+    );
+    expect(io.navigate).not.toHaveBeenCalled();
   });
 });

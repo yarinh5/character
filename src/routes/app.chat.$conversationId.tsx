@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
@@ -31,9 +31,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -462,22 +464,28 @@ function ChatPage() {
             )}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="דיווח על השיחה"
-          onClick={() => setReportOpen(true)}
-        >
-          <Flag className="h-5 w-5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="הסרת השיחה מהרשימה"
-          onClick={() => setDeleteOpen(true)}
-        >
-          <Trash2 className="h-5 w-5" />
-        </Button>
+        <ReportDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          conversationId={conversationId}
+          userId={user?.id}
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="דיווח על השיחה">
+              <Flag className="h-5 w-5" />
+            </Button>
+          }
+        />
+        <DeleteConversationDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onConfirm={deleteConversation}
+          deleting={deleting}
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="הסרת השיחה מהרשימה">
+              <Trash2 className="h-5 w-5" />
+            </Button>
+          }
+        />
       </header>
 
       {/* Messages */}
@@ -655,18 +663,6 @@ function ChatPage() {
         <p className="text-[10px] text-muted-foreground mt-1 text-end">{input.length}/2000</p>
       </div>
 
-      <ReportDialog
-        open={reportOpen}
-        onOpenChange={setReportOpen}
-        conversationId={conversationId}
-        userId={user?.id}
-      />
-      <DeleteConversationDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onConfirm={deleteConversation}
-        deleting={deleting}
-      />
       <StickerPicker
         conversationId={conversationId}
         open={stickerPickerOpen}
@@ -684,22 +680,25 @@ function DeleteConversationDialog({
   onOpenChange,
   onConfirm,
   deleting,
+  trigger,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onConfirm: () => void;
   deleting: boolean;
+  trigger: ReactElement;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent dir="rtl">
         <DialogHeader>
           <DialogTitle>מחיקת שיחה מהרשימה</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground leading-6">
+        <DialogDescription className="leading-6">
           השיחה תוסתר רק אצלך. העובדים והאדמין עדיין יראו את ההיסטוריה, ואם תפתח שוב את אותה דמות
           תיווצר שיחה חדשה.
-        </p>
+        </DialogDescription>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
             ביטול
@@ -718,11 +717,13 @@ function ReportDialog({
   onOpenChange,
   conversationId,
   userId,
+  trigger,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   conversationId: string;
   userId: string | undefined;
+  trigger: ReactElement;
 }) {
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
@@ -753,7 +754,8 @@ function ReportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl">
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent dir="rtl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>דיווח על שיחה</DialogTitle>
         </DialogHeader>
