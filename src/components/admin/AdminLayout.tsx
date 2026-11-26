@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   HeartHandshake,
   LayoutDashboard,
   LogOut,
+  Menu,
   MessageCircle,
   ScrollText,
   Settings,
@@ -23,6 +24,14 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
 import { SkipLink } from "@/components/common/SkipLink";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 type NavTo =
   | "/admin"
@@ -58,6 +67,9 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/settings", label: "הגדרות", icon: Settings },
   { to: "/admin/analytics", label: "אנליטיקות", icon: BarChart3 },
 ];
+
+const PRIMARY_MOBILE_NAV = NAV.slice(0, 4);
+const MORE_MOBILE_NAV = NAV.slice(4);
 
 function Spinner() {
   return (
@@ -106,9 +118,11 @@ function AdminShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const isActive = (to: string, exact?: boolean) =>
     exact ? pathname === to : pathname.startsWith(to);
+  const selectedMore = MORE_MOBILE_NAV.find(({ to, exact }) => isActive(to, exact));
 
   const handleLogout = async () => {
     await signOut();
@@ -170,23 +184,68 @@ function AdminShell({ children }: { children: ReactNode }) {
           יציאה
         </Button>
 
-        <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40 overflow-x-auto">
-          <div className="flex min-w-max">
-            {NAV.map(({ to, label, icon: Icon, exact }) => (
-              <Link
-                key={to}
-                to={to}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 py-2.5 px-4 text-[11px] min-w-[68px]",
-                  isActive(to, exact) ? "text-primary" : "text-muted-foreground",
-                )}
-              >
-                <Icon className="h-5 w-5" />
-                {label}
-              </Link>
-            ))}
-          </div>
-        </nav>
+        <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+          <nav
+            aria-label="ניווט ניהול במובייל"
+            className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40"
+          >
+            <div className="grid grid-cols-5">
+              {PRIMARY_MOBILE_NAV.map(({ to, label, icon: Icon, exact }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  aria-current={isActive(to, exact) ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px]",
+                    isActive(to, exact) ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
+                  {label}
+                </Link>
+              ))}
+              <SheetTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={selectedMore ? `עוד יעדים, נבחר ${selectedMore.label}` : "עוד יעדים"}
+                  data-active={Boolean(selectedMore)}
+                  className={cn(
+                    "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px]",
+                    selectedMore ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Menu className="h-5 w-5" />
+                  <span aria-hidden="true">עוד</span>
+                </button>
+              </SheetTrigger>
+            </div>
+          </nav>
+          <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto" dir="rtl">
+            <SheetHeader>
+              <SheetTitle>מסכי ניהול</SheetTitle>
+              <SheetDescription className="sr-only">יעדי ניווט נוספים</SheetDescription>
+            </SheetHeader>
+            <nav aria-label="יעדי ניהול נוספים" className="mt-5 grid gap-1 pb-3">
+              {MORE_MOBILE_NAV.map(({ to, label, icon: Icon, exact }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  onClick={() => setMoreOpen(false)}
+                  aria-current={isActive(to, exact) ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-11 items-center gap-3 rounded-sm px-3 text-sm font-medium",
+                    isActive(to, exact)
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-accent",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Link>
+              ))}
+            </nav>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );
