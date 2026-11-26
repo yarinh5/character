@@ -1014,11 +1014,16 @@ all Functions locally.” The config reference defines missing `functions.<name>
 their missing sections. No code/config change and no `--no-verify-jwt` flag is required.
 
 After `service.start` and `service.reset` pass, serve all functions from the repository root as one
-run-owned foreground process redirected to private evidence:
+run-owned foreground process redirected to private evidence. The HTTP acceptance includes expired
+client media cleanup. Enable it explicitly for this verified, disposable Product DB and Storage
+only; the worker remains disabled by default. Do not use this setting against QA, a restore target,
+or a shared stack.
 
 ```bash
 cd "$INTEGRATION_RUN_ROOT"
-supabase functions serve \
+edge_acceptance_env="$RUN_EVIDENCE/edge-local-acceptance.env"
+(umask 077; set -o noclobber; printf '%s\n' 'CLIENT_MEDIA_CLEANUP_ENABLED=true' >"$edge_acceptance_env") || exit 1
+supabase functions serve --env-file "$edge_acceptance_env" \
   >"$RUN_EVIDENCE/edge-serve.stdout" \
   2>"$RUN_EVIDENCE/edge-serve.stderr" &
 export PRODUCT_EDGE_SERVE_PID="$!"
@@ -1046,9 +1051,9 @@ test "$edge_ready" = '1'
 
 The 60 samples are one bounded readiness gate, not test retries. A `401` proves the route is served
 and JWT enforcement rejects an unauthenticated POST; it does not prove authorized behavior. The
-subsequent HTTP tests must prove authorized user/service-role paths. The seventeen function routes read only the
-standard local `SUPABASE_URL`, publishable/anon and service-role/secret variables injected by the
-local stack, so no custom env file is planned. Raw status/secrets remain private. A missing function,
+subsequent HTTP tests must prove authorized user/service-role paths. The local stack injects
+`SUPABASE_URL`, publishable/anon and service-role/secret variables; the acceptance env file contains
+only the non-secret cleanup opt-in. Raw status/secrets remain private. A missing function,
 bucket (`client-media`/`character-media`), injected variable, permission or decoder stops
 HTTP/Storage-dependent work. Finalization sends `INT` to the saved Edge PID and records `wait` as a
 secondary failure if needed.
@@ -1303,7 +1308,8 @@ must state the remaining database/volume state.
 - DB/HTTP/Edge/Storage/concurrency, Deno decoder, Docker/WSL, Product runtime, WP01.5, B1-B7,
   migration application, scheduler activation, Git Delivery, QA/Production and deploy are
   **NOT EXECUTED**.
-- Edge serving is planned as `supabase functions serve` from the execution root. Official CLI/config
+- Edge serving is planned as `supabase functions serve` from the execution root, with the local
+  acceptance env file described in the Edge readiness gate above. Official CLI/config
   documentation establishes all-function serving and default `enabled=true`/`verify_jwt=true`; all
   seventeen routes must pass the bounded unauthenticated `401` readiness gate before authenticated HTTP.
 - **Preparation verdict: PREPARATION READY SUBJECT TO EXPLICIT PRE-RUN SANITIZATION AUTHORIZATION.** The focused collector
