@@ -20,6 +20,26 @@
 
 - WP12 300/30 capacity follow-up on `8722c8a`: a new isolated stack with all 170 migrations handled 331/331 real password logins (including the synthetic admin) and 30/30 operator heartbeats. The first fixture-only bulk message transaction timed out and rolled back; the scoped continuation preserved the owned accounts and omitted that oversized setup operation. Realtime remained **BLOCKED**: tenant limit 200, 204/330 joins acknowledged, 126 refused, and client-observed instantaneous peak 185 clients/19 operators. Server recorded 126 `ConnectionRateLimitReached` errors, with no limits changed. Sustained event/Discovery/credit/NEW/admin load, registration/media Edge and higher tiers were not run. Removed only six containers, two volumes and one network created by the task; unrelated inventory matched. This does not establish launch capacity or Product PASS. Evidence: `F:/project love/character/.codex-task/wp12-load-300-30-20261126-01/REPORT.md`.
 
+- WP12 300/30 local text-workload continuation on `ffe4143`, clean DB with 177 migrations:
+  the disposable tenant connection budget was set to 400 through the authenticated Realtime
+  management API; the 100 joins/second limit stayed in place. Both unpaced and paced attempts
+  then stopped at 240/330. Kong logged `512 worker_connections are not enough while connecting
+  to upstream`; a reload of the task-owned gateway added only `worker_connections 1024` to its
+  custom template. The other rendered Kong configuration and routes were unchanged.
+  - The final run held all 300 client and 30 operator authenticated sockets through Kong for
+    35.014 seconds. 331/331 password logins, 30/30 heartbeats, 300/300 real client text RPCs
+    and 30/30 admin point adjustments succeeded. Both read passes passed: 600 Discovery,
+    600 balance, 60 NEW queue and two admin presence reads. All expected client-message and
+    operator-wallet events arrived, with recipient and payload checks and no channel failures.
+  - Independent DB checks found 300 messages, one 10-credit debit per client, 300 wallets at 90,
+    300 NEW items and 30 matching point-wallet/ledger pairs. Local p95: text send 142 ms,
+    Discovery 313 ms, wallet read 304 ms, NEW queue 105 ms. These are observations, not SLOs.
+  - Only the seven task containers, two volumes and one network were removed. Prior inventory
+    matched and no task listener remained. No shared setting, app code, QA or provider changed.
+    The 300/30 registration and media load, longer sustained runs, higher tiers and integrated
+    Product remain open. Evidence: `F:/project love/character/.codex-task/wp12-load-capacity-profile-20261126-01`
+    (`gateway-result.json`, `gateway-requests.jsonl`, `workload-readback.json`, `cleanup.json`).
+
 - AC32 recovery evidence follow-up: migration `20261126110000` rejects non-finite snapshot/coverage dates, post-generation coverage, backwards coverage, and complete claims that stop before the source snapshot. A valid append invalidates old approval readiness and replay authorization atomically without changing the import version or external lock. Final local application from 169 to 170 migrations kept RPC privileges unchanged; 42/42 rollback-only pgTAP and 14/14 focused Vitest passed. Invalid historical timing and stale approval each failed migration preflight without rewriting data. Recovery writers must be disabled and drained for rollout; no live provider import, release, replay, RTO/RPO or Product acceptance was exercised. Both test environments were cleaned with unrelated inventory unchanged. Evidence: `F:/project love/character/.codex-task/wp12-recovery-coverage-final-20261126-01/REPORT.md`.
 
 - AC32 restored-database financial freeze: the recovery pgTAP suite now checks a real authorized admin credit adjustment before the gate closes and rejection afterward. 28/28 passed on the isolated restored PostgreSQL target. The credit wallet and ledger were unchanged by the rejected write, and an in-app alert record was written for the synthetic admin only. ROLLBACK restored the before-state and zero fixture users/wallet/ledger rows; the owned target returned to Exited. Direct Node contract and focused Vitest 14/14 passed. A separate code review found missing ordering checks on the recovery manifest coverage watermark, which remains OPEN. No manifest import, external alert delivery, replay/release or Product acceptance was exercised. Evidence: `F:/project love/character/.codex-task/wp12-recovery-credit-freeze-20261126-01/REPORT.md`.
