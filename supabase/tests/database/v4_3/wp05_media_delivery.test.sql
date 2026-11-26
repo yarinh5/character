@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(29);
+SELECT plan(38);
 
 SELECT has_table('public', 'character_media_asset_characters', 'WP05 character assignments exist');
 SELECT has_table('public', 'character_media_asset_tags', 'WP05 tag assignments exist');
@@ -142,6 +142,77 @@ SELECT throws_like(
   '%character_media_reservations_one_active_asset_client_idx%',
   'A second active reservation for the same asset and client is rejected'
 );
+
+-- Canonical preview uses the reservation and its current authority, not the global asset status.
+INSERT INTO public.user_roles (user_id, role)
+VALUES ('00000000-0000-4000-8000-000000050002', 'operator');
+INSERT INTO public.character_operator_assignments (character_id, operator_id)
+VALUES ('00000000-0000-4000-8000-000000050201', '00000000-0000-4000-8000-000000050101');
+INSERT INTO public.messages (conversation_id, sender_type, sender_id, content)
+VALUES ('00000000-0000-4000-8000-000000050501', 'client',
+  '00000000-0000-4000-8000-000000050003', 'Synthetic preview request');
+UPDATE public.conversation_work_items SET status = 'assigned',
+  responsible_operator_id = '00000000-0000-4000-8000-000000050101', assigned_at = clock_timestamp()
+WHERE conversation_id = '00000000-0000-4000-8000-000000050501';
+INSERT INTO public.conversation_handling_cycles (conversation_id, work_item_id, operator_id)
+SELECT conversation_id, id, responsible_operator_id FROM public.conversation_work_items
+WHERE conversation_id = '00000000-0000-4000-8000-000000050501';
+UPDATE public.character_media_reservations r SET handling_cycle_id = cycle.id
+FROM public.conversation_handling_cycles cycle
+WHERE r.conversation_id = cycle.conversation_id
+  AND r.conversation_id = '00000000-0000-4000-8000-000000050501';
+SELECT set_config('wp05.preview_reservation', id::text, true)
+FROM public.character_media_reservations
+WHERE conversation_id = '00000000-0000-4000-8000-000000050501';
+
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  'assets/wp05-b/preview.webp', 'Reservation owner can preview an available canonical asset');
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050001', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'General admin read access does not grant another actor private reservation preview');
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050003', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'Conversation client cannot read the private reservation preview');
+DELETE FROM public.character_media_asset_characters
+WHERE media_asset_id = '00000000-0000-4000-8000-000000050402'
+  AND character_id = '00000000-0000-4000-8000-000000050201';
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'A reservation cannot preview media removed from the character catalog');
+INSERT INTO public.character_media_asset_characters (media_asset_id, character_id)
+VALUES ('00000000-0000-4000-8000-000000050402', '00000000-0000-4000-8000-000000050201');
+UPDATE public.conversations SET assigned_operator_id = NULL
+WHERE id = '00000000-0000-4000-8000-000000050501';
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'A stale reservation cannot preview after responsibility is cleared');
+UPDATE public.conversations SET assigned_operator_id = '00000000-0000-4000-8000-000000050101',
+  last_business_message_at = clock_timestamp() - interval '181 seconds',
+  inactivity_expires_at = clock_timestamp() - interval '1 second'
+WHERE id = '00000000-0000-4000-8000-000000050501';
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'An expired handling deadline cannot preview before the cycle scanner runs');
+UPDATE public.conversations SET inactivity_expires_at = clock_timestamp() + interval '180 seconds'
+WHERE id = '00000000-0000-4000-8000-000000050501';
+UPDATE public.character_media_assets SET status = 'disabled', disabled_at = clock_timestamp(),
+  status_before_disabled = status
+WHERE id = '00000000-0000-4000-8000-000000050402';
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'A reservation cannot preview a disabled asset');
+UPDATE public.character_media_assets SET status = status_before_disabled, disabled_at = NULL,
+  status_before_disabled = NULL
+WHERE id = '00000000-0000-4000-8000-000000050402';
+UPDATE public.conversation_handling_cycles SET ended_at = clock_timestamp(), end_reason = 'closed'
+WHERE conversation_id = '00000000-0000-4000-8000-000000050501';
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', current_setting('wp05.preview_reservation')::uuid),
+  NULL::text, 'An ended cycle cannot issue a preview');
+SELECT is(public.resolve_character_media_preview_path_for_server(
+  '00000000-0000-4000-8000-000000050002', 'reserved_preview', gen_random_uuid()),
+  NULL::text, 'A missing reservation cannot issue a preview');
 
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';

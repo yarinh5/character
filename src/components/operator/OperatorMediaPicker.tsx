@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Clock3, Eye, Image, LoaderCircle, LockKeyhole, RefreshCw, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -182,6 +182,7 @@ export function OperatorMediaPicker({
   readOnly = false,
   open,
   onOpenChange,
+  returnFocusRef,
   onSent,
 }: {
   actor?: MediaPickerActor;
@@ -191,6 +192,7 @@ export function OperatorMediaPicker({
   readOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLButtonElement | null>;
   onSent?: (
     result: SendResponse,
     conversationId: string,
@@ -953,13 +955,25 @@ export function OperatorMediaPicker({
     </div>
   );
 
+  const restoreOpenerFocus = (event: Event) => {
+    const opener = returnFocusRef?.current;
+    if (!opener?.isConnected || opener.disabled) return;
+    event.preventDefault();
+    opener.focus();
+  };
+
   if (isMobile) {
     return (
       <Sheet
         open={open}
         onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : closePicker())}
       >
-        <SheetContent side="bottom" className="flex max-h-[92dvh] flex-col" dir="rtl">
+        <SheetContent
+          side="bottom"
+          className="flex max-h-[92dvh] flex-col"
+          dir="rtl"
+          onCloseAutoFocus={restoreOpenerFocus}
+        >
           <SheetHeader>
             <SheetTitle>בחירת מדיה</SheetTitle>
             <SheetDescription>בחירת תמונה מהמאגר של הדמות לשליחה בשיחה.</SheetDescription>
@@ -975,7 +989,11 @@ export function OperatorMediaPicker({
       open={open}
       onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : closePicker())}
     >
-      <DialogContent className="flex max-h-[88vh] max-w-2xl flex-col" dir="rtl">
+      <DialogContent
+        className="flex max-h-[88vh] max-w-2xl flex-col"
+        dir="rtl"
+        onCloseAutoFocus={restoreOpenerFocus}
+      >
         <DialogHeader>
           <DialogTitle>בחירת מדיה</DialogTitle>
           <DialogDescription>בחירת תמונה מהמאגר של הדמות לשליחה בשיחה.</DialogDescription>

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { OperatorSendTicket } from "@/hooks/useStickerSend";
 import { toast } from "sonner";
 
 const testState = vi.hoisted(() => ({
@@ -18,6 +19,13 @@ const rpcMock = vi.hoisted(() => vi.fn());
 const navigateMock = vi.hoisted(() => vi.fn());
 const startTypingMock = vi.hoisted(() => vi.fn());
 const stopTypingMock = vi.hoisted(() => vi.fn());
+type PickerProbeProps = {
+  open: boolean;
+  readOnly?: boolean;
+  operatorSendGeneration: number;
+  onSent: (result: { cycle_id: string }, conversationId: string, ticket: OperatorSendTicket) => boolean;
+};
+const recordPicker = vi.hoisted(() => vi.fn<(kind: string, props: PickerProbeProps) => void>());
 const stableMocks = vi.hoisted(() => ({
   applySuccessfulSendCycle: vi.fn((_ticket: unknown, _result: unknown, effect?: () => void) => {
     effect?.();
@@ -90,12 +98,15 @@ vi.mock("@/hooks/useStickerSend", async (importOriginal) => {
 });
 
 vi.mock("@/components/operator/OperatorMediaPicker", () => ({
-  OperatorMediaPicker: ({ open, readOnly }: { open: boolean; readOnly?: boolean }) =>
-    open ? (
-      <div data-testid="media-picker" data-readonly={String(Boolean(readOnly))}>
+  OperatorMediaPicker: (props: PickerProbeProps) => {
+    if (!props.open) return null;
+    recordPicker("media", props);
+    return (
+      <div data-testid="media-picker" data-readonly={String(Boolean(props.readOnly))}>
         media picker
       </div>
-    ) : null,
+    );
+  },
 }));
 
 vi.mock("@/hooks/useConversationReadAccess", () => ({
@@ -108,12 +119,15 @@ vi.mock("@/hooks/useConversationReadAccess", () => ({
 }));
 
 vi.mock("@/components/chat/StickerPicker", () => ({
-  StickerPicker: ({ open, readOnly }: { open: boolean; readOnly?: boolean }) =>
-    open ? (
-      <div data-testid="sticker-picker" data-readonly={String(Boolean(readOnly))}>
+  StickerPicker: (props: PickerProbeProps) => {
+    if (!props.open) return null;
+    recordPicker("sticker", props);
+    return (
+      <div data-testid="sticker-picker" data-readonly={String(Boolean(props.readOnly))}>
         sticker picker
       </div>
-    ) : null,
+    );
+  },
 }));
 
 vi.mock("@/components/operator/OperatorNewQueueList", () => ({
@@ -299,6 +313,8 @@ import { OperatorChatPage } from "@/routes/operator.chat.$conversationId";
 beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   channels.length = 0;
+  recordPicker.mockClear();
+  stableMocks.applySuccessfulSendCycle.mockClear();
   stableMocks.revalidateReadAccess.mockClear();
   stableMocks.suspendReadAccess.mockClear();
   stableMocks.refreshResponsibility.mockClear();
@@ -490,6 +506,45 @@ describe("operator chat read-only responsibility", () => {
     expect(screen.getByTestId("media-picker")).toHaveAttribute("data-readonly", "true");
     expect(screen.getByPlaceholderText("השיחה בטיפול עובד אחר")).toBeDisabled();
   });
+
+  it.each([
+    ["media", "בחירת מדיה לשליחה"],
+    ["sticker", "בחירת סטיקר לשליחה"],
+  ])(
+    "accepts a current %s completion and rejects it after the read scope changes",
+    async (kind, name) => {
+      testState.responsibility = "mine";
+      testState.cycleId = cycleId;
+      testState.readAccessGeneration = 1;
+      const view = await renderChat();
+      fireEvent.click(screen.getByRole("button", { name }));
+      const call = recordPicker.mock.calls.filter(([recorded]) => recorded === kind).at(-1);
+      expect(call).toBeDefined();
+      const props = call![1];
+      const ticket = {
+        conversationId,
+        generation: props.operatorSendGeneration,
+        requestId: 9,
+        expectedCycleId: cycleId,
+      };
+      const result = { cycle_id: cycleId };
+      expect(props.onSent(result, conversationId, ticket)).toBe(true);
+      expect(stableMocks.applySuccessfulSendCycle.mock.lastCall?.[0]).toEqual({
+        ...ticket,
+        generation: 4,
+      });
+
+      testState.readAccessGeneration = 2;
+      view.rerender(
+        <TooltipProvider>
+          <OperatorChatPage />
+        </TooltipProvider>,
+      );
+      stableMocks.applySuccessfulSendCycle.mockClear();
+      expect(props.onSent(result, conversationId, ticket)).toBe(false);
+      expect(stableMocks.applySuccessfulSendCycle).not.toHaveBeenCalled();
+    },
+  );
 
   it("removes sensitive UI state immediately when read access is revoked", async () => {
     testState.responsibility = "mine";

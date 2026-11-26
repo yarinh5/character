@@ -1,12 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import { toast } from "sonner";
 
 const rpc = vi.hoisted(() => vi.fn());
+const isMobile = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc } }));
-vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: isMobile }));
 vi.mock("@/hooks/useMediaViewUrl", () => ({
   useMediaViewUrl: () => ({
     status: "idle",
@@ -82,10 +85,41 @@ async function findAssetButton(name: string) {
 
 beforeEach(() => {
   rpc.mockReset();
+  isMobile.mockReturnValue(false);
   vi.mocked(toast.error).mockReset();
 });
 
 describe("WP05 operator media catalog", () => {
+  it.each([false, true])("returns to the opener on dismissal (mobile: %s)", async (mobile) => {
+    isMobile.mockReturnValue(mobile);
+    rpc.mockResolvedValue({ data: [], error: null });
+    const user = userEvent.setup();
+    function Harness() {
+      const opener = useRef<HTMLButtonElement>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button ref={opener} onClick={() => setOpen(true)}>
+            Open picker
+          </button>
+          {picker({ open, onOpenChange: setOpen, returnFocusRef: opener })}
+        </>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Open picker" });
+    await user.click(opener);
+    await screen.findByRole("dialog", { name: "בחירת מדיה" });
+    if (mobile) {
+      const cancel = screen.getByRole("button", { name: "ביטול" });
+      cancel.focus();
+      await user.keyboard("{Enter}");
+    } else {
+      await user.keyboard("{Escape}");
+    }
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
   it("filters assets through every canonical tag, including a shared tag", async () => {
     rpc.mockResolvedValue({ data: [portrait, landscape], error: null });
     render(picker());

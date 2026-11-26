@@ -192,3 +192,21 @@ reservation or credit debit. The asset remained available.
 Evidence: `F:/project love/character/.codex-task/wp05-send-20261126-01/REPORT.md`.
 This is direct AC12/AC13 HTTP evidence on a disposable stack, not the formal
 Product HTTP suite or an operator picker/admin browser journey.
+
+## Operator picker and recipient browser, 2026-11-26
+
+The actual mobile picker reserved media but could not show its preview: the
+resolver still required the old global `reserved` stock state. The forward
+migration authorizes a preview from the owned reservation, current handling
+authority and catalog scope without changing the asset's global inventory.
+The picker restores opener focus, and the chat translates current media and
+sticker send results into its write scope only after validating read scope.
+
+At 375px, keyboard selection decoded the private preview, cancellation
+released the reservation and restored focus, and a confirmed send closed
+the picker. The synthetic recipient saw the caption and decoded the image.
+PostgreSQL confirmed one delivery, one consumed reservation and no debit for
+the final test image. Final pgTAP: 38/38 plus 77 related checks. Full Vitest:
+821/821; typecheck passed. Evidence:
+`F:/project love/character/.codex-task/wp05-picker-20261126-01/REPORT.md`.
+Admin browser workflow, formal Product and launch acceptance remain open.

@@ -182,6 +182,7 @@ export function OperatorChatPage() {
   const [customerInfoInput, setCustomerInfoInput] = useState("");
   const [sending, setSending] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const mediaPickerOpener = useRef<HTMLButtonElement>(null);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [newQueueSheetOpen, setNewQueueSheetOpen] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
@@ -930,13 +931,30 @@ export function OperatorChatPage() {
     }
   };
 
+  const pickerSendGeneration = sendScope.generation + readAccess.generation * 1_000_000;
+  const currentPickerWriteTicket = (ticket?: OperatorSendTicket) => {
+    const latest = readScopeRef.current;
+    if (
+      !ticket ||
+      !latest.allowed ||
+      latest.conversationId !== ticket.conversationId ||
+      latest.userId !== user?.id ||
+      latest.generation !== readAccess.generation ||
+      ticket.generation !== pickerSendGeneration
+    ) {
+      return null;
+    }
+    return { ...ticket, generation: sendScope.generation };
+  };
+
   const handleStickerSent = (
     result: StickerSendResult,
     _sentConversationId: string,
     ticket?: OperatorSendTicket,
   ) => {
-    if (!ticket) return false;
-    return applySuccessfulSendCycle(ticket, result, () => {
+    const writeTicket = currentPickerWriteTicket(ticket);
+    if (!writeTicket) return false;
+    return applySuccessfulSendCycle(writeTicket, result, () => {
       if (!result.message) return;
       shouldStickToBottomRef.current = true;
       const message: Msg = {
@@ -1461,6 +1479,7 @@ export function OperatorChatPage() {
                             if (responsibilityRef.current !== "other") setMediaPickerOpen(true);
                           }}
                           disabled={sendBlocked}
+                          ref={mediaPickerOpener}
                           aria-label="בחירת מדיה לשליחה"
                         >
                           <ImagePlus className="h-4 w-4" />
@@ -1593,12 +1612,14 @@ export function OperatorChatPage() {
       <OperatorMediaPicker
         conversationId={conversationId}
         expectedCycleId={responsibilityCycleId}
-        operatorSendGeneration={sendScope.generation + readAccess.generation * 1_000_000}
+        operatorSendGeneration={pickerSendGeneration}
         readOnly={composerReadOnly}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+        returnFocusRef={mediaPickerOpener}
         onSent={(result, _sentConversationId, ticket) => {
-          return ticket ? applySuccessfulSendCycle(ticket, result) : false;
+          const writeTicket = currentPickerWriteTicket(ticket);
+          return writeTicket ? applySuccessfulSendCycle(writeTicket, result) : false;
         }}
       />
       <StickerPicker
@@ -1607,7 +1628,7 @@ export function OperatorChatPage() {
         onOpenChange={setStickerPickerOpen}
         role="operator"
         expectedCycleId={responsibilityCycleId}
-        operatorSendGeneration={sendScope.generation + readAccess.generation * 1_000_000}
+        operatorSendGeneration={pickerSendGeneration}
         readOnly={composerReadOnly}
         onSent={handleStickerSent}
       />

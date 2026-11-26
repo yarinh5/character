@@ -97,6 +97,7 @@ function ConvView() {
   const deletionRequestInFlightRef = useRef(false);
   const deletionIdempotencyKeyRef = useRef<string | null>(null);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const mediaPickerOpener = useRef<HTMLButtonElement>(null);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [adminOperatorUserIds, setAdminOperatorUserIds] = useState<string[]>([]);
@@ -867,6 +868,7 @@ function ConvView() {
                         onClick={() => setMediaPickerOpen(true)}
                         disabled={composerDisabled}
                         title="בחירת מדיה"
+                        ref={mediaPickerOpener}
                         aria-label="בחירת מדיה"
                       >
                         <ImagePlus className="h-4 w-4" />
@@ -1140,6 +1142,7 @@ function ConvView() {
         conversationId={conversationId}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+        returnFocusRef={mediaPickerOpener}
       />
       <StickerPicker
         conversationId={conversationId}
