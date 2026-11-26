@@ -104,7 +104,11 @@ suite("V4-3-C HTTP Admin snapshot authorization", () => {
     expect(serialized).not.toMatch(/email|preview|path|url|name|reason|content/i);
   });
 
-  it.skip("anonymous direct invocation of the revoked Admin RPC remains blocked on the local image", () => {
-    // The local postgres:17.6.1.106 image previously SIGSEGVed on this path.
+  it("rejects anonymous direct invocation of the Admin RPC", async () => {
+    const anon = createAnonymousClient();
+    const result = await anon.rpc("get_admin_operations_snapshot");
+
+    expect(result.data).toBeNull();
+    expect(result.error?.code).toBe("42501");
   });
 });
