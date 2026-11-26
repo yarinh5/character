@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
@@ -66,6 +67,16 @@ describe("public entry-page semantics", () => {
     expect(screen.getByLabelText("אימייל")).toHaveAttribute("autocomplete", "email");
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("name", "password");
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("autocomplete", "current-password");
+  });
+
+  it("does not permit a native credential submission before hydration", () => {
+    const markup = renderToStaticMarkup(<LoginPage />);
+    const root = document.createElement("div");
+    root.innerHTML = markup;
+
+    expect(root.querySelector('input[name="email"]')).toBeDisabled();
+    expect(root.querySelector('input[name="password"]')).toBeDisabled();
+    expect(root.querySelector('button[type="submit"]')).toBeDisabled();
   });
 
   it("preserves mobile-sized entry controls on home and login", () => {

@@ -19,9 +19,12 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [publicSupportContact, setPublicSupportContact] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user, role, loading } = useAuth();
+
+  useEffect(() => setHydrated(true), []);
 
   useEffect(() => {
     if (!loading && user && role) navigate({ to: rolePath(role) });
@@ -84,6 +87,7 @@ function LoginPage() {
                     autoComplete="email"
                     className="min-h-11"
                     required
+                    disabled={!hydrated}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     dir="ltr"
@@ -106,11 +110,16 @@ function LoginPage() {
                     autoComplete="current-password"
                     className="min-h-11"
                     required
+                    disabled={!hydrated}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
-                <Button type="submit" className="min-h-11 w-full" disabled={submitting}>
+                <Button
+                  type="submit"
+                  className="min-h-11 w-full"
+                  disabled={!hydrated || submitting}
+                >
                   {submitting ? "מתחבר..." : "התחבר"}
                 </Button>
               </form>
