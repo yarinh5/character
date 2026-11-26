@@ -102,6 +102,45 @@ VALUES (
 
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 
+SAVEPOINT pending_retention_claim;
+UPDATE public.system_settings SET value = 'true'::JSONB
+WHERE key = 'account_deletion_irreversible_enabled';
+UPDATE private.account_deletion_steps
+SET status = 'pending', attempt_count = 0, claimed_at = NULL,
+    claim_token = NULL, lease_expires_at = NULL, failure_code = NULL
+WHERE request_id = '00000000-0000-4000-8000-000000100102'
+  AND step_name = 'retention_minimization';
+INSERT INTO private.account_deletion_steps (request_id, step_name, status)
+VALUES ('00000000-0000-4000-8000-000000100102', 'storage', 'completed');
+
+SELECT is(
+  (SELECT step_name FROM public.claim_account_deletion_step_for_server(
+    '00000000-0000-4000-8000-000000100102'
+  )),
+  'retention_minimization',
+  'A pending retention step with NULL failure_code is claimable after Storage'
+);
+SELECT is(
+  (SELECT attempt_count FROM private.account_deletion_steps
+   WHERE request_id = '00000000-0000-4000-8000-000000100102'
+     AND step_name = 'retention_minimization'),
+  1,
+  'Claim increments the retention attempt exactly once'
+);
+UPDATE private.account_deletion_steps
+SET status = 'failed', failure_code = 'retention_conditions_pending',
+    claim_token = NULL, lease_expires_at = NULL
+WHERE request_id = '00000000-0000-4000-8000-000000100102'
+  AND step_name = 'retention_minimization';
+SELECT is(
+  (SELECT count(*)::INTEGER FROM public.claim_account_deletion_step_for_server(
+    '00000000-0000-4000-8000-000000100102'
+  )),
+  0,
+  'Unresolved retention conditions still block another claim'
+);
+ROLLBACK TO SAVEPOINT pending_retention_claim;
+
 SELECT lives_ok(
   $$SELECT public.execute_account_retention_minimization_for_server(
     '00000000-0000-4000-8000-000000100102',
