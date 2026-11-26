@@ -252,18 +252,16 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
   }, [qc, refresh]);
 
   useEffect(() => {
-    const channel = supabase
+    const walletChannel = supabase
       .channel(`admin-operator-points-${adminId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "operator_point_wallets" },
+        { event: "UPDATE", schema: "public", table: "operator_point_wallets" },
         refreshCreditData,
       )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "operator_point_transactions" },
-        refreshCreditData,
-      )
+      .subscribe();
+    const monitoringChannel = supabase
+      .channel(`admin-operator-monitoring-${adminId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "operators" },
@@ -282,7 +280,8 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(walletChannel);
+      void supabase.removeChannel(monitoringChannel);
     };
   }, [adminId, refreshCreditData, refreshMonitoring]);
 

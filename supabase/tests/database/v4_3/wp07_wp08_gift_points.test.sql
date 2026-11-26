@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(29);
+SELECT plan(38);
 
 SELECT is(
   (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'operator_points_rule_version'),
@@ -37,6 +37,16 @@ SELECT is(
 SELECT has_table('public', 'gift_attachment_purchases', 'Gift purchases have a durable public ledger');
 SELECT has_table('public', 'operator_point_wallets', 'Operator Points use a separate wallet');
 SELECT has_table('public', 'operator_point_transactions', 'Operator Points use a separate transaction ledger');
+SELECT ok(EXISTS (
+  SELECT 1 FROM pg_publication_tables
+  WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
+    AND tablename = 'operator_point_wallets'
+), 'The RLS-protected Operator Point wallet is published for live refresh');
+SELECT ok(NOT EXISTS (
+  SELECT 1 FROM pg_publication_tables
+  WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
+    AND tablename = 'operator_point_transactions'
+), 'Ledger metadata is not published with the wallet refresh signal');
 SELECT has_function('public', 'purchase_attachment_gift', ARRAY['uuid', 'uuid', 'uuid'], 'Gift purchase RPC is installed');
 SELECT has_function('public', 'open_attachment_gift_purchase', ARRAY['uuid', 'uuid', 'uuid'], 'Gift open RPC is installed');
 
@@ -238,6 +248,131 @@ SELECT is(
    WHERE event.purchase_id = '00000000-0000-4000-8000-000000078932'),
   0::bigint,
   'No operator allocation is created retroactively when the snapshot is empty'
+);
+
+-- AC22: reuse the attachment and the Client's remaining 200 credits.
+UPDATE public.operators SET presence_status = 'online', last_seen_at = clock_timestamp()
+WHERE id IN ('00000000-0000-4000-8000-000000078102', '00000000-0000-4000-8000-000000078103');
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('wp08.ac22_two', public.purchase_attachment_gift(
+  '00000000-0000-4000-8000-000000078911', '00000000-0000-4000-8000-000000078801',
+  '00000000-0000-4000-8000-000000078934')::text, true);
+RESET ROLE;
+
+INSERT INTO auth.users (
+  id, aud, role, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+) VALUES (
+  '00000000-0000-4000-8000-000000078006', 'authenticated', 'authenticated',
+  'wp08-operator-d@example.invalid', 'x', now(), '{}', '{}', now(), now()
+);
+INSERT INTO public.user_roles (user_id, role)
+VALUES ('00000000-0000-4000-8000-000000078006', 'operator');
+INSERT INTO public.operators (id, user_id, full_name, is_active, presence_status, last_seen_at)
+VALUES (
+  '00000000-0000-4000-8000-000000078106', '00000000-0000-4000-8000-000000078006',
+  'WP08 operator D', true, 'online', clock_timestamp()
+);
+UPDATE public.operators SET presence_status = 'online', last_seen_at = clock_timestamp()
+WHERE id IN (
+  '00000000-0000-4000-8000-000000078102', '00000000-0000-4000-8000-000000078103',
+  '00000000-0000-4000-8000-000000078104'
+);
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('wp08.ac22_four', public.purchase_attachment_gift(
+  '00000000-0000-4000-8000-000000078911', '00000000-0000-4000-8000-000000078801',
+  '00000000-0000-4000-8000-000000078935')::text, true);
+RESET ROLE;
+
+SELECT results_eq(
+  $$SELECT allocation.operator_id, allocation.amount
+    FROM private.gift_reward_allocations allocation
+    JOIN private.gift_reward_events event ON event.id = allocation.gift_reward_event_id
+    WHERE event.purchase_id = (current_setting('wp08.ac22_two')::jsonb->>'purchase_id')::uuid
+    ORDER BY allocation.operator_id$$,
+  $$VALUES
+    ('00000000-0000-4000-8000-000000078102'::uuid, 5::numeric),
+    ('00000000-0000-4000-8000-000000078103'::uuid, 5::numeric)$$,
+  'AC22: the two eligible operators receive exactly 5 points each'
+);
+SELECT results_eq(
+  $$SELECT allocation.operator_id, allocation.amount
+    FROM private.gift_reward_allocations allocation
+    JOIN private.gift_reward_events event ON event.id = allocation.gift_reward_event_id
+    WHERE event.purchase_id = (current_setting('wp08.ac22_four')::jsonb->>'purchase_id')::uuid
+    ORDER BY allocation.operator_id$$,
+  $$VALUES
+    ('00000000-0000-4000-8000-000000078102'::uuid, 2.5::numeric),
+    ('00000000-0000-4000-8000-000000078103'::uuid, 2.5::numeric),
+    ('00000000-0000-4000-8000-000000078104'::uuid, 2.5::numeric),
+    ('00000000-0000-4000-8000-000000078106'::uuid, 2.5::numeric)$$,
+  'AC22: the four eligible operators receive exactly 2.5 points each'
+);
+
+SELECT set_config('wp08.ac22_wallet_balances', (
+  SELECT jsonb_object_agg(operator_id, balance)::text FROM public.operator_point_wallets
+  WHERE operator_id IN (
+    '00000000-0000-4000-8000-000000078102', '00000000-0000-4000-8000-000000078103',
+    '00000000-0000-4000-8000-000000078104', '00000000-0000-4000-8000-000000078106'
+  )
+), true);
+
+SET LOCAL ROLE authenticated;
+SELECT ok(
+  (current_setting('wp08.ac22_two')::jsonb->>'already_purchased')::boolean = false
+    AND (receipt->>'already_purchased')::boolean = true
+    AND receipt->>'purchase_id' = current_setting('wp08.ac22_two')::jsonb->>'purchase_id',
+  'AC22: replay of the two-operator Gift returns the original purchase'
+)
+FROM public.purchase_attachment_gift(
+  '00000000-0000-4000-8000-000000078911', '00000000-0000-4000-8000-000000078801',
+  '00000000-0000-4000-8000-000000078934') AS replay(receipt);
+SELECT ok(
+  (current_setting('wp08.ac22_four')::jsonb->>'already_purchased')::boolean = false
+    AND (receipt->>'already_purchased')::boolean = true
+    AND receipt->>'purchase_id' = current_setting('wp08.ac22_four')::jsonb->>'purchase_id',
+  'AC22: replay of the four-operator Gift returns the original purchase'
+)
+FROM public.purchase_attachment_gift(
+  '00000000-0000-4000-8000-000000078911', '00000000-0000-4000-8000-000000078801',
+  '00000000-0000-4000-8000-000000078935') AS replay(receipt);
+RESET ROLE;
+
+SELECT is(
+  (SELECT count(*) FROM public.gift_attachment_purchases
+   WHERE client_id = '00000000-0000-4000-8000-000000078001'
+     AND attachment_id = '00000000-0000-4000-8000-000000078911'),
+  4::bigint,
+  'AC22: replay leaves the two earlier fixtures and exactly two new purchases'
+);
+SELECT results_eq(
+  $$SELECT purchase.price_credits_snapshot, event.eligible_operator_count,
+           event.reward_pool_points, event.distributed_points, event.unallocated_points,
+           (SELECT sum(amount) FROM private.gift_reward_allocations WHERE gift_reward_event_id = event.id),
+           (SELECT count(*) FROM public.operator_point_transactions WHERE gift_reward_event_id = event.id),
+           (SELECT sum(amount) FROM public.operator_point_transactions WHERE gift_reward_event_id = event.id)
+    FROM private.gift_reward_events event
+    JOIN public.gift_attachment_purchases purchase ON purchase.id = event.purchase_id
+    WHERE purchase.id IN (
+      (current_setting('wp08.ac22_two')::jsonb->>'purchase_id')::uuid,
+      (current_setting('wp08.ac22_four')::jsonb->>'purchase_id')::uuid
+    )
+    ORDER BY purchase.idempotency_key$$,
+  $$VALUES
+    (100, 2, 10::numeric, 10::numeric, 0::numeric, 10::numeric, 2::bigint, 10::numeric),
+    (100, 4, 10::numeric, 10::numeric, 0::numeric, 10::numeric, 4::bigint, 10::numeric)$$,
+  'AC22: each purchase conserves its 10-point pool with no extra Point transactions after replay'
+);
+SELECT is(
+  (SELECT jsonb_object_agg(operator_id, balance) FROM public.operator_point_wallets
+   WHERE operator_id IN (
+     '00000000-0000-4000-8000-000000078102', '00000000-0000-4000-8000-000000078103',
+     '00000000-0000-4000-8000-000000078104', '00000000-0000-4000-8000-000000078106'
+   )),
+  current_setting('wp08.ac22_wallet_balances')::jsonb,
+  'AC22: replay leaves the eligible operators'' Point wallet balances unchanged'
 );
 
 SELECT * FROM finish();

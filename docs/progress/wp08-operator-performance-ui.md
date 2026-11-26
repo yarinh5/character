@@ -95,3 +95,33 @@ DB/RLS/concurrency/Realtime and browser integration remain
 - Admin backfill is bounded, resumable and idempotent and intentionally emits no historical
   transition notifications. Boundary and schema cases are written for pgTAP and **NOT RUN**; live
   trigger ordering, concurrency, RLS and backfill volume remain **NOT VERIFIED**.
+
+## Local Gift, Realtime wallet and level acceptance, 2026-11-26
+
+- The existing Gift pgTAP suite retains its three-recipient remainder and
+  empty-recipient checks. New authenticated purchases cover 100 credits
+  split into 5+5 for two and 2.5 each for four exact operator IDs. Per-purchase
+  receipts, 10-point conservation, and same-key replay without an additional
+  pool, allocation or wallet change were checked. Final suite: 38/38.
+- On the live operator screen, an admin correction committed at 10 points
+  while the displayed balance stayed 7.5. The point tables were absent from
+  the Realtime publication. A forward migration publishes only the existing
+  RLS wallet; supported ledger writes also update that row. The operator and
+  admin screens consume wallet updates, not ledger row events. The wallet
+  subscription is separate from the admin's monitoring subscriptions after
+  a live session reproduced missed events on the combined channel.
+- The operator screen and header changed 10→11.25 without reload. The admin
+  points dialog changed 11→11.5 and loaded the matching history. Separate
+  authenticated subscribers received their own wallet changes but not a peer
+  change; direct REST likewise hid other wallets. Unauthorized and
+  below-zero corrections left no extra transactions. All recorded valid
+  adjustments had the correct admin audit actor.
+- WP09 completion pgTAP and WP11 analytics pgTAP passed 67/67 and 35/35 on
+  the same business definitions. A synthetic client saw L1 at four, sent its
+  fifth message, and saw L2 with five qualifying messages and 20 to the next
+  level. The live server stored one transition and one in-app notification;
+  the other client could not read the projection.
+- Evidence:
+  `F:/project love/character/.codex-task/wp08-wp09-rewards-20261126-01/REPORT.md`.
+  This does not close live multi-tab checkout or all AC21–AC24 paths.
+  No Product PASS.

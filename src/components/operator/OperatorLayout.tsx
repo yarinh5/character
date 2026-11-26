@@ -146,28 +146,22 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   }, [loading, session, role]);
 
   useEffect(() => {
-    if (!session?.user || role === "client") return;
+    if (
+      !session?.user ||
+      role === "client" ||
+      !operator?.id ||
+      operator.user_id !== session.user.id
+    )
+      return;
     const channel = supabase
       .channel(`operator-points-${session.user.id}`)
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
           table: "operator_point_wallets",
-          filter: operator?.id ? `operator_id=eq.${operator.id}` : undefined,
-        },
-        () => {
-          void refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "operator_point_transactions",
-          filter: operator?.id ? `operator_id=eq.${operator.id}` : undefined,
+          filter: `operator_id=eq.${operator.id}`,
         },
         () => {
           void refresh();
@@ -179,7 +173,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
       void supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id, role, operator?.id]);
+  }, [session?.user?.id, role, operator?.id, operator?.user_id]);
 
   useEffect(() => {
     if (role !== "operator" || !operator?.id) return;

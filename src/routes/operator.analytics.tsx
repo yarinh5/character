@@ -66,19 +66,9 @@ function OperatorAnalyticsPage() {
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
           table: "operator_point_wallets",
-          filter: `operator_id=eq.${operator.id}`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "operator_point_transactions",
           filter: `operator_id=eq.${operator.id}`,
         },
         () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),

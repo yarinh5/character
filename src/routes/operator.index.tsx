@@ -227,22 +227,24 @@ function OperatorDashboard() {
           filter: operator?.user_id ? `user_id=eq.${operator.user_id}` : undefined,
         },
         () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .on(
+      );
+    if (operator?.id) {
+      ch.on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "operator_point_transactions" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "operator_point_wallets",
+          filter: `operator_id=eq.${operator.id}`,
+        },
         () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "operator_point_wallets" },
-        () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .subscribe();
+      );
+    }
+    ch.subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [qc, operator?.user_id]);
+  }, [qc, operator?.id, operator?.user_id]);
 
   const updateStatus = async (status: "available" | "busy" | "offline") => {
     if (!operator) return;

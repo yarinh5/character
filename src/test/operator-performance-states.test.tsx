@@ -437,26 +437,19 @@ describe("operator performance read states", () => {
     expect(io.removeChannel).toHaveBeenCalledWith(channelA);
   });
 
-  it("preserves the realtime filters and removes the channel on unmount", async () => {
+  it("subscribes to only the current wallet updates and removes the channel on unmount", async () => {
     const view = renderPage();
     await screen.findByText("נקודות זמינות");
     const channel = io.channels[0];
 
     expect(channel.name).toBe("operator-performance-operator-a");
+    expect(channel.on).toHaveBeenCalledTimes(1);
     expect(channel.on).toHaveBeenNthCalledWith(
       1,
       "postgres_changes",
       expect.objectContaining({
+        event: "UPDATE",
         table: "operator_point_wallets",
-        filter: "operator_id=eq.operator-a",
-      }),
-      expect.any(Function),
-    );
-    expect(channel.on).toHaveBeenNthCalledWith(
-      2,
-      "postgres_changes",
-      expect.objectContaining({
-        table: "operator_point_transactions",
         filter: "operator_id=eq.operator-a",
       }),
       expect.any(Function),
