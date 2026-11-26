@@ -152,6 +152,18 @@
   gateway-capacity diagnostic is needed before another boundary attempt.
   Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-2000-100-20261126-01/REPORT.md`.
 
+- Current-HEAD local DB continuation on `c68198f`: a new isolated project on the dedicated Engine
+  applied all 180 ordered migrations, and 41 unchanged pgTAP files each completed in an
+  independent `ON_ERROR_STOP=1` transaction. The existing TAP validator accepted
+  **1,393/1,393 assertions** with 41/41 process exits 0; WP02 contributed 33 assertions once.
+  Post-pass Auth, conversation and message counts were zero. Ownership-checked cleanup removed
+  the task's seven containers, three volumes and network with exact before/after inventory.
+  The repository's DB/concurrency/HTTP runners pin a QA-named project ID and were not redirected
+  by changing only config; their target-admission paths, a second DB pass, concurrency and
+  HTTPx2 remain OPEN on this exact revision. The local DB pass is not formal Product admission
+  and did not bypass the C: resource threshold.
+  Evidence: `F:/project love/character/.codex-task/product-local-integrated-20261126-01/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
