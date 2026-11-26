@@ -36,9 +36,24 @@
     Discovery 313 ms, wallet read 304 ms, NEW queue 105 ms. These are observations, not SLOs.
   - Only the seven task containers, two volumes and one network were removed. Prior inventory
     matched and no task listener remained. No shared setting, app code, QA or provider changed.
-    The 300/30 registration and media load, longer sustained runs, higher tiers and integrated
+    The 300/30 registration load, media without response loss, longer runs, higher tiers and integrated
     Product remain open. Evidence: `F:/project love/character/.codex-task/wp12-load-capacity-profile-20261126-01`
     (`gateway-result.json`, `gateway-requests.jsonl`, `workload-readback.json`, `cleanup.json`).
+
+- WP12 300/30 mixed-media run on `3adf396` (179 migrations): **FAIL** on one HTTP response, not a
+  lost write. All 331 password logins, 330 authenticated Postgres Changes subscriptions,
+  270 text writes and 30 operator point adjustments succeeded. 29/30 workload image flows
+  passed on the first attempt, including real signed PNG upload, WebP retrieval,
+  rejection of cross-client access and same-key replay. A separate control also passed.
+  Edge Runtime v1.73.13 logged a CPU soft-limit retirement and aborted the finalize response
+  after SQL committed; Kong returned 502. An exact owner/key replay of that specific write
+  returned 200 and the same message and attachment, with the wallet and single debit unchanged.
+  SQL readback confirmed all 31 image commits (including control), exactly one 10-credit debit
+  per image and correct balances for all 300 wallets. The second read pass and final Realtime
+  delivery tally were not run after the failure. No product or security settings changed.
+  Evidence: `F:/project love/character/.codex-task/wp12-media-load-300-30-20261126-01/REPORT.md`.
+  This does not establish the cause of CPU consumption inside the worker, hosted capacity,
+  registration under load or Product PASS.
 
 - AC32 recovery evidence follow-up: migration `20261126110000` rejects non-finite snapshot/coverage dates, post-generation coverage, backwards coverage, and complete claims that stop before the source snapshot. A valid append invalidates old approval readiness and replay authorization atomically without changing the import version or external lock. Final local application from 169 to 170 migrations kept RPC privileges unchanged; 42/42 rollback-only pgTAP and 14/14 focused Vitest passed. Invalid historical timing and stale approval each failed migration preflight without rewriting data. Recovery writers must be disabled and drained for rollout; no live provider import, release, replay, RTO/RPO or Product acceptance was exercised. Both test environments were cleaned with unrelated inventory unchanged. Evidence: `F:/project love/character/.codex-task/wp12-recovery-coverage-final-20261126-01/REPORT.md`.
 
