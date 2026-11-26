@@ -324,3 +324,29 @@ a backfill of previously split histories.
   resources. Evidence:
   `F:/project love/character/.codex-task/wp04-profile-20261126-01/REPORT.md`.
   Onboarding, provider delivery and formal Product acceptance are separate.
+
+## Mandatory onboarding and activation, 2026-11-26
+
+- Real Auth rejected signup without admission and created no user. In a
+  separate disposable account, mandatory onboarding blocked both protected
+  navigation and `start_or_get_conversation` before completion. The
+  onboarding writes were also blocked by two circular prerequisites:
+  readiness and registration activation.
+- Draft and completion now share the same account/recovery/deletion
+  safeguards as business operations. A registered, unactivated client
+  must have a verified email and the applicable age declaration before
+  saving. A configured consent policy must be valid; completion still
+  requires its accepted documents. Business callers still require
+  activation, consent and readiness. The numeric-step matcher now accepts
+  the browser's valid JSON number and keeps the existing 0–3 range.
+- The browser showed the age error for rejected underage data, resumed the
+  saved draft after reload, completed all steps and opened the same
+  protected chat returned by the authenticated RPC. PostgreSQL confirmed
+  exact fields, one activation, one signup credit, and no consent records
+  in the live browser fixture. The final DB applied 176 migrations with no
+  seed; five live pgTAP suites passed 204/204. Full Vitest passed 829/829
+  with two workers after one unrelated timeout at default concurrency.
+- Evidence:
+  `F:/project love/character/.codex-task/wp04-onboarding-20261126-01/REPORT.md`.
+  Successful external signup/email delivery, real consent rollout and
+  integrated Product are not established by this scope.

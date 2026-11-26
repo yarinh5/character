@@ -383,7 +383,13 @@ function OnboardingPage() {
       setStep(nextStep);
       toast.success("ההתקדמות נשמרה");
     } catch (error) {
-      const code = error instanceof Error ? error.message : "";
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof error.message === "string"
+          ? error.message
+          : "";
       const message =
         code.includes("client_consent") || code.includes("consent_acceptance")
           ? "לא הצלחנו לשמור את ההסכמה. נסה/י שוב."

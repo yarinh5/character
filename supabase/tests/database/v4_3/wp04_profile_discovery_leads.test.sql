@@ -557,6 +557,11 @@ SELECT throws_ok(
   'The business gate distinguishes empty configuration from a missing acceptance'
 );
 SELECT throws_ok(
+  $$SELECT public.save_client_onboarding_step('{}'::jsonb)$$,
+  '42501', 'client_consent_policy_unconfigured',
+  'Drafts do not bypass an invalid consent configuration'
+);
+SELECT throws_ok(
   $$SELECT public.remove_character_like(current_setting('wp04.target')::uuid, auth.uid())$$,
   '42501', 'client_consent_policy_unconfigured',
   'Remove Like uses the same fail-closed eligibility gate'
@@ -725,6 +730,101 @@ SELECT throws_like(
   '%client_onboarding_required%',
   'Enabled onboarding gate blocks an incomplete legacy profile at the server boundary'
 );
+RESET ROLE;
+
+-- An admitted account starts unverified and becomes eligible only on completion.
+INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+VALUES ('00000000-0000-4000-8000-000000040007', 'authenticated', 'authenticated',
+  'wp04-onboarding-new@example.invalid', '{}', '{}', now(), now());
+INSERT INTO private.registration_eligibility (user_id, policy_version)
+VALUES ('00000000-0000-4000-8000-000000040007', 'p06a-v1');
+
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000040007';
+SELECT throws_ok(
+  $$SELECT public.save_client_onboarding_step('{}'::jsonb)$$,
+  '42501', 'client_registration_not_eligible', 'Unverified registration cannot save onboarding'
+);
+RESET ROLE;
+UPDATE auth.users SET email_confirmed_at = clock_timestamp()
+WHERE id = '00000000-0000-4000-8000-000000040007';
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT public.complete_client_onboarding('{}'::jsonb)$$,
+  '42501', 'client_registration_not_eligible', 'A missing age declaration still blocks onboarding'
+);
+RESET ROLE;
+UPDATE private.registration_eligibility SET age_declared_at = clock_timestamp()
+WHERE user_id = '00000000-0000-4000-8000-000000040007';
+
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT public.save_client_onboarding_step(
+    jsonb_build_object('date_of_birth', current_date - interval '17 years'))$$,
+  'P0001', 'invalid_onboarding_age', 'An underage date reaches validation, not a circular gate'
+);
+SELECT lives_ok(
+  $$SELECT public.save_client_onboarding_step(jsonb_build_object(
+    'first_name', 'Synthetic', 'last_name', 'Onboarding',
+    'date_of_birth', current_date - interval '25 years',
+    'city_id', '00000000-0000-4000-8000-000000040101', 'onboarding_step', 2))$$,
+  'A verified adult can save a draft before consent or activation'
+);
+SELECT is(
+  (SELECT onboarding_completed_at FROM public.client_profiles WHERE user_id = auth.uid()),
+  NULL::timestamptz, 'Saving a draft does not complete the profile'
+);
+SELECT throws_ok(
+  $$SELECT public.complete_client_onboarding('{}'::jsonb)$$,
+  '42501', 'client_consent_required', 'Required consent still blocks completion'
+);
+SELECT throws_ok(
+  $$SELECT public.start_or_get_conversation('00000000-0000-4000-8000-000000040301')$$,
+  '42501', 'client_registration_not_eligible', 'A draft does not admit business operations'
+);
+RESET ROLE;
+-- Only fixture rows; no browser or real legal acceptance.
+INSERT INTO public.client_consent_acceptances (client_id, document_id) VALUES
+  ('00000000-0000-4000-8000-000000040007', '00000000-0000-4000-8000-000000040901'),
+  ('00000000-0000-4000-8000-000000040007', '00000000-0000-4000-8000-000000040902');
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT public.complete_client_onboarding('{}'::jsonb)$$,
+  'P0001', 'onboarding_incomplete', 'Accepted consent cannot complete an incomplete profile'
+);
+SELECT lives_ok(
+  $$SELECT public.complete_client_onboarding('{
+    "bio":"Synthetic completed profile","relationship_status":"single","smoking_status":"never",
+    "preferred_min_age":22,"preferred_max_age":34,"preferred_distance_km":50,
+    "content_preferences":["casual_chat"],"character_preferences":["any"],"onboarding_step":3
+  }'::jsonb)$$,
+  'Completion accepts remaining fields without requiring prior activation'
+);
+SELECT is(
+  (SELECT first_name FROM public.client_profiles WHERE user_id = auth.uid()),
+  'Synthetic', 'Completion retains the previously saved draft'
+);
+SELECT lives_ok(
+  $$SELECT public.start_or_get_conversation('00000000-0000-4000-8000-000000040301')$$,
+  'The completed, activated client can then start a conversation'
+);
+RESET ROLE;
+SELECT ok((SELECT activated_at IS NOT NULL FROM private.registration_eligibility
+  WHERE user_id = '00000000-0000-4000-8000-000000040007'),
+  'The existing activation trigger recorded eligible completion');
+SELECT is(
+  (SELECT count(*) FROM public.credit_transactions
+   WHERE user_id = '00000000-0000-4000-8000-000000040007' AND type = 'signup_bonus'),
+  1::bigint, 'Eligible completion grants one signup bonus through the existing trigger'
+);
+UPDATE public.profiles SET status = 'blocked'
+WHERE user_id = '00000000-0000-4000-8000-000000040007';
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT public.save_client_onboarding_step('{}'::jsonb)$$,
+  'P0001', 'client_account_inactive', 'Blocked accounts still cannot write onboarding'
+);
+RESET ROLE;
 
 SELECT * FROM finish();
 ROLLBACK;

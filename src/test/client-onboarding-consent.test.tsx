@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -125,6 +126,27 @@ beforeEach(() => {
 });
 
 describe("client onboarding consent contract", () => {
+  it("shows the age validation message for the actual PostgREST error shape", async () => {
+    rpc.mockImplementation(async (name: string) => {
+      if (name === "get_client_consent_requirements") return { data: [], error: null };
+      if (name === "save_client_onboarding_step") {
+        return {
+          data: null,
+          error: { message: "invalid_onboarding_age", code: "P0001", details: null, hint: null },
+        };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    render(<OnboardingPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "חזרה" }));
+    fireEvent.click(screen.getByRole("button", { name: "שמירה והמשך" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("הגיל צריך להיות בין 18 ל־120."));
+    expect(screen.getByText("2 מתוך 3")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("opens a legacy completed profile at the earliest missing step without dropping existing fields", async () => {
     readTable.mockImplementation((table: string) => {
       const result = queryResult(table);
