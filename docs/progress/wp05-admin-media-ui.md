@@ -161,3 +161,18 @@ EXECUTED**. This is an offline implementation package and does not close WP05, A
 - Direct Node regressions cover the setting, trigger binding, server-clock start and absence of a
   legacy rewrite. The pgTAP expectation is updated but remains **NOT RUN**; live DB/Edge/signed-URL
   acceptance is still required before Product acceptance.
+
+## Regular-media live follow-up, 2026-11-26
+
+On `97f6de0`, a synthetic client opened a new view-once image through the
+actual chat, Edge signer and private Storage. It decoded on open and reload;
+the server opening time, 60-second deadline and balance did not change.
+After expiry the chat showed the seen state without an image or open control.
+A fresh signature returned 404 and Storage rejected a previously successful URL.
+
+Three PostgreSQL suites passed 106/106, including delivery to a different
+client and same-client uniqueness. Evidence:
+`F:/project love/character/.codex-task/wp05-regular-20261126-01/REPORT.md`.
+This covers live P01 viewing and sequential DB delivery checks, not exact
+subsecond cutoff, historical seven-second rows, new concurrent send,
+the picker/admin journey, or Product PASS.
