@@ -94,6 +94,30 @@ beforeEach(() => {
 });
 
 describe("admin users directory", () => {
+  it("omits unsupported deprovision and impersonation actions for admin rows", async () => {
+    io.list.mockResolvedValue([
+      { ...users[1], user_id: "admin-target", display_name: "Admin Target", role: "admin" },
+      {
+        ...users[2],
+        user_id: "operator-target",
+        display_name: "Operator Target",
+        role: "operator",
+      },
+    ]);
+    mount();
+    expect(await screen.findByText("Admin Target")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "התחזות אל Admin Target" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "חסימה עבור Admin Target" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "מחיקת Admin Target" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "התחזות אל Operator Target" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "חסימה עבור Operator Target" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "מחיקת Operator Target" })).toBeInTheDocument();
+  });
+
   it("shows an unassigned role, loads a later page, and searches beyond the initial page", async () => {
     mount();
     expect(await screen.findByText("User 0")).toBeInTheDocument();

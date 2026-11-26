@@ -260,17 +260,21 @@ function UsersPage() {
                       <KeyRound className="h-4 w-4" />
                     </Button>
                     <SendResetButton user={u} />
-                    <ImpersonateButton user={u} />
-                    <ToggleStatusButton user={u} onDone={invalidate} />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      title="מחיקה"
-                      aria-label={`מחיקת ${u.display_name ?? u.email ?? "משתמש"}`}
-                      onClick={() => setDeleting(u)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {u.role !== "admin" && (
+                      <>
+                        <ImpersonateButton user={u} />
+                        <ToggleStatusButton user={u} onDone={invalidate} />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="מחיקה"
+                          aria-label={`מחיקת ${u.display_name ?? u.email ?? "משתמש"}`}
+                          onClick={() => setDeleting(u)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
