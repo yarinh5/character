@@ -987,6 +987,7 @@ suite("WP01.5 HTTP and Realtime revocation", () => {
       id: ids.mediaReservation,
       media_asset_id: ids.mediaAsset,
       conversation_id: ids.conversation,
+      client_id: clientUser.user.id,
       operator_id: ids.ownerOperator,
       reserved_by_user_id: ownerUser.user.id,
       previous_asset_status: "available",
@@ -1063,6 +1064,25 @@ suite("WP01.5 HTTP and Realtime revocation", () => {
                 label: "attachment",
                 run: () => deleteByEq(service, "message_attachments", "id", ids.mediaAttachment),
               },
+              {
+                label: "client level transitions",
+                run: () =>
+                  deleteByEq(service, "client_level_transitions", "client_id", users[0].id),
+              },
+              ...[ids.ownerOperator, ids.readerOperator, ids.adminOperator].flatMap((id) => [
+                {
+                  label: `operator point transactions ${id}`,
+                  run: () => deleteByEq(service, "operator_point_transactions", "operator_id", id),
+                },
+                {
+                  label: `operator score events ${id}`,
+                  run: () => deleteByEq(service, "operator_score_events", "operator_id", id),
+                },
+                {
+                  label: `operator point wallet ${id}`,
+                  run: () => deleteByEq(service, "operator_point_wallets", "operator_id", id),
+                },
+              ]),
               {
                 label: "messages",
                 run: () => deleteByEq(service, "messages", "conversation_id", ids.conversation),

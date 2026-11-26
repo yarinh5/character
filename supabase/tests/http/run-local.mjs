@@ -7,6 +7,7 @@ import { isProductHttp, runProductHttp } from "./paid-sticker-window.mjs";
 const projectId = "qmgkmsarzfjnqltljkjl";
 const dbContainer = `supabase_db_${projectId}`;
 const apiContainer = `supabase_kong_${projectId}`;
+const vitestConfig = resolve("vitest.http.config.ts");
 
 function fail(message) {
   console.error(message);
@@ -93,11 +94,15 @@ function readEventBaseline(label) {
 
 function runPaidHttpChild(paths, env, signal) {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [resolve("node_modules/vitest/vitest.mjs"), "run", ...paths], {
-      env,
-      stdio: "inherit",
-      windowsHide: true,
-    });
+    const child = spawn(
+      process.execPath,
+      [resolve("node_modules/vitest/vitest.mjs"), "run", "--config", vitestConfig, ...paths],
+      {
+        env,
+        stdio: "inherit",
+        windowsHide: true,
+      },
+    );
     const terminate = () => child.kill("SIGTERM");
     signal.addEventListener("abort", terminate, { once: true });
     if (signal.aborted) terminate();
@@ -133,8 +138,11 @@ async function main() {
     });
     if (!controller.signal.aborted) process.exitCode = result;
   } catch (error) {
-    console.error(error.message.startsWith("Paid-sticker HTTP:")
-      ? error.message : "Paid-sticker HTTP: local setup or journal operation failed.");
+    console.error(
+      error.message.startsWith("Paid-sticker HTTP:")
+        ? error.message
+        : "Paid-sticker HTTP: local setup or journal operation failed.",
+    );
     process.exitCode = 1;
   }
 }
@@ -193,18 +201,22 @@ async function runLegacy() {
 
   const vitestBin = resolve("node_modules/vitest/vitest.mjs");
   const args = process.argv.slice(2);
-  const result = spawnSync(process.execPath, [vitestBin, "run", ...args], {
-    env: {
-      ...process.env,
-      SUPABASE_LOCAL_URL: apiUrl,
-      SUPABASE_LOCAL_ANON_KEY: String(local.ANON_KEY ?? ""),
-      SUPABASE_LOCAL_SERVICE_ROLE_KEY: String(local.SERVICE_ROLE_KEY ?? ""),
-      SUPABASE_LOCAL_STICKERS_ENABLED: stickersEnabled,
-      SUPABASE_LOCAL_PAID_STICKER_REQUIRED: "0",
+  const result = spawnSync(
+    process.execPath,
+    [vitestBin, "run", "--config", vitestConfig, ...args],
+    {
+      env: {
+        ...process.env,
+        SUPABASE_LOCAL_URL: apiUrl,
+        SUPABASE_LOCAL_ANON_KEY: String(local.ANON_KEY ?? ""),
+        SUPABASE_LOCAL_SERVICE_ROLE_KEY: String(local.SERVICE_ROLE_KEY ?? ""),
+        SUPABASE_LOCAL_STICKERS_ENABLED: stickersEnabled,
+        SUPABASE_LOCAL_PAID_STICKER_REQUIRED: "0",
+      },
+      stdio: "inherit",
+      windowsHide: true,
     },
-    stdio: "inherit",
-    windowsHide: true,
-  });
+  );
 
   const eventBaselineAfter = readEventBaseline("after");
   if (JSON.stringify(eventBaselineAfter) !== JSON.stringify(eventBaselineBefore)) {

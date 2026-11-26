@@ -285,6 +285,11 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
       ...[ids.ownerOperator, ids.otherOperator, ids.adminOperator, ids.unassignedOperator].flatMap(
         (operatorId) => [
           {
+            label: `operator point transactions ${operatorId}`,
+            run: async () =>
+              deleteByEq(service, "operator_point_transactions", "operator_id", operatorId),
+          },
+          {
             label: `operator score events ${operatorId}`,
             run: async () =>
               deleteByEq(service, "operator_score_events", "operator_id", operatorId),
@@ -293,6 +298,11 @@ suite("V4-3-E1 HTTP active NEW responsibility", () => {
             label: `operator monthly scores ${operatorId}`,
             run: async () =>
               deleteByEq(service, "operator_monthly_scores", "operator_id", operatorId),
+          },
+          {
+            label: `operator point wallet ${operatorId}`,
+            run: async () =>
+              deleteByEq(service, "operator_point_wallets", "operator_id", operatorId),
           },
         ],
       ),
