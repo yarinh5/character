@@ -68,11 +68,16 @@ function RegisterPage() {
           termsAccepted: true,
         },
       });
-      toast.success("הבקשה התקבלה. בדוק את האימייל כדי לאמת את החשבון; הבונוס יינתן רק לאחר השלמת הזכאות.");
+      toast.success(
+        "הבקשה התקבלה. בדוק את האימייל כדי לאמת את החשבון; הבונוס יינתן רק לאחר השלמת הזכאות.",
+      );
     } catch (error) {
-      const code = error instanceof RegistrationFailure ? error.code : String((error as Error)?.message ?? "");
-      if (code.includes("registration_paused")) toast.error("ההרשמה מושהית כעת. אפשר לנסות שוב מאוחר יותר.");
-      else if (code.includes("registration_rate_limited")) toast.error("בוצעו יותר מדי ניסיונות. יש להמתין ולנסות שוב.");
+      const code =
+        error instanceof RegistrationFailure ? error.code : String((error as Error)?.message ?? "");
+      if (code.includes("registration_paused"))
+        toast.error("ההרשמה מושהית כעת. אפשר לנסות שוב מאוחר יותר.");
+      else if (code.includes("registration_rate_limited"))
+        toast.error("בוצעו יותר מדי ניסיונות. יש להמתין ולנסות שוב.");
       else if (code.includes("already_registered")) toast.error("כתובת אימייל זו כבר רשומה");
       else toast.error("לא ניתן להשלים את ההרשמה כעת. לא נוצר חשבון פעיל ולא הוענק בונוס.");
     } finally {
@@ -83,7 +88,7 @@ function RegisterPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-hero px-4 py-12">
       <div className="w-full max-w-md">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2">
+        <Link to="/" className="mb-8 flex min-h-11 items-center justify-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-primary">
             <MessageCircle className="h-5 w-5 text-primary-foreground" />
           </div>
@@ -98,19 +103,46 @@ function RegisterPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="displayName">שם תצוגה</Label>
-                <Input id="displayName" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+                <Input
+                  id="displayName"
+                  name="displayName"
+                  autoComplete="nickname"
+                  className="min-h-11"
+                  required
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">אימייל</Label>
-                <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} dir="ltr" />
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  className="min-h-11"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  dir="ltr"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">סיסמה</Label>
-                <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  className="min-h-11"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
                 <p className="text-xs text-muted-foreground">לפחות 8 תווים</p>
               </div>
               <div className="space-y-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-                <label className="flex items-start gap-2 text-sm">
+                <label className="flex min-h-11 items-start gap-2 text-sm">
                   <Checkbox
                     ref={termsRef}
                     checked={agreeTerms}
@@ -122,9 +154,19 @@ function RegisterPage() {
                   />
                   <span className="text-muted-foreground">
                     אני מאשר/ת את{" "}
-                    <Link to="/terms" className="text-primary hover:underline">תנאי השימוש</Link>
-                    {" "}ואת{" "}
-                    <Link to="/privacy" className="text-primary hover:underline">מדיניות הפרטיות</Link>
+                    <Link
+                      to="/terms"
+                      className="inline-flex min-h-11 items-center text-primary hover:underline"
+                    >
+                      תנאי השימוש
+                    </Link>{" "}
+                    ואת{" "}
+                    <Link
+                      to="/privacy"
+                      className="inline-flex min-h-11 items-center text-primary hover:underline"
+                    >
+                      מדיניות הפרטיות
+                    </Link>
                   </span>
                 </label>
                 {termsInvalid && (
@@ -132,7 +174,7 @@ function RegisterPage() {
                     יש לאשר את תנאי השימוש ואת מדיניות הפרטיות.
                   </p>
                 )}
-                <label className="flex items-start gap-2 text-sm">
+                <label className="flex min-h-11 items-start gap-2 text-sm">
                   <Checkbox
                     ref={ageRef}
                     checked={agreeAge}
@@ -152,13 +194,16 @@ function RegisterPage() {
                   </p>
                 )}
               </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
+              <Button type="submit" className="min-h-11 w-full" disabled={submitting}>
                 {submitting ? "יוצר חשבון..." : "צור חשבון"}
               </Button>
             </form>
             <p className="mt-6 text-center text-sm text-muted-foreground">
               יש לך חשבון?{" "}
-              <Link to="/login" className="font-medium text-primary hover:underline">
+              <Link
+                to="/login"
+                className="inline-flex min-h-11 items-center font-medium text-primary hover:underline"
+              >
                 התחברות
               </Link>
             </p>

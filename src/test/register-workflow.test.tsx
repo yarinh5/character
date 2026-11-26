@@ -20,7 +20,11 @@ vi.stubGlobal(
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children, to, className }: { children: ReactNode; to: string; className?: string }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
   useNavigate: () => io.navigate,
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: () => io.register }));
@@ -52,6 +56,27 @@ function completeForm() {
 }
 
 describe("consent accessibility", () => {
+  it("keeps registration controls touch-sized and identifiable to autofill", () => {
+    render(<RegisterPage />);
+    for (const [label, name, autocomplete] of [
+      ["שם תצוגה", "displayName", "nickname"],
+      ["אימייל", "email", "email"],
+      ["סיסמה", "password", "new-password"],
+    ]) {
+      const input = screen.getByLabelText(label);
+      expect(input).toHaveClass("min-h-11");
+      expect(input).toHaveAttribute("name", name);
+      expect(input).toHaveAttribute("autocomplete", autocomplete);
+    }
+    expect(screen.getByRole("button", { name: "צור חשבון" })).toHaveClass("min-h-11");
+    for (const name of ["Character Chat", "תנאי השימוש", "מדיניות הפרטיות", "התחברות"]) {
+      expect(screen.getByRole("link", { name })).toHaveClass("min-h-11");
+    }
+    for (const checkbox of screen.getAllByRole("checkbox")) {
+      expect(checkbox.closest("label")).toHaveClass("min-h-11");
+    }
+  });
+
   it("exposes the existing registration title as the only level-one heading", () => {
     render(<RegisterPage />);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
