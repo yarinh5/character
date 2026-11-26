@@ -708,11 +708,11 @@ The current candidate inventory is deliberately split as follows:
 | HTTP integration tests under `supabase/tests/http/**`   |     8 | the separate HTTP runner in section H                              |
 | Deno decoder test                                       |     1 | the explicit `deno test --node-modules-dir=none ...` command above |
 | Direct Offline DB/migration contract files              |    22 | nineteen files in section G, plus three direct packaging regressions |
-| `node:test` tools/orchestration/migration safety suites |    24 | their explicit Node package/orchestration commands; never Vitest   |
+| `node:test` tools/orchestration/migration safety suites |    25 | their explicit Node package/orchestration commands; never Vitest   |
 
 The Product inventory includes `src/lib/slaMonitoring.test.ts`, `src/components/ui/dialog.test.tsx`
-and both `src/test/client-withdraw-like.test.tsx` and `src/test/client-liked-entries.test.tsx`. The 24 `node:test` suites comprise the two files under
-`integration/tools`, four orchestration-safety files, 17 direct Offline database/migration
+and both `src/test/client-withdraw-like.test.tsx` and `src/test/client-liked-entries.test.tsx`. The 25 `node:test` suites comprise the two files under
+`integration/tools`, five orchestration-safety files (including the isolated-target safety suite), 17 direct Offline database/migration
 contracts, and the approved shared port-binding contract at
 `supabase/tests/local-docker-port-contract.test.mjs`. Five additional direct contracts are plain
 Node programs rather than `node:test` suites. This revision adds the exact node:test inventory path
