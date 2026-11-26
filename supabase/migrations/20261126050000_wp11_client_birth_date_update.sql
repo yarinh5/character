@@ -12,7 +12,18 @@ BEGIN
   IF _user_id IS NULL THEN
     RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
   END IF;
-  PERFORM private.ensure_active_client(_user_id);
+  PERFORM private.ensure_recovery_business_open();
+  IF private.account_deletion_blocks_business_activity(_user_id) OR NOT EXISTS (
+    SELECT 1 FROM public.user_roles role
+    JOIN public.profiles profile ON profile.user_id = role.user_id
+    WHERE role.user_id = _user_id
+      AND role.role = 'client'::public.app_role
+      AND COALESCE(profile.status, 'active') = 'active'
+      AND profile.deleted_at IS NULL
+      AND profile.pii_archived_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'client_account_inactive' USING ERRCODE = '42501';
+  END IF;
   IF _date_of_birth IS NULL THEN
     RAISE EXCEPTION 'invalid_birth_date' USING ERRCODE = '22023';
   END IF;
