@@ -61,6 +61,7 @@ function assertDockerPort(name, internalPort, expectedPort) {
   ) {
     fail(`Refusing HTTP tests: ${name} does not match the configured local port mapping.`);
   }
+  return info.Id;
 }
 
 function readEventBaseline(label) {
@@ -181,7 +182,7 @@ async function runLegacy() {
   const dbPort = configPort(config, "db");
   assertLoopbackUrl(apiUrl, apiPort, "local API URL");
   assertLoopbackUrl(dbUrl, dbPort, "local DB URL");
-  assertDockerPort(dbContainer, "5432/tcp", dbPort);
+  const dbId = assertDockerPort(dbContainer, "5432/tcp", dbPort);
   assertDockerPort(apiContainer, "8000/tcp", apiPort);
   console.log(`Verified isolated local stack: API ${apiPort}, DB ${dbPort}`);
   const eventBaselineBefore = readEventBaseline("before");
@@ -216,6 +217,9 @@ async function runLegacy() {
       env: {
         ...process.env,
         SUPABASE_LOCAL_URL: apiUrl,
+        SUPABASE_LOCAL_API_PORT: String(apiPort),
+        SUPABASE_LOCAL_DB_CONTAINER: frozenTarget?.db.id ?? dbId,
+        SUPABASE_LOCAL_PROJECT_ID: projectId,
         SUPABASE_LOCAL_ANON_KEY: String(local.ANON_KEY ?? ""),
         SUPABASE_LOCAL_SERVICE_ROLE_KEY: String(local.SERVICE_ROLE_KEY ?? ""),
         SUPABASE_LOCAL_STICKERS_ENABLED: stickersEnabled,

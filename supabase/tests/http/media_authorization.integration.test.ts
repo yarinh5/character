@@ -23,6 +23,7 @@ import {
   seedWallet,
   setRole,
   signInSyntheticUser,
+  verifiedLocalFixtureDbContainer,
   type HttpClient,
 } from "./v4_3_http_fixtures";
 import { createMediaTestEvidenceFromEnvironment, createMediaTestPath } from "./media-test-evidence";
@@ -108,7 +109,7 @@ function wp06bFixtureDb(sql: string, stage: string) {
       [
         "exec",
         "-i",
-        "supabase_db_qmgkmsarzfjnqltljkjl",
+        verifiedLocalFixtureDbContainer(),
         "psql",
         "-X",
         "-U",
@@ -1776,7 +1777,7 @@ suite("WP06B profile image Storage cleanup", () => {
     requireWp06b(
       runId &&
         api.protocol === "http:" &&
-        api.port === "60421" &&
+        api.port === process.env.SUPABASE_LOCAL_API_PORT &&
         ["127.0.0.1", "localhost", "[::1]"].includes(api.hostname),
       "disposable local HTTP runner and run ID required",
     );

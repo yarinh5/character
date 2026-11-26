@@ -368,6 +368,9 @@ export async function runProductHttp({
   }
   Object.assign(childEnv, {
     SUPABASE_LOCAL_URL: api,
+    SUPABASE_LOCAL_API_PORT: "60421",
+    SUPABASE_LOCAL_DB_CONTAINER: target.db.id,
+    SUPABASE_LOCAL_PROJECT_ID: project,
     SUPABASE_LOCAL_ANON_KEY: status.ANON_KEY,
     SUPABASE_LOCAL_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY,
     SUPABASE_LOCAL_PAID_STICKER_REQUIRED: "0",
