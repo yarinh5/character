@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(22);
+SELECT plan(28);
 
 SELECT has_table('private', 'restore_recovery_events', 'restore recovery event ledger exists');
 SELECT has_table('private', 'restore_recovery_requirements', 'recovery requirements exist');
@@ -46,6 +46,21 @@ SELECT results_eq(
 );
 RESET ROLE;
 
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims = '{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000d0601"}';
+SELECT results_eq(
+  $$ SELECT (result->>'balance_after')::integer - (result->>'balance_before')::integer
+     FROM public.admin_adjust_client_credits(
+       '00000000-0000-4000-8000-0000000d0602', 10, 'fixture credit before recovery'
+     ) AS adjustment(result) $$,
+  ARRAY[10], 'the authorized admin can adjust this client wallet before recovery'
+);
+RESET ROLE;
+
+CREATE TEMP TABLE recovery_wallet_before ON COMMIT DROP AS
+SELECT balance, lifetime_earned, lifetime_spent FROM public.credit_wallets
+WHERE user_id = '00000000-0000-4000-8000-0000000d0602';
+
 SET LOCAL ROLE service_role;
 SET LOCAL request.jwt.claims = '{"role":"service_role"}';
 SELECT results_eq(
@@ -85,7 +100,36 @@ SELECT throws_ok(
   'P0001', 'restore_recovery_requirements_incomplete',
   'the event owner cannot approve before the required evidence is verified'
 );
+SELECT throws_ok(
+  $$ SELECT public.admin_adjust_client_credits(
+    '00000000-0000-4000-8000-0000000d0602', 10, 'fixture credit during recovery'
+  ) $$,
+  '42501', 'system_recovery_blocked', 'even an authorized admin cannot adjust credits during recovery'
+);
 RESET ROLE;
+
+SELECT results_eq(
+  $$ SELECT balance, lifetime_earned, lifetime_spent FROM public.credit_wallets
+     WHERE user_id = '00000000-0000-4000-8000-0000000d0602' $$,
+  $$ SELECT balance, lifetime_earned, lifetime_spent FROM recovery_wallet_before $$,
+  'the rejected adjustment did not change the restored wallet'
+);
+SELECT results_eq(
+  $$ SELECT amount, reason FROM public.credit_transactions
+     WHERE user_id = '00000000-0000-4000-8000-0000000d0602' AND type = 'admin_adjustment' $$,
+  $$ VALUES (10, 'fixture credit before recovery'::text) $$,
+  'the rejected adjustment did not add an entry to the credit ledger'
+);
+SELECT results_eq(
+  $$ SELECT type FROM public.notifications
+     WHERE user_id = '00000000-0000-4000-8000-0000000d0601' AND type = 'restore_recovery_blocked' $$,
+  ARRAY['restore_recovery_blocked'], 'the admin receives the in-app recovery alert once'
+);
+SELECT is_empty(
+  $$ SELECT id FROM public.notifications
+     WHERE user_id = '00000000-0000-4000-8000-0000000d0602' AND type = 'restore_recovery_blocked' $$,
+  'the client does not receive the admin recovery alert'
+);
 
 SELECT is_empty(
   $$ SELECT id FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-0000000d0604' $$,
