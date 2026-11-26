@@ -561,6 +561,7 @@ function ChatPage() {
                     access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
                     accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
                     refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                    onBalanceChange={setCreditBalance}
                   />
                 ))}
                 {stickerHydrationPending && <StickerHydrationPlaceholder />}

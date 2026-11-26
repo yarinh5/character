@@ -11,6 +11,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import type {
   MessageAttachmentAccess,
@@ -34,6 +35,7 @@ type MessageAttachmentProps = {
   access: MessageAttachmentAccess | null;
   accessStatus: MessageAttachmentAccessStatus;
   refreshAccess: () => Promise<MessageAttachmentAccess | null>;
+  onBalanceChange?: (balance: number) => void;
   enabled?: boolean;
   accessGeneration?: number;
 };
@@ -43,6 +45,7 @@ export function MessageAttachment({
   access,
   accessStatus,
   refreshAccess,
+  onBalanceChange,
   enabled = true,
   accessGeneration = 0,
 }: MessageAttachmentProps) {
@@ -262,7 +265,10 @@ export function MessageAttachment({
       return;
     }
 
-    const response = (data ?? {}) as { session_id?: unknown; purchase_id?: unknown };
+    const response = (data ?? {}) as { session_id?: unknown; balance?: unknown };
+    if ((canPurchaseGift || canOpenLegacyPaid) && typeof response.balance === "number") {
+      onBalanceChange?.(response.balance);
+    }
     paidOpenSessionIdRef.current =
       canOpenLegacyPaid && typeof response.session_id === "string" ? response.session_id : null;
     paidOpenIdempotencyKeyRef.current = null;
@@ -304,7 +310,7 @@ export function MessageAttachment({
     const price = giftFlow ? access?.required_gift_price_credits : access?.price_credits_snapshot;
     const giftName = access?.required_gift_name;
     return (
-      <>
+      <AlertDialog open={paidOpenConfirmOpen} onOpenChange={setPaidOpenConfirmOpen}>
         <div className="mt-2 flex aspect-[4/3] w-full min-w-48 flex-col items-center justify-center gap-3 rounded-md border border-border bg-muted/30 px-4 text-center">
           <LockKeyhole className="h-5 w-5 text-muted-foreground" />
           <p className="text-sm font-medium">
@@ -317,47 +323,50 @@ export function MessageAttachment({
                 : `פתיחה אחת: ${price} קרדיטים`}
             </p>
           )}
-          <Button
-            size="sm"
-            onClick={() => setPaidOpenConfirmOpen(true)}
-            disabled={
-              (!canOpenLegacyPaid && !canPurchaseGift && !canOpenPurchasedGift) ||
-              paidOpenPurchasing
-            }
-          >
-            {paidOpenPurchasing && <LoaderCircle className="h-4 w-4 animate-spin" />}
-            {canOpenPurchasedGift ? "פתח ל-60 שניות" : canPurchaseGift ? "רכוש מתנה" : "פתח תמונה"}
-          </Button>
+          <AlertDialogTrigger asChild>
+            <Button
+              size="sm"
+              disabled={
+                (!canOpenLegacyPaid && !canPurchaseGift && !canOpenPurchasedGift) ||
+                paidOpenPurchasing
+              }
+            >
+              {paidOpenPurchasing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+              {canOpenPurchasedGift
+                ? "פתח ל-60 שניות"
+                : canPurchaseGift
+                  ? "רכוש מתנה"
+                  : "פתח תמונה"}
+            </Button>
+          </AlertDialogTrigger>
         </div>
-        <AlertDialog open={paidOpenConfirmOpen} onOpenChange={setPaidOpenConfirmOpen}>
-          <AlertDialogContent dir="rtl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {canPurchaseGift ? "לרכוש את המתנה?" : "לפתוח את התמונה?"}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {canOpenPurchasedGift
-                  ? "הפתיחה תתחיל חלון צפייה של 60 שניות."
-                  : typeof price === "number"
-                    ? giftFlow
-                      ? `רכישת ${giftName ?? "המתנה"} תחייב ${price} קרדיטים. הפתיחה מתבצעת בנפרד.`
-                      : `פתיחה זו תחייב ${price} קרדיטים ותאפשר צפייה קצרה אחת.`
-                    : "הפעולה תחייב קרדיטים לפי ההצעה שנשמרה."}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={paidOpenPurchasing}>ביטול</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => void openPaidAttachment()}
-                disabled={paidOpenPurchasing}
-              >
-                {paidOpenPurchasing && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                {canPurchaseGift ? "רכוש מתנה" : "פתח תמונה"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {canPurchaseGift ? "לרכוש את המתנה?" : "לפתוח את התמונה?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {canOpenPurchasedGift
+                ? "הפתיחה תתחיל חלון צפייה של 60 שניות."
+                : typeof price === "number"
+                  ? giftFlow
+                    ? `רכישת ${giftName ?? "המתנה"} תחייב ${price} קרדיטים. הפתיחה מתבצעת בנפרד.`
+                    : `פתיחה זו תחייב ${price} קרדיטים ותאפשר צפייה קצרה אחת.`
+                  : "הפעולה תחייב קרדיטים לפי ההצעה שנשמרה."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={paidOpenPurchasing}>ביטול</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void openPaidAttachment()}
+              disabled={paidOpenPurchasing}
+            >
+              {paidOpenPurchasing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+              {canPurchaseGift ? "רכוש מתנה" : "פתח תמונה"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     );
   }
 

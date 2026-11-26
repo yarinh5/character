@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
 function deferred<T>(): Deferred<T> {
@@ -133,6 +133,37 @@ describe("conversation read access invalidation", () => {
 });
 
 describe("media URL access generation", () => {
+  beforeEach(() => vi.stubEnv("VITE_SUPABASE_URL", "http://127.0.0.1:61021"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses the browser gateway for a signed Storage URL from the internal signer", async () => {
+    state.invoke.mockResolvedValueOnce({
+      data: {
+        url: "http://kong:8000/storage/v1/object/sign/character-media/folder/picture.webp?token=signed-fixture",
+        expires_at: "2030-01-01T00:00:00Z",
+      },
+      error: null,
+    });
+    const { result } = renderHook(() => useMediaViewUrl("message_attachment", "attachment-a"));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.url).toBe(
+      "http://127.0.0.1:61021/storage/v1/object/sign/character-media/folder/picture.webp?token=signed-fixture",
+    );
+  });
+
+  it.each([
+    "https://external.test/functions/v1/not-a-storage-object?token=signed-fixture",
+    "http://kong:8000/storage/v1/object/sign/character-media/folder/picture.webp",
+  ])("rejects a non-signed Storage response: %s", async (url) => {
+    state.invoke.mockResolvedValueOnce({
+      data: { url, expires_at: "2030-01-01T00:00:00Z" },
+      error: null,
+    });
+    const { result } = renderHook(() => useMediaViewUrl("message_attachment", "attachment-a"));
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.url).toBeNull();
+  });
+
   it("discards a late signed URL after access is revoked", async () => {
     const oldRequest = deferred<{ data: { url: string; expires_at: string }; error: null }>();
     state.invoke.mockReturnValueOnce(oldRequest.promise);
@@ -145,7 +176,10 @@ describe("media URL access generation", () => {
     expect(result.current.url).toBeNull();
     await act(async () =>
       oldRequest.resolve({
-        data: { url: "https://secret.test/signed", expires_at: "2030-01-01T00:00:00Z" },
+        data: {
+          url: "http://kong:8000/storage/v1/object/sign/character-media/folder/picture.webp?token=signed-fixture",
+          expires_at: "2030-01-01T00:00:00Z",
+        },
         error: null,
       }),
     );

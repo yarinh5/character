@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageAttachment } from "@/components/chat/MessageAttachment";
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
@@ -91,6 +92,7 @@ beforeEach(() => {
 describe("WP07 Gift attachment flow", () => {
   it("keeps Gift purchase and the 60-second opening as separate idempotent operations", async () => {
     const refreshAccess = vi.fn().mockResolvedValue(giftPurchased);
+    const onBalanceChange = vi.fn();
     rpc.mockResolvedValueOnce({
       data: { purchase_id: giftPurchased.available_purchase_id, balance: 50 },
       error: null,
@@ -102,6 +104,7 @@ describe("WP07 Gift attachment flow", () => {
         access={giftRequired}
         accessStatus="ready"
         refreshAccess={refreshAccess}
+        onBalanceChange={onBalanceChange}
       />,
     );
 
@@ -115,6 +118,7 @@ describe("WP07 Gift attachment flow", () => {
       }),
     );
     expect(rpc).not.toHaveBeenCalledWith("open_attachment_gift_purchase", expect.anything());
+    await waitFor(() => expect(onBalanceChange).toHaveBeenCalledExactlyOnceWith(50));
 
     view.rerender(
       <MessageAttachment
@@ -122,6 +126,7 @@ describe("WP07 Gift attachment flow", () => {
         access={giftPurchased}
         accessStatus="ready"
         refreshAccess={refreshAccess}
+        onBalanceChange={onBalanceChange}
       />,
     );
     rpc.mockResolvedValueOnce({
@@ -143,7 +148,31 @@ describe("WP07 Gift attachment flow", () => {
     );
     expect(calls).toHaveLength(2);
     expect(calls[0][1]._idempotency_key).not.toBe(calls[1][1]._idempotency_key);
+    expect(onBalanceChange).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["Escape", "Cancel"])(
+    "restores the actual trigger on %s without purchasing",
+    async (action) => {
+      const user = userEvent.setup();
+      render(
+        <MessageAttachment
+          attachment={attachment}
+          access={giftRequired}
+          accessStatus="ready"
+          refreshAccess={vi.fn()}
+        />,
+      );
+      const trigger = screen.getByRole("button", { name: "רכוש מתנה" });
+      trigger.focus();
+      await user.keyboard("{Enter}");
+      const cancel = await screen.findByRole("button", { name: "ביטול" });
+      expect(cancel).toHaveFocus();
+      await user.keyboard(action === "Escape" ? "{Escape}" : "{Enter}");
+      await waitFor(() => expect(trigger).toHaveFocus());
+      expect(rpc).not.toHaveBeenCalled();
+    },
+  );
 
   it("releases a rejected Gift purchase for an explicit retry with the same idempotency key", async () => {
     const refreshAccess = vi.fn().mockResolvedValue(giftPurchased);
