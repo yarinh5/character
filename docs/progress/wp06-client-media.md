@@ -1,5 +1,25 @@
 # WP06 — client media upload, access and cleanup
 
+## 2026-11-26 browser upload and ledger verification
+
+- On `4020b2f` with 175 migrations and no seed, a synthetic client opened
+  an existing conversation and chose a 2×2 WebP in the browser. Intent,
+  Storage PUT and finalize each returned HTTP 200 once. The chat decoded the
+  private derivative through the browser gateway and restored it after reload.
+  The UI and database balances went from 20 to 10 with one message, one
+  attachment, one matching debit and an exact 24-hour access deadline.
+- The private derivative remained and the raw source was removed after
+  finalize. An authenticated, unrelated synthetic client got HTTP 404 from
+  the media signer and no URL. This did not wait through the full window or
+  rerun the scheduled physical cleanup workflow.
+- Live pgTAP initially failed #16 and #17 because both assertions counted the
+  unrelated browser user's committed records. The checks now require the
+  exact single linked debit for their fixture client and exact single image
+  message for their fixture conversation. Replaying the suite with the
+  unrelated records still present passed 41/41. Focused Vitest passed 33/33.
+- Evidence: `F:/project love/character/.codex-task/browser-uploads-20261126-01/REPORT.md`.
+  This does not establish Product PASS.
+
 Date: 2026-11-05 (Asia/Jerusalem)
 
 ## Offline implementation draft

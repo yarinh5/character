@@ -95,8 +95,21 @@ SELECT is(
 RESET ROLE;
 
 SELECT is((SELECT balance FROM public.credit_wallets WHERE user_id = '00000000-0000-4000-8000-000000060001'), 10, 'Finalize charges exactly ten credits once');
-SELECT is((SELECT count(*) FROM public.credit_transactions WHERE reason = 'Client image spend'), 1::bigint, 'Finalize creates one credit transaction');
-SELECT is((SELECT count(*) FROM public.messages WHERE content = '[image]'), 1::bigint, 'Finalize creates one client message');
+SELECT results_eq(
+  $$SELECT amount, reason, message_id, message_attachment_id
+    FROM public.credit_transactions WHERE user_id = '00000000-0000-4000-8000-000000060001'$$,
+  $$SELECT -10, 'Client image spend'::text,
+      (current_setting('wp06.finalize')::jsonb->'message'->>'id')::uuid,
+      (current_setting('wp06.finalize')::jsonb->'attachment'->>'id')::uuid$$,
+  'Finalize creates exactly one linked credit transaction for the client'
+);
+SELECT results_eq(
+  $$SELECT id, sender_type::text, sender_id, content
+    FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-000000060301'$$,
+  $$SELECT (current_setting('wp06.finalize')::jsonb->'message'->>'id')::uuid, 'client'::text,
+      '00000000-0000-4000-8000-000000060001'::uuid, '[image]'::text$$,
+  'Finalize creates exactly one client image message in the conversation'
+);
 SELECT ok(
   (current_setting('wp06.finalize')::jsonb->>'access_expires_at')::timestamptz
     <= (current_setting('wp06.finalize')::jsonb->'message'->>'created_at')::timestamptz + interval '24 hours',

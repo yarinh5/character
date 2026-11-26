@@ -213,6 +213,15 @@ Admin browser workflow, formal Product and launch acceptance remain open.
 
 ## Admin upload and catalog lifecycle, 2026-11-26
 
+Sticker follow-up: on the clean `4020b2f` snapshot, an authenticated admin
+opened the sticker catalog from the mobile More menu, uploaded a synthetic
+WebP and activated the processed sticker. Signed PUT and processing each
+returned 200 once. The catalog decoded the 2×2 render from the browser
+gateway; DB/Storage confirmed the exact admin, ready/active state and one
+private render object. No customer-facing feature flag, pricing or send
+behavior was changed or tested. Evidence:
+`F:/project love/character/.codex-task/browser-uploads-20261126-01/REPORT.md`.
+
 A real first upload on `74760de` exposed two independent failures: the new
 character had no required default tag, and the signed PUT returned an
 internal gateway origin. The upload intent now creates one default tag
