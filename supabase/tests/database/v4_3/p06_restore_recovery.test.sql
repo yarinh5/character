@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(28);
+SELECT plan(42);
 
 SELECT has_table('private', 'restore_recovery_events', 'restore recovery event ledger exists');
 SELECT has_table('private', 'restore_recovery_requirements', 'recovery requirements exist');
@@ -63,6 +63,17 @@ WHERE user_id = '00000000-0000-4000-8000-0000000d0602';
 
 SET LOCAL ROLE service_role;
 SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.begin_restore_recovery_for_server(
+         '00000000-0000-4000-8000-0000000d0605', 'fixture-recovery-lock', 'fixture-authority',
+         'fixture-snapshot', '-infinity', '00000000-0000-4000-8000-0000000d0601', repeat('a', 64)
+       );
+       RAISE EXCEPTION 'fixture_expected_snapshot_rejection';
+     END $fixture$ $$,
+  '23514', 'new row for relation "restore_recovery_events" violates check constraint "restore_recovery_snapshot_time_finite"',
+  'a non-finite snapshot cannot start a blocked recovery event'
+);
 SELECT results_eq(
   $$ SELECT event_id, event_version, status FROM public.begin_restore_recovery_for_server(
     '00000000-0000-4000-8000-0000000d0605', 'fixture-recovery-lock', 'fixture-authority',
@@ -147,6 +158,147 @@ SELECT results_eq(
      FROM private.restore_recovery_control WHERE singleton $$,
   $$ VALUES ('blocked'::text, '00000000-0000-4000-8000-0000000d0605'::uuid, FALSE) $$,
   'missing evidence leaves the correct recovery event blocked and replay disabled'
+);
+
+
+
+SET LOCAL ROLE service_role;
+SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.import_restore_recovery_manifest_for_server(
+         '00000000-0000-4000-8000-0000000d0605', 1, 'future-coverage', 'fixture-authority',
+         1, NULL, repeat('b', 64), now() + interval '1 second', now(), TRUE
+       );
+       RAISE EXCEPTION 'fixture_expected_coverage_rejection';
+     END $fixture$ $$,
+  '22023', 'invalid_restore_authority_manifest_coverage',
+  'a manifest cannot attest coverage after it was generated'
+);
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.import_restore_recovery_manifest_for_server(
+         '00000000-0000-4000-8000-0000000d0605', 1, 'short-coverage', 'fixture-authority',
+         1, NULL, repeat('b', 64), now() - interval '1 second', now(), TRUE
+       );
+       RAISE EXCEPTION 'fixture_expected_coverage_rejection';
+     END $fixture$ $$,
+  '22023', 'invalid_restore_authority_manifest_coverage',
+  'complete deletion coverage must reach the restored snapshot'
+);
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.import_restore_recovery_manifest_for_server(
+         '00000000-0000-4000-8000-0000000d0605', 1, 'infinite-coverage', 'fixture-authority',
+         1, NULL, repeat('b', 64), '-infinity', now(), FALSE
+       );
+       RAISE EXCEPTION 'fixture_expected_coverage_rejection';
+     END $fixture$ $$,
+  '22023', 'invalid_restore_authority_manifest_coverage',
+  'coverage must be a finite timestamp even for partial evidence'
+);
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'partial', 'fixture-authority',
+       1, NULL, repeat('b', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'partial coverage may be recorded without claiming completeness'
+);
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.import_restore_recovery_manifest_for_server(
+         '00000000-0000-4000-8000-0000000d0605', 1, 'regressing-coverage', 'fixture-authority',
+         2, repeat('b', 64), repeat('c', 64), now() - interval '2 seconds', now(), FALSE
+       );
+       RAISE EXCEPTION 'fixture_expected_coverage_rejection';
+     END $fixture$ $$,
+  '22023', 'invalid_restore_authority_manifest_coverage',
+  'a hash-linked successor cannot move the coverage watermark backwards'
+);
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'complete', 'fixture-authority',
+       2, repeat('b', 64), repeat('c', 64), now(), now(), TRUE
+     ) $$,
+  'complete evidence can reach exactly the snapshot and generation time'
+);
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'equal-watermark', 'fixture-authority',
+       3, repeat('c', 64), repeat('d', 64), now(), now(), TRUE
+     ) $$,
+  'a later manifest may preserve the previous coverage watermark'
+);
+RESET ROLE;
+
+SELECT results_eq(
+  $$ SELECT manifest_id FROM private.restore_recovery_authority_manifests
+     WHERE event_id = '00000000-0000-4000-8000-0000000d0605' ORDER BY sequence $$,
+  ARRAY['partial', 'complete', 'equal-watermark'],
+  'only the valid hash-linked manifests were recorded'
+);
+SELECT results_eq(
+  $$ SELECT access_state, recovery_deletion_replay_enabled FROM private.restore_recovery_control WHERE singleton $$,
+  $$ VALUES ('blocked'::text, FALSE) $$,
+  'recording evidence neither reopens business access nor enables replay'
+);
+
+
+
+SET LOCAL ROLE service_role;
+SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT public.record_restore_reconciliation_for_server(
+  '00000000-0000-4000-8000-0000000d0605', 1, 'equal-watermark', category,
+  'matched', 0, 0, 0, repeat('e', 64)
+) FROM unnest(ARRAY['credit_ledger', 'gift_purchases', 'credit_requests']) category;
+SELECT * FROM public.finalize_restore_recovery_import_for_server(
+  '00000000-0000-4000-8000-0000000d0605', 1
+);
+RESET ROLE;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims = '{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000d0601"}';
+SELECT public.admin_verify_restore_personal_data(
+  '00000000-0000-4000-8000-0000000d0605', 2, 'fixture review', repeat('f', 64), 'fixture review'
+);
+RESET ROLE;
+
+SELECT results_eq(
+  $$ SELECT status FROM private.restore_recovery_events
+     WHERE id = '00000000-0000-4000-8000-0000000d0605' $$,
+  ARRAY['ready_for_approval'], 'the finalized evidence can reach readiness before a successor arrives'
+);
+
+SET LOCAL ROLE service_role;
+SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 3, 'new-partial', 'fixture-authority',
+       4, repeat('d', 64), repeat('0', 64), now(), now(), FALSE
+     ) $$,
+  'later partial evidence may enter reconciliation'
+);
+RESET ROLE;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims = '{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000d0601"}';
+SELECT throws_ok(
+  $$ DO $fixture$ BEGIN
+       PERFORM public.admin_approve_restore_recovery(
+         '00000000-0000-4000-8000-0000000d0605', 3, 'fixture approval'
+       );
+       RAISE EXCEPTION 'fixture_expected_approval_rejection';
+     END $fixture$ $$,
+  'P0001', 'restore_recovery_requirements_incomplete',
+  'approval cannot reuse verified evidence from before the partial successor'
+);
+RESET ROLE;
+
+SELECT results_eq(
+  $$ SELECT requirement_name || ':' || status FROM private.restore_recovery_requirements
+     WHERE event_id = '00000000-0000-4000-8000-0000000d0605' ORDER BY requirement_name $$,
+  ARRAY['deletion_replay:pending', 'external_lock:verified', 'ledger_reconciliation:pending', 'personal_data_review:pending'],
+  'appending evidence invalidates old readiness but retains the verified lock'
 );
 
 SELECT * FROM finish();
