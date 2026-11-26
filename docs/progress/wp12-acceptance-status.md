@@ -81,6 +81,19 @@
   larger image sizes under concurrent Realtime, longer duration, load on signup, or Product.
   Evidence: `F:/project love/character/.codex-task/wp12-media-load-300-30-20261126-02/REPORT.md`.
 
+- WP12 1,000/100 attempt on `f4a788e`: **FAIL at subscription readiness**.
+  All 1,101 synthetic logins and the real media control passed, but 979/1,100
+  subscriptions acknowledged. The 1,200 tenant quota was distinct from Ranch's
+  1,000 listener quota. A verified runtime listener change to 1,200 did not move
+  the failure boundary. Logs and `system_info(:check_io)` showed that the existing
+  BEAM still rejected descriptors above 1,023 even with OS soft limit 4,096.
+  Same-image one-shot eval measured an Erlang pollset cap of 1,024 by default
+  and 4,096 when started with the larger limit, proving a boot-time requirement.
+  Both attempts stopped before mixed traffic. Next valid run must establish and
+  read back both budgets at Realtime startup on an owned service. No product
+  or shared settings changed. No signup load or Product PASS is claimed.
+  Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-01/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
