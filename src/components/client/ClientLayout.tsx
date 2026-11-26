@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { parseConsentRequirements } from "@/lib/clientConsent";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -268,6 +269,7 @@ export function RequireClient({ children }: { children: ReactNode }) {
 
     let alive = true;
     setOnboardingGate("loading");
+    const isOnboardingRoute = pathname.startsWith("/app/onboarding");
 
     Promise.all([
       supabase
@@ -282,36 +284,52 @@ export function RequireClient({ children }: { children: ReactNode }) {
         )
         .eq("user_id", sessionUserId)
         .maybeSingle(),
+      isOnboardingRoute
+        ? Promise.resolve({ data: [], error: null })
+        : supabase.rpc("get_client_consent_requirements"),
     ])
-      .then(([{ data: setting, error: settingError }, { data: profile, error: profileError }]) => {
-        if (!alive) return;
-        if (settingError || profileError || typeof setting?.value !== "boolean") {
-          setOnboardingGate("error");
+      .then(
+        ([
+          { data: setting, error: settingError },
+          { data: profile, error: profileError },
+          { data: consentData, error: consentError },
+        ]) => {
+          if (!alive) return;
+          if (settingError || profileError || consentError || typeof setting?.value !== "boolean") {
+            setOnboardingGate("error");
+            setCheckedOnboardingKey(onboardingKey);
+            return;
+          }
+
+          const mandatory = setting.value;
+          const completed = hasRequiredOnboardingFields(profile);
+          const missingRequiredConsent = parseConsentRequirements(consentData).some(
+            (requirement) => requirement.required && requirement.accepted_at === null,
+          );
+
+          if ((mandatory && !completed) || missingRequiredConsent) {
+            if (isOnboardingRoute) {
+              setOnboardingGate("allowed");
+              setCheckedOnboardingKey(onboardingKey);
+              return;
+            }
+            setOnboardingGate("redirecting");
+            setCheckedOnboardingKey(onboardingKey);
+            navigate({ to: "/app/onboarding", replace: true });
+            return;
+          }
+
+          if (pathname === "/app" || pathname === "/app/") {
+            setOnboardingGate("redirecting");
+            setCheckedOnboardingKey(onboardingKey);
+            navigate({ to: "/app/characters", replace: true });
+            return;
+          }
+
+          setOnboardingGate("allowed");
           setCheckedOnboardingKey(onboardingKey);
-          return;
-        }
-
-        const mandatory = setting.value;
-        const completed = hasRequiredOnboardingFields(profile);
-        const isOnboardingRoute = pathname.startsWith("/app/onboarding");
-
-        if (mandatory && !completed && !isOnboardingRoute) {
-          setOnboardingGate("redirecting");
-          setCheckedOnboardingKey(onboardingKey);
-          navigate({ to: "/app/onboarding", replace: true });
-          return;
-        }
-
-        if (pathname === "/app" || pathname === "/app/") {
-          setOnboardingGate("redirecting");
-          setCheckedOnboardingKey(onboardingKey);
-          navigate({ to: "/app/characters", replace: true });
-          return;
-        }
-
-        setOnboardingGate("allowed");
-        setCheckedOnboardingKey(onboardingKey);
-      })
+        },
+      )
       .catch(() => {
         if (alive) {
           setOnboardingGate("error");

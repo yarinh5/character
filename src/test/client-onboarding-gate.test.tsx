@@ -13,6 +13,7 @@ const io = vi.hoisted(() => ({
     error: { message: string } | null;
   }> | null,
   responses: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  consentResponse: { data: [] as unknown, error: null as { message: string } | null },
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -30,6 +31,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
+    rpc: () => Promise.resolve(io.consentResponse),
     from(table: string) {
       const query = {
         select: () => query,
@@ -60,6 +62,15 @@ const completeProfile = {
   content_preferences: ["casual_chat"],
   character_preferences: ["any"],
 };
+const requiredConsent = {
+  id: "consent-a",
+  consent_key: "terms",
+  version: "1",
+  title: "Terms",
+  document_url: "https://example.test/terms",
+  required: true,
+  accepted_at: null as string | null,
+};
 
 function mount() {
   return render(
@@ -81,6 +92,7 @@ beforeEach(() => {
     system_settings: { data: { value: true }, error: null },
     client_profiles: { data: completeProfile, error: null },
   };
+  io.consentResponse = { data: [], error: null };
 });
 
 describe("client onboarding navigation gate", () => {
@@ -216,6 +228,54 @@ describe("client onboarding navigation gate", () => {
   it("does not require completion when mandatory onboarding is disabled", async () => {
     io.responses.system_settings = { data: { value: false }, error: null };
     io.responses.client_profiles = { data: null, error: null };
+    mount();
+    expect(await screen.findByText("Protected content")).toBeInTheDocument();
+  });
+
+  it("routes a completed client to accept a newly required consent", async () => {
+    io.consentResponse = {
+      data: [requiredConsent],
+      error: null,
+    };
+    mount();
+    await waitFor(() =>
+      expect(io.navigate).toHaveBeenCalledWith({ to: "/app/onboarding", replace: true }),
+    );
+    expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
+  });
+
+  it("admits a client whose required consent is accepted", async () => {
+    io.consentResponse = {
+      data: [{ ...requiredConsent, accepted_at: "2026-01-01T00:00:00Z" }],
+      error: null,
+    };
+    mount();
+    expect(await screen.findByText("Protected content")).toBeInTheDocument();
+  });
+
+  it("does not require an optional consent", async () => {
+    io.consentResponse = { data: [{ ...requiredConsent, required: false }], error: null };
+    mount();
+    expect(await screen.findByText("Protected content")).toBeInTheDocument();
+  });
+
+  it("blocks malformed consent data instead of admitting a client", async () => {
+    io.consentResponse = { data: { required: false }, error: null };
+    mount();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
+  });
+
+  it("blocks a failed consent lookup on a protected route", async () => {
+    io.consentResponse = { data: null, error: { message: "policy unavailable" } };
+    mount();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
+  });
+
+  it("keeps onboarding available when consent lookup fails there", async () => {
+    io.pathname = "/app/onboarding";
+    io.consentResponse = { data: null, error: { message: "policy unconfigured" } };
     mount();
     expect(await screen.findByText("Protected content")).toBeInTheDocument();
   });

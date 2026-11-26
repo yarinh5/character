@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { parseConsentRequirements, type ConsentRequirement } from "@/lib/clientConsent";
 import { ProfileImageManager } from "@/components/profile/ProfileImageManager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,15 +52,6 @@ const CHARACTER_OPTIONS = [
 ] as const;
 
 type City = { id: string; display_name_he: string };
-type ConsentRequirement = {
-  id: string;
-  consent_key: string;
-  version: string;
-  title: string;
-  document_url: string;
-  required: boolean;
-  accepted_at: string | null;
-};
 type Form = {
   firstName: string;
   lastName: string;
@@ -107,33 +99,6 @@ function profileImagesWithPrimary(
 ) {
   if (!primary) return existingUrls;
   return [primary, ...existingUrls.filter((url) => url !== primary && url !== previousPrimary)];
-}
-
-function parseConsentRequirements(value: unknown): ConsentRequirement[] {
-  if (!Array.isArray(value)) throw new Error("consent_requirements_malformed");
-  return value.map((item) => {
-    if (
-      typeof item !== "object" ||
-      item === null ||
-      !("id" in item) ||
-      typeof item.id !== "string" ||
-      !("consent_key" in item) ||
-      typeof item.consent_key !== "string" ||
-      !("version" in item) ||
-      typeof item.version !== "string" ||
-      !("title" in item) ||
-      typeof item.title !== "string" ||
-      !("document_url" in item) ||
-      typeof item.document_url !== "string" ||
-      !("required" in item) ||
-      typeof item.required !== "boolean" ||
-      !("accepted_at" in item) ||
-      (item.accepted_at !== null && typeof item.accepted_at !== "string")
-    ) {
-      throw new Error("consent_requirements_malformed");
-    }
-    return item as ConsentRequirement;
-  });
 }
 
 function OnboardingPage() {
