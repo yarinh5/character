@@ -261,11 +261,13 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (lookupError) throw new Error(lookupError.message);
     if (!profile) throw new Error("משתמש לא נמצא");
     await setAuthBan(data.user_id, true);
+    const deletedAt = new Date().toISOString();
     const tag = `deleted+${Date.now()}@deleted.local`;
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({
         status: "blocked",
+        deleted_at: deletedAt,
         display_name: "משתמש מחוק",
         email: tag,
       })
@@ -273,7 +275,7 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     if (profileError) throw new Error(profileError.message);
     const { error: operatorError } = await supabaseAdmin
       .from("operators")
-      .update({ is_active: false, availability_status: "offline" })
+      .update({ is_active: false, availability_status: "offline", deleted_at: deletedAt })
       .eq("user_id", data.user_id);
     if (operatorError) throw new Error(operatorError.message);
     await logAudit(context.userId, "user.soft_deleted", "user", data.user_id);

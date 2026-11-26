@@ -399,6 +399,51 @@ describe("admin user directory server boundary", () => {
     expect(io.audit).not.toHaveBeenCalled();
   });
 
+  it("persists archive markers when soft-deleting a non-admin user", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
+    const profileWrite = vi.fn().mockReturnValue({
+      eq: async () => ({ error: null }),
+    });
+    const operatorWrite = vi.fn().mockReturnValue({
+      eq: async () => ({ error: null }),
+    });
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles")
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { email: "user@example.test" }, error: null }),
+            }),
+          }),
+          update: profileWrite,
+        };
+      if (table === "operators") return { update: operatorWrite };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    const userId = "00000000-0000-4000-8000-000000000002";
+    await expect(softDelete({ data: { user_id: userId }, context: context() })).resolves.toEqual({
+      ok: true,
+    });
+    expect(io.authUpdate).toHaveBeenCalledWith(userId, { ban_duration: "876000h" });
+    const profile = profileWrite.mock.calls[0]?.[0];
+    const operator = operatorWrite.mock.calls[0]?.[0];
+    expect(profile).toEqual(
+      expect.objectContaining({ status: "blocked", deleted_at: expect.any(String) }),
+    );
+    expect(operator).toEqual(
+      expect.objectContaining({
+        is_active: false,
+        availability_status: "offline",
+        deleted_at: profile.deleted_at,
+      }),
+    );
+    expect(Number.isNaN(Date.parse(profile.deleted_at))).toBe(false);
+    expect(io.audit).toHaveBeenCalledOnce();
+  });
+
   it("rejects deletion of another admin before any mutation", async () => {
     await expect(
       softDelete({
