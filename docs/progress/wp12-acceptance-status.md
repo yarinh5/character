@@ -36,7 +36,7 @@
     Discovery 313 ms, wallet read 304 ms, NEW queue 105 ms. These are observations, not SLOs.
   - Only the seven task containers, two volumes and one network were removed. Prior inventory
     matched and no task listener remained. No shared setting, app code, QA or provider changed.
-    The 300/30 registration load, media without response loss, longer runs, higher tiers and integrated
+    At this point the 300/30 registration and media checks, longer runs, higher tiers and integrated
     Product remain open. Evidence: `F:/project love/character/.codex-task/wp12-load-capacity-profile-20261126-01`
     (`gateway-result.json`, `gateway-requests.jsonl`, `workload-readback.json`, `cleanup.json`).
 
@@ -69,6 +69,27 @@
   requests. Edge still retired one worker at its CPU soft limit, but none of these requests
   lost a response. Evidence: `F:/project love/character/.codex-task/wp06-client-media-cost-20261126-01/REPORT.md`.
   This is focused corrective evidence; the mixed 300/30 load, higher tiers and Product remain open.
+
+- WP12 300/30 mixed-media confirmation on `37c359e`: **PASS for this local workload**.
+  Same test and request concurrency as the response-loss run, with only task/port bindings changed.
+  330 authenticated Postgres Changes subscriptions stayed active for 35.014 seconds; all
+  270 text writes, 30 image flows, 30 point adjustments and both read waves passed.
+  All expected Realtime notifications arrived. There were no failed requests or retries.
+  The DB recorded exactly 31 image debits and 31 private previews including the control;
+  no originals remained. Local successful finalize p95 was 406 ms. Edge still retired
+  one worker at the CPU soft limit, with no request abort. This does not prove higher tiers,
+  larger image sizes under concurrent Realtime, longer duration, load on signup, or Product.
+  Evidence: `F:/project love/character/.codex-task/wp12-media-load-300-30-20261126-02/REPORT.md`.
+
+- WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
+  synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
+  The actual URL served WebP before the deadline and Storage rejected the identical URL after
+  the deadline with the expired JWT claim. Its token expiry was no later than the SQL deadline.
+  The original owner could not mint a new URL after expiry (404), while an authorized service
+  read proved the private preview still existed. No cleanup worker ran. The fixture observer
+  initially failed to recognize Storage's specific error wording; authoritative logs and the
+  same-fixture follow-up resolved it without another crossing. Browser refresh and placeholder
+  coverage at expiry remain open; there is no physical deletion claim.
 
 - AC32 recovery evidence follow-up: migration `20261126110000` rejects non-finite snapshot/coverage dates, post-generation coverage, backwards coverage, and complete claims that stop before the source snapshot. A valid append invalidates old approval readiness and replay authorization atomically without changing the import version or external lock. Final local application from 169 to 170 migrations kept RPC privileges unchanged; 42/42 rollback-only pgTAP and 14/14 focused Vitest passed. Invalid historical timing and stale approval each failed migration preflight without rewriting data. Recovery writers must be disabled and drained for rollout; no live provider import, release, replay, RTO/RPO or Product acceptance was exercised. Both test environments were cleaned with unrelated inventory unchanged. Evidence: `F:/project love/character/.codex-task/wp12-recovery-coverage-final-20261126-01/REPORT.md`.
 

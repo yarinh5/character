@@ -1,5 +1,17 @@
 # WP06 — client media upload, access and cleanup
 
+## 2026-11-26 signed URL expiry
+
+- On `37c359e`, an owner minted a signed preview shortly before the fixture's
+  24-hour deadline. The same URL served WebP before the deadline and was
+  rejected for an expired token after it. The token expired no later than
+  the DB deadline. Fresh issuance was rejected and an authorized service
+  read still found the private file, with the cleanup worker inactive.
+- This establishes the HTTP/Storage part of AC16-A. Browser refresh and
+  the expired placeholder were not exercised in this check. It does not
+  establish physical deletion or Product PASS.
+- [Local evidence](<F:/project love/character/.codex-task/wp12-media-load-300-30-20261126-02/REPORT.md>).
+
 ## 2026-11-26 browser upload and ledger verification
 
 - On `4020b2f` with 175 migrations and no seed, a synthetic client opened
