@@ -48,6 +48,7 @@ FORBIDDEN_ENGINE_ID=''
 PROJECT_ID=''
 PORT_RANGE_START=''
 PORT_RANGE_END=''
+OUTER_PRIMARY=''
 
 while test "$#" -gt 0; do
   case "$1" in
@@ -83,6 +84,11 @@ while test "$#" -gt 0; do
     --project-id) PROJECT_ID="${2-}"; shift 2 ;;
     --port-range-start) PORT_RANGE_START="${2-}"; shift 2 ;;
     --port-range-end) PORT_RANGE_END="${2-}"; shift 2 ;;
+    --outer-primary)
+      test "$PHASE" = finalize-user && test -z "$OUTER_PRIMARY" && test -n "${2-}" || usage
+      OUTER_PRIMARY="$2"
+      shift 2
+      ;;
     *) printf 'unknown argument: %s\n' "$1" >&2; usage ;;
   esac
 done
@@ -585,12 +591,49 @@ environment_user() {
   printf 'environment-user PASS\n'
 }
 
+retain_outer_primary() {
+  local outer_gate outer_rc recorded_identity
+  [[ "$OUTER_PRIMARY" =~ ^([a-z0-9][a-z0-9.-]{0,100}):([1-9][0-9]{0,2})$ ]] || return 1
+  outer_gate="${BASH_REMATCH[1]}"
+  outer_rc="${BASH_REMATCH[2]}"
+  test "$outer_rc" -le 255 || return 1
+  [[ "$RUN_ID" =~ ^[a-z0-9][a-z0-9-]{0,100}$ ]] || return 1
+  test -d "$RUN_EVIDENCE" && test ! -L "$RUN_EVIDENCE" &&
+    test "$(realpath -e "$RUN_EVIDENCE")" = "$RUN_EVIDENCE" &&
+    test "$(stat -c '%u:%g:%a' "$RUN_EVIDENCE")" = "$APPROVED_UID:$APPROVED_GID:700" &&
+    test "$(id -u):$(id -g)" = "$APPROVED_UID:$APPROVED_GID" || return 1
+  test -f "$PRIMARY_FAILURE" && test ! -L "$PRIMARY_FAILURE" &&
+    test "$(stat -c '%u:%g:%h' "$PRIMARY_FAILURE")" = "$APPROVED_UID:$APPROVED_GID:1" || return 1
+
+  if test -s "$PRIMARY_FAILURE"; then
+    recorded_identity="$(awk -F '\t' 'NR==1 && NF>=2 && $1 ~ /^[a-z0-9][a-z0-9.-]*$/ {print $1 ":" $2} END {if (NR!=1) exit 1}' "$PRIMARY_FAILURE")" || return 1
+    case "$recorded_identity" in
+      outer.*) test "$recorded_identity" = "outer.$OUTER_PRIMARY" || return 1 ;;
+      *) test "${recorded_identity##*:}" = "$outer_rc" || return 1 ;;
+    esac
+  else
+    # An outer failure must not qualify for the artifact's pre-backup exception.
+    test -f "$CLI_BACKUP_STATE" && test ! -L "$CLI_BACKUP_STATE" &&
+      test "$(awk -F '\t' 'NR==1 {print $1}' "$CLI_BACKUP_STATE")" = required || return 1
+    printf 'outer.%s\t%s\t%s\n' "$outer_gate" "$outer_rc" 'outer-runner failure' >"$PRIMARY_FAILURE" || return 1
+  fi
+  sync "$PRIMARY_FAILURE"
+}
+
 finalize_user() {
   cleanup_rc=0
   primary_rc=0
   primary_gate=''
+  if test -n "$OUTER_PRIMARY" && ! retain_outer_primary; then
+    printf '%s\n' 'finalize-user: invalid or conflicting outer primary; cleanup not attempted' >&2
+    exit 64
+  fi
   if test -s "$PRIMARY_FAILURE"; then
     primary_gate="$(awk -F '\t' 'NR==1 {print $1}' "$PRIMARY_FAILURE")"
+    if [[ "$primary_gate" = outer.* ]] && test -z "$OUTER_PRIMARY"; then
+      printf '%s\n' 'finalize-user: outer primary requires its bound argument; cleanup not attempted' >&2
+      exit 64
+    fi
     primary_rc="$(awk -F '\t' 'NR==1 {print $2}' "$PRIMARY_FAILURE")"
     case "$primary_rc" in ''|*[!0-9]*) primary_rc=1 ;; esac
   fi

@@ -1,0 +1,15 @@
+diff --git a/preparation.py b/preparation.py
+--- a/preparation.py
++++ b/preparation.py
+@@ -211,7 +211,10 @@ def finish_run(boundary, *, service_state, prior_quiescent, canary_attempted, primary,
+                 secondary.append(_fact(name, r))
+             elif b"PRODUCT_CANARY_FINAL_CLEANUP=1" not in r["stdout"].split(b"\n"):
+                 raise SequenceError(name, "unconfirmed cleanup: missing success marker")
+-        r = _user(b, "finalize-user", [*BASH, nb.ARTIFACT, "finalize-user", *args], 600000)
++        final_argv = [*BASH, nb.ARTIFACT, "finalize-user", *args]
++        if service_state == "NotDispatched" and primary is not None:
++            final_argv.extend(("--outer-primary", f"{primary['stage']}:{primary['exitCode']}"))
++        r = _user(b, "finalize-user", final_argv, 600000)
+         if r["timedOut"]:
+             raise SequenceError("finalize-user", "Finalize deadline; outcome unknown", exit_code=r["exitCode"], timed_out=True)
+         observed = _user(b, "finalize-result-observation", ["/usr/bin/cat", ev + "/finalize.result.txt"], 60000)

@@ -21,7 +21,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const artifact = join(here, "product-linux-execution.sh");
 const executionPackage = join(here, "..", "EXECUTION-PACKAGE.md");
-const bash = process.env.GIT_BASH ?? "C:\\Program Files\\Git\\bin\\bash.exe";
+const bash =
+  process.env.GIT_BASH ??
+  (process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/bash");
 const environmentContract = Object.freeze({
   context: "product-linux-unix-a6e50de2",
   endpoint: "unix:///run/docker.sock",
@@ -63,6 +65,7 @@ function getExecutionPackageShellBlock(name) {
 }
 
 function toPosix(path) {
+  if (process.platform !== "win32") return path;
   const result = bashRun(["-c", 'cygpath -u "$1"', "--", path]);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
@@ -169,10 +172,10 @@ esac
   const archive = join(downloads, "supabase_linux_amd64.tar.gz");
   const tar = bashRun([
     "-c",
-    'archive="$(cygpath -u "$1")"; build="$(cygpath -u "$2")"; tar -czf "$archive" -C "$build" supabase',
+    'tar -czf "$1" -C "$2" supabase',
     "--",
-    archive,
-    build,
+    toPosix(archive),
+    toPosix(build),
   ]);
   assert.equal(tar.status, 0, tar.stderr);
   const badArchive = join(downloads, "bad.tar.gz");
@@ -378,7 +381,13 @@ exit 0
   );
   write(
     bashEnv,
-    `id() {
+    `sync() {
+  if test "$TEST_SCENARIO" = outer-primary-sync-fail; then
+    return 1
+  fi
+  ${process.platform === "win32" ? 'test -f "$1"' : '/usr/bin/sync "$@"'}
+}
+id() {
   case "$TEST_SCENARIO" in
     install-*) test "\${1-}" = '-u' && { printf '0\\n'; return 0; } ;;
   esac
@@ -1470,6 +1479,108 @@ test("finalization restores cli-latest before requiring the exact full snapshot"
     assert.equal(finalized.status, 0, finalized.stderr);
     assert.ok(!existsSync(join(fixture.verification, fixture.runId)));
     assert.match(readFileSync(join(fixture.evidence, fixture.runId, "snapshot-final.verify.stdout"), "utf8"), /OK/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("Finalize preserves a known outer failure before removing the run target", () => {
+  const fixture = makeFixture();
+  try {
+    prepareEnvironmentGateFixture(fixture);
+    const evidence = join(fixture.evidence, fixture.runId);
+    const ledger = join(evidence, "primary-failure.tsv");
+    assert.equal(readFileSync(ledger, "utf8"), "");
+
+    const finalized = execute(fixture, "finalize-user", "success", {}, [
+      "--outer-primary", "04-repeat-source-fence:99",
+    ]);
+    assert.equal(finalized.status, 99, finalized.stderr);
+    assert.equal(readFileSync(ledger, "utf8"), "outer.04-repeat-source-fence\t99\touter-runner failure\n");
+    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=99 cleanup=0\n");
+    assert.match(readFileSync(join(evidence, "evidence-files.final.sha256"), "utf8"), /primary-failure\.tsv/);
+    assert.equal(existsSync(join(fixture.verification, fixture.runId)), false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("Finalize stops on malformed or conflicting outer failure without cleaning up", () => {
+  const fixture = makeFixture();
+  try {
+    prepareEnvironmentGateFixture(fixture);
+    const evidence = join(fixture.evidence, fixture.runId);
+    const ledger = join(evidence, "primary-failure.tsv");
+    const first = "environment.residue\t42\texisting artifact failure\n";
+    write(ledger, first);
+    const before = actions(fixture);
+
+    for (const outer of ["01-environment-gate:256", "01-environment-gate:0", "01-environment-gate:99"]) {
+      const finalized = execute(fixture, "finalize-user", "success", {}, ["--outer-primary", outer]);
+      assert.equal(finalized.status, 64, finalized.stderr);
+      assert.match(finalized.stderr, /outer primary/);
+      assert.equal(readFileSync(ledger, "utf8"), first);
+      assert.equal(existsSync(join(evidence, "finalize.result.txt")), false);
+      assert.equal(existsSync(join(fixture.verification, fixture.runId)), true);
+      assert.deepEqual(actions(fixture), before);
+    }
+
+    const finalized = execute(fixture, "finalize-user", "success", {}, [
+      "--outer-primary", "01-environment-gate:42",
+    ]);
+    assert.equal(finalized.status, 42, finalized.stderr);
+    assert.equal(readFileSync(ledger, "utf8"), first);
+    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=42 cleanup=0\n");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("Finalize leaves the run intact when the outer failure cannot be synced", () => {
+  const fixture = makeFixture();
+  try {
+    prepareEnvironmentGateFixture(fixture);
+    const before = actions(fixture);
+    const outer = ["--outer-primary", "04-repeat-source-fence:99"];
+    for (const [scenario, args] of [
+      ["outer-primary-sync-fail", outer],
+      ["outer-primary-sync-fail", outer],
+      ["success", []],
+      ["success", ["--outer-primary", "01-environment-gate:99"]],
+    ]) {
+      const finalized = execute(fixture, "finalize-user", scenario, {}, args);
+      assert.equal(finalized.status, 64, finalized.stderr);
+      assert.match(finalized.stderr, /cleanup not attempted/);
+    }
+    assert.equal(existsSync(join(fixture.evidence, fixture.runId, "finalize.result.txt")), false);
+    assert.equal(existsSync(join(fixture.verification, fixture.runId)), true);
+    assert.deepEqual(actions(fixture), before);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("an outer failure cannot authorize Finalize's pre-backup exception", () => {
+  const fixture = makeFixture();
+  try {
+    write(join(fixture.repository, "unexpected-before-backup.txt"), "unexpected\n");
+    assert.equal(execute(fixture, "prepare-user", "success").status, 75);
+    const evidence = join(fixture.evidence, fixture.runId);
+    const ledger = join(evidence, "primary-failure.tsv");
+    const backupState = join(evidence, "cli-latest-backup.state.tsv");
+    const originalState = readFileSync(backupState);
+    write(ledger, "");
+    write(backupState, "required\t" + "0".repeat(64) + "\n");
+    const outer = ["--outer-primary", "snapshot.count:75"];
+    assert.equal(execute(fixture, "finalize-user", "outer-primary-sync-fail", {}, outer).status, 64);
+    write(backupState, originalState);
+    assert.match(readFileSync(ledger, "utf8"), /^outer\.snapshot\.count\t75\t/);
+
+    const finalized = execute(fixture, "finalize-user", "success", {}, outer);
+    assert.equal(finalized.status, 75, finalized.stderr);
+    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=75 cleanup=104\n");
+    assert.equal(existsSync(join(fixture.verification, fixture.runId)), true);
+    assert.ok(!actions(fixture).some((action) => action.startsWith("rm:")));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
