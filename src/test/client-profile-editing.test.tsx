@@ -163,25 +163,15 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (table, values, userId) => successfulWrite(table, values, userId));
   io.rpc.mockReset().mockImplementation(async (name: string, args: Record<string, unknown>) => {
-    if (name === "save_client_onboarding_step") {
-      const payload = args._payload as {
-        date_of_birth: string;
-        profile_image_url: string | null;
-        profile_image_urls: string[];
-      };
-      const dateOfBirth = payload.date_of_birth;
+    if (name === "update_client_birth_date") {
+      const dateOfBirth = args._date_of_birth as string;
+      const computedAge = new Date().getUTCFullYear() - Number(dateOfBirth.slice(0, 4));
       Object.assign(io.savedClient, {
         date_of_birth: dateOfBirth,
-        computed_age: new Date().getUTCFullYear() - Number(dateOfBirth.slice(0, 4)),
-        age: new Date().getUTCFullYear() - Number(dateOfBirth.slice(0, 4)),
-        profile_image_url: payload.profile_image_url,
-        profile_image_urls:
-          payload.profile_image_urls ??
-          (payload.profile_image_url
-            ? [payload.profile_image_url]
-            : io.savedClient.profile_image_urls),
+        computed_age: computedAge,
+        age: computedAge,
       });
-      return { data: { onboarding_step: 3 }, error: null };
+      return { data: { date_of_birth: dateOfBirth, computed_age: computedAge }, error: null };
     }
     if (name !== "update_client_profile_images") throw new Error(`Unexpected RPC: ${name}`);
     return {
@@ -269,17 +259,13 @@ describe("client profile editing", () => {
       }),
       "client-a",
     );
-    expect(io.rpc).toHaveBeenCalledWith("save_client_onboarding_step", {
-      _payload: {
-        date_of_birth: dateOfBirth,
-        profile_image_url: client.profile_image_url,
-        profile_image_urls: client.profile_image_urls,
-      },
+    expect(io.rpc).toHaveBeenCalledWith("update_client_birth_date", {
+      _date_of_birth: dateOfBirth,
     });
     expect(io.rpc.mock.invocationCallOrder[0]).toBeLessThan(io.write.mock.invocationCallOrder[0]);
   });
 
-  it("preserves the confirmed image order and primary during a DOB-only save", async () => {
+  it("leaves images and interests untouched during a DOB-only save", async () => {
     const imageProfile = {
       ...client,
       profile_image_url: "primary.webp",
@@ -300,16 +286,13 @@ describe("client profile editing", () => {
 
     await waitFor(() => expect(io.success).toHaveBeenCalledWith("נשמר"));
     expect(io.rpc).toHaveBeenCalledTimes(1);
-    expect(io.rpc).toHaveBeenCalledWith("save_client_onboarding_step", {
-      _payload: {
-        date_of_birth: "1990-01-01",
-        profile_image_url: "primary.webp",
-        profile_image_urls: ["second.webp", "primary.webp"],
-      },
+    expect(io.rpc).toHaveBeenCalledWith("update_client_birth_date", {
+      _date_of_birth: "1990-01-01",
     });
     expect(io.savedClient).toMatchObject({
       profile_image_url: "primary.webp",
       profile_image_urls: ["second.webp", "primary.webp"],
+      interests: imageProfile.interests,
     });
     const clientWrites = io.write.mock.calls.filter(([table]) => table === "client_profiles");
     expect(clientWrites).toHaveLength(1);
@@ -320,7 +303,7 @@ describe("client profile editing", () => {
   it("saves a queued avatar after a DOB RPC without sending it as confirmed image state", async () => {
     const dobSave = deferred<Reply>();
     io.rpc.mockImplementation((name: string, args: Record<string, unknown>) =>
-      name === "save_client_onboarding_step"
+      name === "update_client_birth_date"
         ? dobSave.promise
         : Promise.resolve({
             data: [
@@ -341,16 +324,12 @@ describe("client profile editing", () => {
     await waitFor(() => expect(io.rpc).toHaveBeenCalledTimes(1));
     act(() => io.avatarChange?.(["new.webp", "kept.webp"], "new.webp"));
     expect(io.rpc).toHaveBeenCalledTimes(1);
-    expect(io.rpc).toHaveBeenNthCalledWith(1, "save_client_onboarding_step", {
-      _payload: {
-        date_of_birth: "1990-01-01",
-        profile_image_url: null,
-        profile_image_urls: ["kept.webp"],
-      },
+    expect(io.rpc).toHaveBeenNthCalledWith(1, "update_client_birth_date", {
+      _date_of_birth: "1990-01-01",
     });
 
     await act(async () => {
-      dobSave.resolve({ data: { onboarding_step: 3 }, error: null });
+      dobSave.resolve({ data: { date_of_birth: "1990-01-01", computed_age: 36 }, error: null });
     });
     await waitFor(() => expect(io.rpc).toHaveBeenCalledTimes(2));
     expect(io.rpc).toHaveBeenNthCalledWith(2, "update_client_profile_images", {
@@ -364,13 +343,13 @@ describe("client profile editing", () => {
     const dateOfBirth = "1990-01-01";
     let failOnce = true;
     io.rpc.mockImplementation(async (name: string) => {
-      expect(name).toBe("save_client_onboarding_step");
+      expect(name).toBe("update_client_birth_date");
       if (failOnce) {
         failOnce = false;
         return { data: null, error: { message: "invalid_onboarding_age" } };
       }
       io.savedClient.date_of_birth = dateOfBirth;
-      return { data: { onboarding_step: 3 }, error: null };
+      return { data: { date_of_birth: dateOfBirth, computed_age: 36 }, error: null };
     });
     render(<Page />);
     await loaded();
@@ -547,19 +526,11 @@ describe("client profile editing", () => {
       content_preferences: client.content_preferences,
       character_preferences: client.character_preferences,
     });
-    expect(io.rpc).toHaveBeenNthCalledWith(1, "save_client_onboarding_step", {
-      _payload: {
-        date_of_birth: changedDate,
-        profile_image_url: client.profile_image_url,
-        profile_image_urls: client.profile_image_urls,
-      },
+    expect(io.rpc).toHaveBeenNthCalledWith(1, "update_client_birth_date", {
+      _date_of_birth: changedDate,
     });
-    expect(io.rpc).toHaveBeenNthCalledWith(2, "save_client_onboarding_step", {
-      _payload: {
-        date_of_birth: client.date_of_birth,
-        profile_image_url: client.profile_image_url,
-        profile_image_urls: client.profile_image_urls,
-      },
+    expect(io.rpc).toHaveBeenNthCalledWith(2, "update_client_birth_date", {
+      _date_of_birth: client.date_of_birth,
     });
   });
 

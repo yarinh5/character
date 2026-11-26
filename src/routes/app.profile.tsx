@@ -450,20 +450,24 @@ function ProfileEditor() {
     };
     try {
       if (dateOfBirthChanged) {
-        const { error } = await supabase.rpc("save_client_onboarding_step", {
-          _payload: {
-            date_of_birth: form.date_of_birth,
-            profile_image_url: clientBaseline.profile_image_url,
-            profile_image_urls: clientBaseline.profile_image_urls,
-          },
+        const { data, error } = await supabase.rpc("update_client_birth_date", {
+          _date_of_birth: form.date_of_birth,
         });
-        if (error) throw error;
+        if (
+          error ||
+          data?.date_of_birth !== form.date_of_birth ||
+          !Number.isInteger(data.computed_age) ||
+          data.computed_age < 18 ||
+          data.computed_age > 120
+        ) {
+          throw error ?? new Error("birth_date_update_unconfirmed");
+        }
         if (!alive.current) return;
         confirmedClientBaseline = {
           ...clientBaseline,
-          date_of_birth: form.date_of_birth,
-          computed_age: computedAge,
-          age: computedAge,
+          date_of_birth: data.date_of_birth,
+          computed_age: data.computed_age,
+          age: data.computed_age,
         };
         setLoadedProfile(confirmedClientBaseline);
       }

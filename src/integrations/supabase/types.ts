@@ -4843,6 +4843,10 @@ export type Database = {
           profile_image_urls: string[];
         }[];
       };
+      update_client_birth_date: {
+        Args: { _date_of_birth: string };
+        Returns: { date_of_birth: string; computed_age: number };
+      };
     };
     Enums: {
       app_role: "client" | "operator" | "admin";
