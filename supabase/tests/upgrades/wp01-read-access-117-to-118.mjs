@@ -485,7 +485,14 @@ export function discoverReadAccessTarget() {
   const cliVersion = run(SUPABASE_CLI_EXECUTABLE, ["--version"]).trim();
   assert.equal(cliVersion, "2.95.4");
   const dockerContext = run("docker", ["context", "show"]).trim();
-  assert.equal(dockerContext, "desktop-linux");
+  const dockerEngineId = run("docker", ["info", "--format", "{{.ID}}"]).trim();
+  assert.match(dockerEngineId, /^[0-9a-f-]{36}$/i);
+  if (dockerContext === "default") {
+    assert.equal(process.env.DOCKER_HOST, "unix:///var/run/docker.sock");
+    assert.equal(dockerEngineId, process.env.CODEX_ISOLATED_DOCKER_ENGINE_ID);
+  } else {
+    assert.equal(dockerContext, "desktop-linux");
+  }
   const status = JSON.parse(supabase(["status", "--output", "json"]));
   for (const [label, value, expectedPort] of [
     ["DB", status.DB_URL, dbPort],
@@ -503,6 +510,7 @@ export function discoverReadAccessTarget() {
     db: inspect(dbName, "5432/tcp", dbPort, true),
     dbPort,
     dockerContext,
+    dockerEngineId,
     projectId,
   };
 }
@@ -513,6 +521,7 @@ export function assertFrozenReadAccessTarget(reference, candidate, options = {})
     "configHash",
     "cliVersion",
     "dockerContext",
+    "dockerEngineId",
     "apiPort",
     "dbPort",
   ]) {

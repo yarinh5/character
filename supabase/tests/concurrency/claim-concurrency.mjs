@@ -328,6 +328,8 @@ async function scenario(observer, label, reversed) {
           OR metadata->>'message_id'=${quote(ids.message)};
         DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)}
           OR metadata->>'character_id'=${quote(ids.character)};
+        DELETE FROM public.audit_logs WHERE entity_type='conversation'
+          AND entity_id=${quote(ids.conversation)};
         DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)};
         DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)};
         DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)};

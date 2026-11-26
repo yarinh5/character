@@ -32,7 +32,8 @@ const bucket = "character-media";
 const folder = "characters/00000000-0000-4000-8000-000000060301";
 const objectName = "v4_3_media_fixture.webp";
 const objectPath = `${folder}/${objectName}`;
-const paidIdempotencyKey = "v4_3_media_paid_open_0000000000000001";
+const giftPurchaseKey = "00000000-0000-4000-8000-000000061101";
+const giftOpenKey = "00000000-0000-4000-8000-000000061102";
 
 const ids = {
   character: "00000000-0000-4000-8000-000000060301",
@@ -42,6 +43,8 @@ const ids = {
   crossCharacterConversation: "00000000-0000-4000-8000-000000060403",
   tag: "00000000-0000-4000-8000-000000060501",
   otherTag: "00000000-0000-4000-8000-000000060502",
+  giftCollection: "00000000-0000-4000-8000-000000060503",
+  giftSticker: "00000000-0000-4000-8000-000000060504",
   assignedOperator: "00000000-0000-4000-8000-000000060601",
   otherAssignedOperator: "00000000-0000-4000-8000-000000060602",
   unassignedOperator: "00000000-0000-4000-8000-000000060603",
@@ -103,8 +106,18 @@ function wp06bFixtureDb(sql: string, stage: string) {
     return execFileSync(
       "docker",
       [
-        "exec", "-i", "supabase_db_qmgkmsarzfjnqltljkjl",
-        "psql", "-X", "-U", "postgres", "-d", "postgres", "-qAt", "-v", "ON_ERROR_STOP=1",
+        "exec",
+        "-i",
+        "supabase_db_qmgkmsarzfjnqltljkjl",
+        "psql",
+        "-X",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-qAt",
+        "-v",
+        "ON_ERROR_STOP=1",
       ],
       { input: sql, encoding: "utf8", stdio: "pipe", timeout: 15_000, windowsHide: true },
     ).trim();
@@ -114,12 +127,16 @@ function wp06bFixtureDb(sql: string, stage: string) {
 }
 
 function claimWp06bFixture(ownerId: string, objectPath: string) {
-  requireWp06b(wp06bUuid.test(ownerId) && /^wp06b-[0-9a-f]{24}\.webp$/.test(
-    objectPath.slice(ownerId.length + 1),
-  ) && objectPath.startsWith(`${ownerId}/`), "claim identity");
+  requireWp06b(
+    wp06bUuid.test(ownerId) &&
+      /^wp06b-[0-9a-f]{24}\.webp$/.test(objectPath.slice(ownerId.length + 1)) &&
+      objectPath.startsWith(`${ownerId}/`),
+    "claim identity",
+  );
   // Keep the guard and real service-role claim in one transaction. An HTTP
   // preflight followed by a global claim would leave a window for other writers.
-  const result = wp06bFixtureDb(`
+  const result = wp06bFixtureDb(
+    `
 BEGIN ISOLATION LEVEL READ COMMITTED;
 SET LOCAL statement_timeout = '5s';
 SET LOCAL lock_timeout = '1s';
@@ -166,9 +183,14 @@ $claim$;
 SELECT current_setting('wp06b.fixture_queue_id') || '|' ||
        current_setting('wp06b.fixture_claim_token');
 COMMIT;
-`, "atomic claim (requires one fresh exact row, no competing work, and a free queue lock)");
+`,
+    "atomic claim (requires one fresh exact row, no competing work, and a free queue lock)",
+  );
   const [queueId, claimToken, extra] = result.split("|");
-  requireWp06b(extra === undefined && wp06bUuid.test(queueId) && wp06bUuid.test(claimToken), "claim return");
+  requireWp06b(
+    extra === undefined && wp06bUuid.test(queueId) && wp06bUuid.test(claimToken),
+    "claim return",
+  );
   return { queueId, claimToken };
 }
 
@@ -192,6 +214,9 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
   let adminClient: HttpClient;
   let permanentReservationId: string | undefined;
   let paidSessionId: string | undefined;
+  let giftPurchaseId: string | undefined;
+  let giftMessageId: string | undefined;
+  let otherClientAttachmentId: string | undefined;
   let lockedImagesEnabled = true;
 
   const trackUser = (email: string) => (user: { id: string }) => users.push({ id: user.id, email });
@@ -206,6 +231,14 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       .single();
     if (error || !data?.id) throw new Error("local media fixture active cycle is unavailable");
     return data.id;
+  }
+
+  async function reopenMainConversation() {
+    const { error } = await service
+      .from("conversations")
+      .update({ status: "open" })
+      .eq("id", ids.conversation);
+    if (error) throw error;
   }
 
   async function mediaSideEffectCounts() {
@@ -406,6 +439,28 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       name: "v4_3_media_other_tag",
       sort_order: 1,
     });
+    await insertRow(service, "sticker_collections", {
+      id: ids.giftCollection,
+      slug: "v4-3-media-gifts",
+      name: "V4-3 media gifts",
+      character_id: ids.character,
+      is_active: true,
+    });
+    await insertRow(service, "stickers", {
+      id: ids.giftSticker,
+      collection_id: ids.giftCollection,
+      slug: "v4-3-media-gift",
+      name: "V4-3 media gift",
+      object_path: `collections/${ids.giftCollection}/stickers/${ids.giftSticker}/render.webp`,
+      width: 1,
+      height: 1,
+      byte_size: 1,
+      is_active: true,
+      is_gift: true,
+      ingest_status: "ready",
+      processed_at: new Date().toISOString(),
+      price_credits: 7,
+    });
 
     const syntheticWebp = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x04, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
@@ -491,6 +546,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       viewMode: "view_once" | "paid_open" | "permanent",
       accessMode: "standard" | "locked" = "standard",
       priceCreditsSnapshot: number | null = null,
+      requiredGiftId: string | null = null,
     ) => {
       await insertRow(service, "character_media_reservations", {
         id: reservationId,
@@ -526,6 +582,9 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         access_mode: accessMode,
         view_mode: viewMode,
         price_credits_snapshot: priceCreditsSnapshot,
+        required_gift_id: requiredGiftId,
+        required_gift_name_snapshot: requiredGiftId ? "V4-3 media gift" : null,
+        required_gift_price_credits_snapshot: requiredGiftId ? priceCreditsSnapshot : null,
       });
       tracked.attachments.push(attachmentId);
       await insertRow(service, "character_media_deliveries", {
@@ -552,6 +611,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       "paid_open",
       "standard",
       7,
+      ids.giftSticker,
     );
     await seedAttachment(
       ids.lockedReservation,
@@ -565,7 +625,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     const { error: restoreConversationError } = await service
       .from("conversations")
       .update({ status: "open" })
-      .eq("id", ids.conversation);
+      .in("id", [ids.conversation, ids.otherClientConversation, ids.crossCharacterConversation]);
     if (restoreConversationError) throw restoreConversationError;
     await insertRow(service, "conversation_handling_cycles", {
       conversation_id: ids.conversation,
@@ -620,49 +680,112 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       ...tracked.clientUploads,
     ];
     const assertCleanup = async () => {
-      const [assets, reservations, messages, attachments, transactions, profiles, objects] =
-        await Promise.all([
-          service
-            .from("character_media_assets")
-            .select("id", { count: "exact", head: true })
-            .in(
-              "id",
-              Object.values(ids).filter((value) =>
-                value.startsWith("00000000-0000-4000-8000-0000000607"),
-              ),
+      const [
+        assets,
+        reservations,
+        messages,
+        attachments,
+        transactions,
+        purchases,
+        stickers,
+        collections,
+        profiles,
+        objects,
+      ] = await Promise.all([
+        service
+          .from("character_media_assets")
+          .select("id", { count: "exact", head: true })
+          .in(
+            "id",
+            Object.values(ids).filter((value) =>
+              value.startsWith("00000000-0000-4000-8000-0000000607"),
             ),
-          service
-            .from("character_media_reservations")
-            .select("id", { count: "exact", head: true })
-            .eq("conversation_id", ids.conversation),
-          service
-            .from("messages")
-            .select("id", { count: "exact", head: true })
-            .eq("conversation_id", ids.conversation),
-          service
-            .from("message_attachments")
-            .select("id", { count: "exact", head: true })
-            .in("id", tracked.attachments),
-          service
-            .from("credit_transactions")
-            .select("id", { count: "exact", head: true })
-            .eq("message_attachment_id", ids.paidAttachment),
-          service
-            .from("profiles")
-            .select("user_id", { count: "exact", head: true })
-            .in("user_id", fixtureUserIds),
-          service.storage.from(bucket).list(folder, { search: objectName }),
-        ]);
-      for (const result of [assets, reservations, messages, attachments, transactions, profiles]) {
+          ),
+        service
+          .from("character_media_reservations")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", ids.conversation),
+        service
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", ids.conversation),
+        service
+          .from("message_attachments")
+          .select("id", { count: "exact", head: true })
+          .in("id", tracked.attachments),
+        service
+          .from("credit_transactions")
+          .select("id", { count: "exact", head: true })
+          .in("message_attachment_id", tracked.attachments),
+        service
+          .from("gift_attachment_purchases")
+          .select("id", { count: "exact", head: true })
+          .eq("attachment_id", ids.paidAttachment),
+        service
+          .from("stickers")
+          .select("id", { count: "exact", head: true })
+          .eq("id", ids.giftSticker),
+        service
+          .from("sticker_collections")
+          .select("id", { count: "exact", head: true })
+          .eq("id", ids.giftCollection),
+        service
+          .from("profiles")
+          .select("user_id", { count: "exact", head: true })
+          .in("user_id", fixtureUserIds),
+        service.storage.from(bucket).list(folder, { search: objectName }),
+      ]);
+      for (const result of [
+        assets,
+        reservations,
+        messages,
+        attachments,
+        transactions,
+        purchases,
+        stickers,
+        collections,
+        profiles,
+      ]) {
         if (result.error || result.count !== 0)
           throw new Error("local media fixture cleanup verification failed");
       }
       if (objects.error || objects.data?.some((object) => object.name === objectName)) {
         throw new Error("local media Storage cleanup verification failed");
       }
+      if (giftPurchaseId) {
+        requireWp06b(wp06bUuid.test(giftPurchaseId), "gift purchase identity");
+        const privateCleared = wp06bFixtureDb(
+          `
+SELECT NOT EXISTS (
+  SELECT 1 FROM private.gift_attachment_open_sessions
+  WHERE attachment_id = '${ids.paidAttachment}'::uuid
+) AND NOT EXISTS (
+  SELECT 1 FROM private.gift_reward_events
+  WHERE purchase_id = '${giftPurchaseId}'::uuid
+);
+`,
+          "scoped gift private cleanup verification",
+        );
+        if (privateCleared !== "t")
+          throw new Error("local gift private cleanup verification failed");
+      }
     };
 
     await runCleanupSteps([
+      {
+        label: "resolve gift purchase",
+        run: async () => {
+          const { data, error } = await service
+            .from("gift_attachment_purchases")
+            .select("id,gift_message_id")
+            .eq("attachment_id", ids.paidAttachment)
+            .maybeSingle();
+          if (error) throw error;
+          giftPurchaseId = data?.id;
+          giftMessageId = data?.gift_message_id ?? undefined;
+          if (giftMessageId) ownedEventTokens.push(giftMessageId);
+        },
+      },
       {
         label: "fixture events before parent cleanup",
         run: async () => {
@@ -683,9 +806,85 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
           cleanupPrivateMediaOpenState(tracked.attachments, ownerId ? [ownerId] : []),
       },
       {
-        label: "credit transactions",
+        label: "gift private sessions and allocations",
+        run: async () => {
+          wp06bFixtureDb(
+            `
+BEGIN;
+DELETE FROM private.gift_attachment_open_sessions WHERE attachment_id = '${ids.paidAttachment}'::uuid;
+DELETE FROM private.gift_reward_allocations WHERE gift_reward_event_id IN (
+  SELECT event.id FROM private.gift_reward_events event
+  JOIN public.gift_attachment_purchases purchase ON purchase.id = event.purchase_id
+  WHERE purchase.attachment_id = '${ids.paidAttachment}'::uuid
+);
+WITH removed AS (
+  DELETE FROM public.operator_point_transactions WHERE gift_reward_event_id IN (
+    SELECT event.id FROM private.gift_reward_events event
+    JOIN public.gift_attachment_purchases purchase ON purchase.id = event.purchase_id
+    WHERE purchase.attachment_id = '${ids.paidAttachment}'::uuid
+  ) RETURNING operator_id, amount
+), totals AS (
+  SELECT operator_id, sum(amount) AS amount FROM removed GROUP BY operator_id
+)
+UPDATE public.operator_point_wallets wallet
+SET balance = wallet.balance - totals.amount,
+    lifetime_earned = wallet.lifetime_earned - totals.amount
+FROM totals WHERE wallet.operator_id = totals.operator_id;
+COMMIT;
+`,
+            "scoped gift sessions and allocations",
+          );
+        },
+      },
+      {
+        label: "operator point transactions",
+        run: async () => {
+          const { error } = await service
+            .from("operator_point_transactions")
+            .delete()
+            .in("operator_id", [
+              ids.assignedOperator,
+              ids.otherAssignedOperator,
+              ids.unassignedOperator,
+            ]);
+          if (error) throw error;
+        },
+      },
+      {
+        label: "gift reward event",
+        run: async () => {
+          wp06bFixtureDb(
+            `
+DELETE FROM private.gift_reward_events WHERE purchase_id IN (
+  SELECT id FROM public.gift_attachment_purchases
+  WHERE attachment_id = '${ids.paidAttachment}'::uuid
+);
+`,
+            "scoped gift reward event",
+          );
+        },
+      },
+      {
+        label: "gift purchase",
         run: async () =>
-          deleteByEq(service, "credit_transactions", "message_attachment_id", ids.paidAttachment),
+          deleteByEq(service, "gift_attachment_purchases", "attachment_id", ids.paidAttachment),
+      },
+      {
+        label: "gift message sticker",
+        run: async () => {
+          if (giftMessageId)
+            await deleteByEq(service, "message_stickers", "message_id", giftMessageId);
+        },
+      },
+      {
+        label: "credit transactions",
+        run: async () => {
+          const { error } = await service
+            .from("credit_transactions")
+            .delete()
+            .in("message_attachment_id", tracked.attachments);
+          if (error) throw error;
+        },
       },
       {
         label: "media audit logs",
@@ -728,6 +927,24 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         },
       },
       {
+        label: "client upload fixture tombstones",
+        run: async () => {
+          if (tracked.clientUploads.length === 0) return;
+          const { error } = await service
+            .from("client_media_uploads")
+            .update({
+              status: "deleted",
+              finalized_at: null,
+              access_expires_at: null,
+              message_id: null,
+              message_attachment_id: null,
+              idempotency_key: null,
+            })
+            .in("id", tracked.clientUploads);
+          if (error) throw error;
+        },
+      },
+      {
         label: "attachments",
         run: async () =>
           deleteByEq(service, "message_attachments", "message_id", ids.permanentMessage),
@@ -759,13 +976,19 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         },
       },
       {
-        label: "handling cycle",
+        label: "reservations and handling cycle",
         run: async () => {
           for (const conversationId of [
             ids.conversation,
             ids.otherClientConversation,
             ids.crossCharacterConversation,
           ]) {
+            await deleteByEq(
+              service,
+              "character_media_reservations",
+              "conversation_id",
+              conversationId,
+            );
             await deleteByEq(
               service,
               "conversation_handling_cycles",
@@ -788,23 +1011,6 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         },
       },
       {
-        label: "reservations",
-        run: async () => {
-          for (const conversationId of [
-            ids.conversation,
-            ids.otherClientConversation,
-            ids.crossCharacterConversation,
-          ]) {
-            await deleteByEq(
-              service,
-              "character_media_reservations",
-              "conversation_id",
-              conversationId,
-            );
-          }
-        },
-      },
-      {
         label: "assets",
         run: async () =>
           deleteByEq(service, "character_media_assets", "character_id", ids.character),
@@ -816,6 +1022,20 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
           await deleteByEq(service, "media_tags", "id", ids.otherTag);
         },
       },
+      {
+        label: "gift sticker",
+        run: async () => deleteByEq(service, "stickers", "id", ids.giftSticker),
+      },
+      {
+        label: "gift collection",
+        run: async () => deleteByEq(service, "sticker_collections", "id", ids.giftCollection),
+      },
+      ...[ids.assignedOperator, ids.otherAssignedOperator, ids.unassignedOperator].map(
+        (operatorId) => ({
+          label: `operator point wallet ${operatorId}`,
+          run: async () => deleteByEq(service, "operator_point_wallets", "operator_id", operatorId),
+        }),
+      ),
       ...fixtureUserIds.map((fixtureUserId) => ({
         label: `wallet ${fixtureUserId}`,
         run: async () => deleteByEq(service, "credit_wallets", "user_id", fixtureUserId),
@@ -947,17 +1167,13 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       _conversation_id: ids.conversation,
       _asset_id: ids.otherSendAsset,
     });
-    expect(otherReservation.error).toBeNull();
-    const otherReservationId = String(
-      (otherReservation.data as { reservation_id: string }).reservation_id,
-    );
-    tracked.reservations.push(otherReservationId);
+    assertSafeBusinessError(otherReservation.error, "active_handling_cycle_required");
 
     const expectedCycleId = await activeCycleId();
     const sideEffectsBeforeDeniedSends = await mediaSideEffectCounts();
     const [otherOperatorSend, unassignedSend] = await Promise.all([
       otherAssigned.rpc("send_operator_media_message", {
-        _reservation_id: otherReservationId,
+        _reservation_id: permanentReservationId,
         _caption: "v4_3_media_other_operator_attempt",
         _view_mode: "permanent",
         _expected_cycle_id: expectedCycleId,
@@ -1079,6 +1295,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     expect(firstResult.already_sent).toBe(false);
     tracked.messages.push(firstResult.message.id);
     tracked.attachments.push(firstResult.attachment.id);
+    otherClientAttachmentId = firstResult.attachment.id;
 
     const retry = await assigned.rpc("send_operator_media_message", {
       _reservation_id: reservationId,
@@ -1101,6 +1318,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
   });
 
   it("releases and expires reservations without creating or deleting delivery history", async () => {
+    await reopenMainConversation();
     const reserveArgs = {
       _conversation_id: ids.conversation,
       _asset_id: ids.otherSendAsset,
@@ -1148,6 +1366,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
   });
 
   it("serializes concurrent reserve and send retries without a second delivery", async () => {
+    await reopenMainConversation();
     const reserveArgs = {
       _conversation_id: ids.conversation,
       _asset_id: ids.raceAsset,
@@ -1162,7 +1381,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     const reservationIds = [leftReserve.data, rightReserve.data].map((value) =>
       String((value as { reservation_id: string }).reservation_id),
     );
-    expect(new Set(reservationIds)).toHaveSize(1);
+    expect(new Set(reservationIds).size).toBe(1);
     tracked.reservations.push(reservationIds[0]!);
 
     const expectedCycleId = await activeCycleId();
@@ -1185,7 +1404,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     }>;
     expect(results.filter((result) => result.already_sent === false)).toHaveLength(1);
     expect(results.filter((result) => result.already_sent === true)).toHaveLength(1);
-    expect(new Set(results.map((result) => result.message.id))).toHaveSize(1);
+    expect(new Set(results.map((result) => result.message.id)).size).toBe(1);
     tracked.messages.push(results[0]!.message.id);
     const attachmentId = results.find((result) => result.attachment)?.attachment?.id;
     if (attachmentId) tracked.attachments.push(attachmentId);
@@ -1208,7 +1427,9 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       unassigned.rpc("get_message_attachment_access", { _attachment_ids: attachmentIds }),
     ]);
     expect(ownerAccess.error).toBeNull();
-    expect(ownerAccess.data).toHaveLength(5);
+    expect(ownerAccess.data?.map((row) => row.attachment_id).sort()).toEqual(
+      attachmentIds.filter((id) => id !== otherClientAttachmentId).sort(),
+    );
     expect(ownerAccess.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1221,15 +1442,21 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         }),
         expect.objectContaining({
           attachment_id: ids.paidAttachment,
-          render_state: "paid_open_available",
+          render_state: "gift_purchase_required",
+          required_gift_id: ids.giftSticker,
+          required_gift_name: "V4-3 media gift",
+          required_gift_price_credits: 7,
         }),
         expect.objectContaining({ attachment_id: ids.lockedAttachment, render_state: "disabled" }),
       ]),
     );
     expect(otherAccess.error).toBeNull();
-    expect(otherAccess.data).toEqual([]);
+    expect(otherClientAttachmentId).toBeDefined();
+    expect(otherAccess.data?.map((row) => row.attachment_id)).toEqual([otherClientAttachmentId]);
     expect(assignedAccess.error).toBeNull();
-    expect(assignedAccess.data).toHaveLength(5);
+    expect(assignedAccess.data?.map((row) => row.attachment_id).sort()).toEqual(
+      [...attachmentIds].sort(),
+    );
     expect(unassignedAccess.error).toBeNull();
     expect(unassignedAccess.data).toEqual([]);
     for (const row of [...(ownerAccess.data ?? []), ...(assignedAccess.data ?? [])]) {
@@ -1269,7 +1496,13 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
         "base64",
       ),
     );
-    const uploaded = await fetch(uploadUrl, {
+    const signedUpload = new URL(uploadUrl);
+    expect(signedUpload.pathname).toMatch(/^\/storage\/v1\/object\/upload\/sign\/client-media\//);
+    expect(signedUpload.searchParams.has("token")).toBe(true);
+    const localApi = new URL(process.env.SUPABASE_LOCAL_URL ?? "");
+    signedUpload.protocol = localApi.protocol;
+    signedUpload.host = localApi.host;
+    const uploaded = await fetch(signedUpload, {
       method: "PUT",
       headers: { "Content-Type": "image/png" },
       body: onePixelPng,
@@ -1335,8 +1568,9 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     expect(opened.data).toMatchObject({
       attachment_id: ids.viewOnceAttachment,
       render_state: "view_once_opened",
+      view_policy_version: "regular_60s_v1",
     });
-    await expectSignedMedia(await invokeMediaView(owner, body), 7);
+    await expectSignedMedia(await invokeMediaView(owner, body), 60);
 
     const completed = await owner.rpc("complete_free_view_once_attachment", {
       _attachment_id: ids.viewOnceAttachment,
@@ -1349,53 +1583,181 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
     await expectUnavailable(await invokeMediaView(owner, body));
   });
 
-  it("opens Paid media once and keeps locked legacy media disabled", async () => {
+  it("purchases the required Gift once, opens its session, and keeps locked legacy media disabled", async () => {
     expect(lockedImagesEnabled).toBe(false);
     const paidBody = { kind: "message_attachment", attachment_id: ids.paidAttachment };
     await expectUnavailable(await invokeMediaView(owner, paidBody));
 
-    const opened = await owner.rpc("open_paid_message_attachment", {
+    const financialState = async () => {
+      const [ownerWallet, operatorWallet, ledger] = await Promise.all([
+        service
+          .from("credit_wallets")
+          .select("balance")
+          .eq("user_id", userId(emails.owner))
+          .single(),
+        service
+          .from("credit_wallets")
+          .select("balance")
+          .eq("user_id", userId(emails.assigned))
+          .single(),
+        service
+          .from("credit_transactions")
+          .select("id", { count: "exact", head: true })
+          .eq("message_attachment_id", ids.paidAttachment),
+      ]);
+      expect(ownerWallet.error).toBeNull();
+      expect(operatorWallet.error).toBeNull();
+      expect(ledger.error).toBeNull();
+      return [ownerWallet.data?.balance, operatorWallet.data?.balance, ledger.count];
+    };
+    const startingBalance = (await financialState())[0];
+    expect(typeof startingBalance).toBe("number");
+    expect(await financialState()).toEqual([startingBalance, 0, 0]);
+    const legacyOpen = await owner.rpc("open_paid_message_attachment", {
       _attachment_id: ids.paidAttachment,
-      _idempotency_key: paidIdempotencyKey,
+      _idempotency_key: "v4_3_media_legacy_gift_guard_0001",
+    });
+    assertSafeBusinessError(legacyOpen.error, "gift_purchase_required");
+    expect(await financialState()).toEqual([startingBalance, 0, 0]);
+
+    const purchased = await owner.rpc("purchase_attachment_gift", {
+      _attachment_id: ids.paidAttachment,
+      _gift_id: ids.giftSticker,
+      _idempotency_key: giftPurchaseKey,
+    });
+    expect(purchased.error).toBeNull();
+    const purchase = purchased.data as {
+      purchase_id: string;
+      balance: number;
+      already_purchased: boolean;
+      message: { id: string };
+    };
+    expect(purchase).toMatchObject({
+      attachment_id: ids.paidAttachment,
+      gift_id: ids.giftSticker,
+      already_purchased: false,
+      balance: startingBalance! - 7,
+      message: { content: "[sticker]" },
+    });
+    giftPurchaseId = purchase.purchase_id;
+    giftMessageId = purchase.message.id;
+    expect(await financialState()).toEqual([startingBalance! - 7, 0, 1]);
+    await expectUnavailable(await invokeMediaView(owner, paidBody));
+    const purchasedAccess = await owner.rpc("get_message_attachment_access", {
+      _attachment_ids: [ids.paidAttachment],
+    });
+    expect(purchasedAccess.error).toBeNull();
+    expect(purchasedAccess.data).toEqual([
+      expect.objectContaining({
+        render_state: "gift_purchased",
+        available_purchase_id: giftPurchaseId,
+      }),
+    ]);
+
+    const purchaseReplay = await owner.rpc("purchase_attachment_gift", {
+      _attachment_id: ids.paidAttachment,
+      _gift_id: ids.giftSticker,
+      _idempotency_key: giftPurchaseKey,
+    });
+    expect(purchaseReplay.error).toBeNull();
+    expect(purchaseReplay.data).toMatchObject({
+      purchase_id: giftPurchaseId,
+      already_purchased: true,
+      balance: startingBalance! - 7,
+    });
+    expect(await financialState()).toEqual([startingBalance! - 7, 0, 1]);
+
+    const opened = await owner.rpc("open_attachment_gift_purchase", {
+      _attachment_id: ids.paidAttachment,
+      _purchase_id: giftPurchaseId,
+      _idempotency_key: giftOpenKey,
     });
     expect(opened.error).toBeNull();
-    const paidResult = opened.data as {
+    const openResult = opened.data as {
       session_id: string;
       expires_at: string;
-      balance: number;
       already_opened: boolean;
     };
-    expect(paidResult).toMatchObject({ already_opened: false, balance: 13 });
-    paidSessionId = paidResult.session_id;
-    await expectSignedMedia(await invokeMediaView(owner, paidBody), 7);
-
-    const completed = await owner.rpc("complete_paid_message_attachment_session", {
-      _session_id: paidSessionId,
+    expect(openResult.already_opened).toBe(false);
+    expect(new Date(openResult.expires_at).getTime()).toBeGreaterThan(Date.now());
+    paidSessionId = openResult.session_id;
+    await expectSignedMedia(await invokeMediaView(owner, paidBody), 60);
+    const openedAccess = await owner.rpc("get_message_attachment_access", {
+      _attachment_ids: [ids.paidAttachment],
     });
-    expect(completed.error).toBeNull();
-    expect(completed.data).toMatchObject({ session_id: paidSessionId, completed: true });
-    await expectUnavailable(await invokeMediaView(owner, paidBody));
+    expect(openedAccess.error).toBeNull();
+    expect(openedAccess.data).toEqual([
+      expect.objectContaining({ render_state: "paid_open_active", available_purchase_id: null }),
+    ]);
+    const openReplay = await owner.rpc("open_attachment_gift_purchase", {
+      _attachment_id: ids.paidAttachment,
+      _purchase_id: giftPurchaseId,
+      _idempotency_key: giftOpenKey,
+    });
+    expect(openReplay.error).toBeNull();
+    expect(openReplay.data).toMatchObject({ session_id: paidSessionId, already_opened: true });
+    const secondOpen = await owner.rpc("open_attachment_gift_purchase", {
+      _attachment_id: ids.paidAttachment,
+      _purchase_id: giftPurchaseId,
+      _idempotency_key: "00000000-0000-4000-8000-000000061103",
+    });
+    assertSafeBusinessError(secondOpen.error, "gift_purchase_already_consumed");
+    expect(await financialState()).toEqual([startingBalance! - 7, 0, 1]);
 
     const { data: transactions, error: transactionError } = await service
       .from("credit_transactions")
-      .select("user_id,amount,type,message_attachment_id")
-      .eq("message_attachment_id", ids.paidAttachment)
-      .order("amount", { ascending: true });
+      .select("id,user_id,amount,type,reason,message_id,message_attachment_id")
+      .eq("message_attachment_id", ids.paidAttachment);
     expect(transactionError).toBeNull();
     expect(transactions).toEqual([
-      {
+      expect.objectContaining({
         user_id: userId(emails.owner),
         amount: -7,
-        type: "paid_image_open_spend",
+        type: "sticker_spend",
+        reason: "attachment_gift_purchase",
+        message_id: giftMessageId,
         message_attachment_id: ids.paidAttachment,
-      },
-      {
-        user_id: userId(emails.assigned),
-        amount: 7,
-        type: "paid_image_open_payout",
-        message_attachment_id: ids.paidAttachment,
-      },
+      }),
     ]);
+    const [purchaseRow, messageSticker] = await Promise.all([
+      service
+        .from("gift_attachment_purchases")
+        .select("status,charged_transaction_id,gift_message_id,price_credits_snapshot")
+        .eq("id", giftPurchaseId)
+        .single(),
+      service
+        .from("message_stickers")
+        .select("sticker_id,sticker_name_snapshot,price_credits_snapshot")
+        .eq("message_id", giftMessageId)
+        .single(),
+    ]);
+    expect(purchaseRow.error).toBeNull();
+    expect(purchaseRow.data).toMatchObject({
+      status: "opened",
+      charged_transaction_id: transactions?.[0]?.id,
+      gift_message_id: giftMessageId,
+      price_credits_snapshot: 7,
+    });
+    expect(messageSticker.error).toBeNull();
+    expect(messageSticker.data).toMatchObject({
+      sticker_id: ids.giftSticker,
+      sticker_name_snapshot: "V4-3 media gift",
+      price_credits_snapshot: 7,
+    });
+
+    requireWp06b(wp06bUuid.test(paidSessionId), "gift session identity");
+    const expiredSessionId = wp06bFixtureDb(
+      `
+UPDATE private.gift_attachment_open_sessions
+SET opened_at = clock_timestamp() - interval '61 seconds',
+    expires_at = clock_timestamp() - interval '1 second'
+WHERE id = '${paidSessionId}'::uuid AND attachment_id = '${ids.paidAttachment}'::uuid
+RETURNING id;
+`,
+      "expire exact gift session",
+    );
+    expect(expiredSessionId).toBe(paidSessionId);
+    await expectUnavailable(await invokeMediaView(owner, paidBody));
 
     await expectUnavailable(
       await invokeMediaView(owner, {
@@ -1412,14 +1774,17 @@ suite("WP06B profile image Storage cleanup", () => {
     const runId = process.env.WP015_HTTP_RUN_ID || process.env.RUN_ID;
     const api = new URL(process.env.SUPABASE_LOCAL_URL ?? "");
     requireWp06b(
-      runId && api.protocol === "http:" && api.port === "60421" &&
+      runId &&
+        api.protocol === "http:" &&
+        api.port === "60421" &&
         ["127.0.0.1", "localhost", "[::1]"].includes(api.hostname),
       "disposable local HTTP runner and run ID required",
     );
     requireWp06b(wp06bFixtureDb("SELECT 1;", "local DB target") === "1", "local DB target");
     const scope = createHash("sha256")
       .update(JSON.stringify([runId, process.pid, performance.timeOrigin]))
-      .digest("hex").slice(0, 24);
+      .digest("hex")
+      .slice(0, 24);
     const fileName = `wp06b-${scope}.webp`;
     const email = `wp06b-${scope}@example.invalid`;
     const password = randomBytes(24).toString("base64url");
@@ -1480,8 +1845,11 @@ suite("WP06B profile image Storage cleanup", () => {
         });
         const row = saved.data?.[0];
         requireWp06b(
-          !saved.error && saved.data?.length === 1 && row?.profile_image_url === primary &&
-            Array.isArray(row.profile_image_urls) && row.profile_image_urls.length === urls.length &&
+          !saved.error &&
+            saved.data?.length === 1 &&
+            row?.profile_image_url === primary &&
+            Array.isArray(row.profile_image_urls) &&
+            row.profile_image_urls.length === urls.length &&
             (primary === null || row.profile_image_urls[0] === primary),
           primary === null ? "committed profile removal" : "committed profile save",
         );
@@ -1491,23 +1859,30 @@ suite("WP06B profile image Storage cleanup", () => {
       await saveImages(null);
       const { queueId, claimToken } = claimWp06bFixture(ownerId, objectPath);
       const claimArgs = { _queue_id: queueId, _claim_token: claimToken };
-      const authorization = await service.rpc("authorize_client_profile_image_cleanup_for_server", claimArgs);
+      const authorization = await service.rpc(
+        "authorize_client_profile_image_cleanup_for_server",
+        claimArgs,
+      );
       if (authorization.error || authorization.data !== "delete") {
         throw new Error("WP06B fixture failed: worker delete authorization");
       }
       const downloaded = await storage.download(objectPath);
       requireWp06b(
-        !downloaded.error && downloaded.data &&
+        !downloaded.error &&
+          downloaded.data &&
           image.equals(Buffer.from(await downloaded.data.arrayBuffer())),
         "uploaded WebP remains readable after profile removal",
       );
 
       async function expectCompletionError(token: string, expected: string) {
         const completed = await service.rpc("complete_client_profile_image_cleanup_for_server", {
-          ...claimArgs, _claim_token: token,
+          ...claimArgs,
+          _claim_token: token,
         });
         requireWp06b(
-          completed.data === null && completed.error?.code === "P0001" && completed.error.message === expected,
+          completed.data === null &&
+            completed.error?.code === "P0001" &&
+            completed.error.message === expected,
           `completion must reject with ${expected}`,
         );
       }
@@ -1518,8 +1893,14 @@ suite("WP06B profile image Storage cleanup", () => {
       const wrongToken = randomUUID();
       requireWp06b(wrongToken !== claimToken, "distinct wrong token");
       await expectCompletionError(wrongToken, "profile_image_cleanup_claim_not_found");
-      const completed = await service.rpc("complete_client_profile_image_cleanup_for_server", claimArgs);
-      requireWp06b(!completed.error && completed.data === "deleted", "current token completes deletion");
+      const completed = await service.rpc(
+        "complete_client_profile_image_cleanup_for_server",
+        claimArgs,
+      );
+      requireWp06b(
+        !completed.error && completed.data === "deleted",
+        "current token completes deletion",
+      );
     } finally {
       if (ownerId) {
         let storageCleared = false;
@@ -1527,26 +1908,35 @@ suite("WP06B profile image Storage cleanup", () => {
           {
             label: "WP06B exact Storage fixture",
             run: async () => {
-              if (uploadAttempted && await fixtureObjectPresent()) {
-                const owned = wp06bFixtureDb(`
+              if (uploadAttempted && (await fixtureObjectPresent())) {
+                const owned = wp06bFixtureDb(
+                  `
 SELECT count(*) FROM storage.objects
 WHERE bucket_id = '${wp06bBucket}' AND name = '${objectPath}' AND owner_id = '${ownerId}';
-`, "Storage cleanup ownership");
+`,
+                  "Storage cleanup ownership",
+                );
                 requireWp06b(owned === "1", "refuse Storage cleanup without exact ownership");
                 await removeFixtureObject();
               }
-              if (uploadAttempted) requireWp06b(!(await fixtureObjectPresent()), "Storage cleanup verification");
+              if (uploadAttempted)
+                requireWp06b(!(await fixtureObjectPresent()), "Storage cleanup verification");
               storageCleared = true;
             },
           },
           {
             label: "WP06B fixture events before Auth cleanup",
-            run: async () => { await deleteFixtureEventsForOwnership(service, [ownerId]); },
+            run: async () => {
+              await deleteFixtureEventsForOwnership(service, [ownerId]);
+            },
           },
           {
             label: "WP06B exact Auth fixture",
             run: async () => {
-              requireWp06b(storageCleared, "preserve Auth owner when Storage cleanup is unverified");
+              requireWp06b(
+                storageCleared,
+                "preserve Auth owner when Storage cleanup is unverified",
+              );
               await deleteAuthUser(service, ownerId);
             },
           },
@@ -1560,7 +1950,8 @@ WHERE bucket_id = '${wp06bBucket}' AND name = '${objectPath}' AND owner_id = '${
           {
             label: "WP06B Auth and queue cascade verification",
             run: async () => {
-              const cleared = wp06bFixtureDb(`
+              const cleared = wp06bFixtureDb(
+                `
 SELECT NOT EXISTS (SELECT 1 FROM auth.users WHERE id = '${ownerId}'::uuid)
    AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE user_id = '${ownerId}'::uuid)
    AND NOT EXISTS (SELECT 1 FROM public.client_profiles WHERE user_id = '${ownerId}'::uuid)
@@ -1571,7 +1962,9 @@ SELECT NOT EXISTS (SELECT 1 FROM auth.users WHERE id = '${ownerId}'::uuid)
      WHERE owner_user_id = '${ownerId}'::uuid
        AND bucket_id = '${wp06bBucket}' AND object_path = '${objectPath}'
    );
-`, "Auth and exact queue cascade");
+`,
+                "Auth and exact queue cascade",
+              );
               requireWp06b(cleared === "t", "Auth and exact queue cleanup verification");
             },
           },

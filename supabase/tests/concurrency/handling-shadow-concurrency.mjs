@@ -192,7 +192,7 @@ async function seedConversation(observer, label, withCycle = true) {
     VALUES (${quote(ids.character)},${quote(ids.operator)});
     INSERT INTO public.credit_wallets(user_id,balance,lifetime_earned,lifetime_spent)
     VALUES
-      (${quote(ids.client)},20,20,0),
+      (${quote(ids.client)},30,30,0),
       (${quote(ids.operatorUser)},20,20,0)
     ON CONFLICT (user_id) DO UPDATE SET
       balance=EXCLUDED.balance,
@@ -209,7 +209,12 @@ async function seedConversation(observer, label, withCycle = true) {
     ${
       withCycle
         ? `INSERT INTO public.conversation_handling_cycles(id,conversation_id,work_item_id,operator_id)
-           VALUES (${quote(ids.cycle)},${quote(ids.conversation)},${quote(ids.item)},${quote(ids.operator)});`
+           VALUES (${quote(ids.cycle)},${quote(ids.conversation)},${quote(ids.item)},${quote(ids.operator)});
+           WITH anchor AS (SELECT clock_timestamp() AS at)
+           UPDATE public.conversations conversation
+           SET last_business_message_at=anchor.at,
+               inactivity_expires_at=anchor.at + interval '180 seconds'
+           FROM anchor WHERE conversation.id=${quote(ids.conversation)};`
         : ""
     }
     COMMIT;`);
@@ -385,6 +390,9 @@ async function cleanup(observer) {
         `DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)};`,
       );
       await observer.ok(
+        `DELETE FROM public.operator_point_transactions WHERE operator_id=${quote(ids.operator)};`,
+      );
+      await observer.ok(
         `DELETE FROM public.operator_score_events WHERE conversation_id=${quote(ids.conversation)};`,
       );
       await observer.ok(
@@ -421,6 +429,9 @@ async function cleanup(observer) {
         )
            OR operator_id=${quote(ids.operator)}
            OR character_id=${quote(ids.character)};`);
+      await observer.ok(
+        `DELETE FROM public.operator_point_wallets WHERE operator_id=${quote(ids.operator)};`,
+      );
       await observer.ok(`DELETE FROM public.operators WHERE id=${quote(ids.operator)};`);
       await observer.ok(`DELETE FROM public.characters WHERE id=${quote(ids.character)};`);
       await observer.ok(`DELETE FROM public.user_roles WHERE user_id=${quote(ids.operatorUser)};`);

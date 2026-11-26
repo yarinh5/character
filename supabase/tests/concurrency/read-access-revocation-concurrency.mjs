@@ -155,6 +155,7 @@ DELETE FROM public.conversation_read_states WHERE conversation_id IN (${conversa
 DELETE FROM public.conversation_locks WHERE conversation_id IN (${conversationIds}) OR locked_by_user_id IN (${userIds});
 DELETE FROM public.internal_notes WHERE conversation_id IN (${conversationIds}) OR operator_id IN (${operatorIds});
 DELETE FROM public.customer_info_entries WHERE conversation_id IN (${conversationIds}) OR client_id IN (${userIds}) OR operator_id IN (${operatorIds});
+DELETE FROM public.operator_point_transactions WHERE operator_id IN (${operatorIds});
 DELETE FROM public.operator_score_events WHERE conversation_id IN (${conversationIds}) OR operator_id IN (${operatorIds});
 DELETE FROM public.operator_monthly_scores WHERE operator_id IN (${operatorIds});
 DELETE FROM public.message_stickers WHERE message_id IN (SELECT id FROM public.messages WHERE conversation_id IN (${conversationIds}));
@@ -166,6 +167,7 @@ DELETE FROM public.character_operator_assignments WHERE character_id IN (${chara
 DELETE FROM public.conversations WHERE id IN (${conversationIds});
 DELETE FROM public.user_conversation_access_versions WHERE user_id IN (${userIds});
 DELETE FROM public.characters WHERE id IN (${characterIds});
+DELETE FROM public.operator_point_wallets WHERE operator_id IN (${operatorIds});
 DELETE FROM public.operators WHERE id IN (${operatorIds}) OR user_id IN (${userIds});
 DELETE FROM public.user_roles WHERE user_id IN (${userIds});
 DELETE FROM public.profiles WHERE id IN (SELECT id FROM wp01_owned_profiles) OR user_id IN (${userIds});
@@ -310,15 +312,19 @@ function fixtureSql(ids) {
     (${q(ids.client)},'authenticated','authenticated',${q(`${runId}_client@example.invalid`)},now(),'{}','{}',now(),now()),
     (${q(ids.user)},'authenticated','authenticated',${q(`${runId}_operator@example.invalid`)},now(),'{}','{}',now(),now());
   INSERT INTO public.user_roles(user_id,role) VALUES (${q(ids.user)},'operator');
-  INSERT INTO public.operators(id,user_id,full_name,is_active,availability_status,presence_status) VALUES (${q(ids.operator)},${q(ids.user)},${q(runId)},true,'available','online');
+  INSERT INTO public.operators(id,user_id,full_name,is_active,availability_status,presence_status,last_seen_at) VALUES (${q(ids.operator)},${q(ids.user)},${q(runId)},true,'available','online',clock_timestamp());
   INSERT INTO public.characters(id,name,is_active,is_visible,availability_status) VALUES (${q(ids.character)},${q(runId)},true,true,'available');
   INSERT INTO public.character_operator_assignments(character_id,operator_id) VALUES (${q(ids.character)},${q(ids.operator)});
   INSERT INTO public.conversations(id,client_id,character_id,status) VALUES (${q(ids.conversation)},${q(ids.client)},${q(ids.character)},'open');
+  INSERT INTO public.messages(id,conversation_id,sender_type,sender_id,content) VALUES (${q(ids.clientMessage)},${q(ids.conversation)},'client',${q(ids.client)},'synthetic client request');
   COMMIT;`;
 }
 function ids() {
   return Object.fromEntries(
-    ["client", "user", "operator", "character", "conversation"].map((key) => [key, randomUUID()]),
+    ["client", "user", "operator", "character", "conversation", "clientMessage"].map((key) => [
+      key,
+      randomUUID(),
+    ]),
   );
 }
 
@@ -374,6 +380,8 @@ function fixtureGraphSnapshot() {
     'analytics',(SELECT count(*) FROM public.analytics_events),
     'audit',(SELECT count(*) FROM public.audit_logs),
     'score_events',(SELECT count(*) FROM public.operator_score_events),
+    'point_transactions',(SELECT count(*) FROM public.operator_point_transactions),
+    'point_wallets',(SELECT count(*) FROM public.operator_point_wallets),
     'monthly_scores',(SELECT count(*) FROM public.operator_monthly_scores),
     'attachments',(SELECT count(*) FROM public.message_attachments),
     'message_stickers',(SELECT count(*) FROM public.message_stickers),
@@ -499,7 +507,7 @@ async function scenarioRevokeWins() {
     const after = json(
       `SELECT json_build_object('messages',(SELECT count(*) FROM public.messages WHERE conversation_id=${q(fixture.conversation)}),'cycles',(SELECT count(*) FROM public.conversation_handling_cycles WHERE conversation_id=${q(fixture.conversation)}),'allowed',private.can_user_read_conversation(${q(fixture.conversation)},${q(fixture.user)}));`,
     );
-    assert.deepEqual(after, { messages: 0, cycles: 0, allowed: false });
+    assert.deepEqual(after, { messages: 1, cycles: 0, allowed: false });
   });
 }
 
@@ -508,7 +516,10 @@ async function scenarioSendWins() {
     const send = openSession("send_first");
     const revoke = openSession("revoke_second");
     await send.ok(
-      `BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims='{"sub":"${fixture.user}","role":"authenticated"}'; SELECT public.send_operator_message(${q(fixture.conversation)},'authorized before revoke',NULL); SELECT pg_backend_pid();`,
+      `BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims='{"sub":"${fixture.user}","role":"authenticated"}';`,
+    );
+    await send.ok(
+      `SELECT public.send_operator_message(${q(fixture.conversation)},'authorized before revoke',NULL);`,
     );
     const revokePid = Number((await revoke.ok("SELECT pg_backend_pid();")).lines.at(-1));
     const pending = revoke.query(
@@ -623,7 +634,7 @@ async function scenarioAuthorityRevokeVsSend(kind, revokeFirst) {
             `SELECT count(*) FROM public.messages WHERE conversation_id=${q(fixture.conversation)};`,
           ),
         ),
-        0,
+        1,
       );
     } else {
       await send.ok(

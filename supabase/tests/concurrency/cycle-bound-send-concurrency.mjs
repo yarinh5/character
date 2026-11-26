@@ -184,6 +184,9 @@ const baselineSql = `SELECT json_build_object(
   'cycles',(SELECT count(*) FROM public.conversation_handling_cycles),
   'evidence',(SELECT count(*) FROM private.handling_send_authority_evidence),
   'ledger',(SELECT count(*) FROM public.credit_transactions),
+  'score_events',(SELECT count(*) FROM public.operator_score_events),
+  'point_transactions',(SELECT count(*) FROM public.operator_point_transactions),
+  'point_wallets',(SELECT count(*) FROM public.operator_point_wallets),
   'notifications',(SELECT count(*) FROM public.notifications),
   'analytics',(SELECT count(*) FROM public.analytics_events),
   'audit',(SELECT count(*) FROM public.audit_logs),
@@ -317,17 +320,21 @@ async function scenario(observer, label, reverse) {
       evidence: 2,
       effects: ["client_request", "staff_response", "staff_response"],
     });
-    const payoutCount = await observer.json(
-      `SELECT to_json(count(*)) FROM public.credit_transactions WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}) AND type='operator_message_payout';`,
+    const scoreCount = await observer.json(
+      `SELECT to_json(count(*)) FROM public.operator_score_events WHERE conversation_id=${quote(ids.conversation)} AND operator_id=${quote(winnerOperator)} AND reason='operator_message';`,
     );
-    assert.equal(payoutCount, 2, "only the two authorized operator sends create payouts");
+    assert.equal(scoreCount, 2, "only the two authorized sends create score events");
+    const pointCount = await observer.json(
+      `SELECT to_json(count(*)) FROM public.operator_point_transactions transaction JOIN public.operator_score_events event ON event.id=transaction.source_score_event_id WHERE event.conversation_id=${quote(ids.conversation)} AND transaction.operator_id=${quote(winnerOperator)};`,
+    );
+    assert.equal(pointCount, 2, "only the two authorized sends create point transactions");
     assert.equal(
       await observer.json("SELECT to_json(count(*)) FROM public.credit_transactions;"),
-      ledgerBefore + 2,
-      "the rejected contender creates no extra ledger transaction",
+      ledgerBefore,
+      "operator sends do not create credit payouts",
     );
     console.log(
-      `${label}: winner=${reverse ? "B" : "A"}; loser=handling_cycle_token_invalid; active_cycles=1; evidence=2; ledger delta=0.`,
+      `${label}: winner=${reverse ? "B" : "A"}; loser=handling_cycle_token_invalid; active_cycles=1; evidence=2; score=2; points=2; credit delta=0.`,
     );
   } finally {
     await Promise.allSettled([a.close(), b.close()]);
@@ -338,7 +345,7 @@ async function scenario(observer, label, reverse) {
     );
     if (setupCommitted)
       await observer.ok(
-        `BEGIN; DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}) OR character_id=${quote(ids.character)}; DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)} OR user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR metadata->>'character_id'=${quote(ids.character)}; DELETE FROM public.audit_logs WHERE entity_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.operator_score_events WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_monthly_scores WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversations WHERE id=${quote(ids.conversation)}; DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)}; DELETE FROM public.characters WHERE id=${quote(ids.character)}; DELETE FROM public.operators WHERE id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); COMMIT;`,
+        `BEGIN; DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}) OR character_id=${quote(ids.character)}; DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)} OR user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR metadata->>'character_id'=${quote(ids.character)}; DELETE FROM public.audit_logs WHERE entity_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.operator_point_transactions WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_score_events WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_monthly_scores WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversations WHERE id=${quote(ids.conversation)}; DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)}; DELETE FROM public.characters WHERE id=${quote(ids.character)}; DELETE FROM public.operator_point_wallets WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operators WHERE id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); COMMIT;`,
       );
   }
 }

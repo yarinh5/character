@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(27);
+SELECT plan(29);
 
 SELECT is(
   (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'operator_points_rule_version'),
@@ -116,6 +116,19 @@ VALUES ('00000000-0000-4000-8000-000000078001', 300, 300);
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000078001';
+SELECT throws_like(
+  $$SELECT public.open_paid_message_attachment(
+    '00000000-0000-4000-8000-000000078911', 'legacy-gift-bypass')$$,
+  'gift_purchase_required',
+  'The legacy paid-open RPC cannot charge a Gift-gated attachment'
+);
+RESET ROLE;
+SELECT is(
+  (SELECT balance FROM public.credit_wallets WHERE user_id = '00000000-0000-4000-8000-000000078001'),
+  300,
+  'The rejected legacy open leaves the Client wallet unchanged'
+);
+SET LOCAL ROLE authenticated;
 SELECT throws_like(
   $$SELECT public.purchase_attachment_gift(
     '00000000-0000-4000-8000-000000078911', '00000000-0000-4000-8000-000000078802',
