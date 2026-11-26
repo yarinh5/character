@@ -246,3 +246,26 @@ targeted within one business day; this does not create automatic 24/7 technical 
 - Both report sources now use bounded 100-row pages with a one-row lookahead and stable descending `(created_at, id)` cursors. Client reports keep table RLS; a new forward-only operator-report RPC keeps the old row shape, requires admin authorization, rejects partial cursors and invalid page sizes, and caps output at 101. The old RPC remains available. Profile enrichment is batched rather than sent as one growing ID list.
 - The UI keeps loaded rows after a later page fails, offers an explicit continuation retry, and updates/invalidate the paged cache after moderation. Search and counts explicitly describe loaded rows rather than claiming a global total.
 - RED reproduced the missing continuation. Final focused UI tests passed 32/32; full UI tests 676/676; DB Offline tests 101/101; typecheck, scoped lint and client/SSR build passed. The written pgTAP case and the PostgREST keyset filter still require live verification. No migration was applied; Product acceptance remains open.
+
+## 2026-11-26 local report submission, notification and moderation
+
+- On a clean local project with 174 committed migrations and no seed, two authenticated
+  workers could see the same synthetic client in outreach candidates. A real worker submitted
+  a report and then placed an idempotent local block. Only that worker lost the candidate;
+  the other worker retained access and the client stayed globally active. This did not
+  exercise NEW allocation or rerun WP02.
+- An admin opened the report from in-app notifications, saved in-progress and closed with an
+  explanation. The readback and audit confirmed versions 2 and 3 and the exact admin actor.
+  A client could not read the report list; an operator could not moderate. Escape returned focus
+  to the moderation button in the 530px RTL viewport. This was an in-app journey, not external
+  notification delivery.
+- The browser exposed two notifications for one report. The old analytics trigger also emitted
+  a notification under a different type, bypassing the report preference, while the newer
+  notifier also addressed blocked admins. The forward correction keeps the original analytics
+  event and one preference-aware notification for active admins. No historical notifications,
+  report permissions or moderation behavior changed. Live RED failed three assertions;
+  final moderation and paging TAP passed 23/23 and 14/14. Another authenticated report after the
+  migration produced exactly one notification through the real API. Offline checks passed 8/8.
+- Evidence: `F:/project love/character/.codex-task/wp11-report-20261126-01/REPORT.md`.
+  Cleanup verified unchanged prior inventory and no task listeners. This is scoped AC27 evidence,
+  not full WP11, AC31 or Product acceptance.

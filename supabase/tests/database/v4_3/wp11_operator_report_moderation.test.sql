@@ -9,12 +9,23 @@ INSERT INTO auth.users (
 ) VALUES
   ('00000000-0000-4000-8000-000000112001', 'authenticated', 'authenticated', 'wp11-moderation-admin@example.invalid', 'x', now(), '{}', '{}', now(), now()),
   ('00000000-0000-4000-8000-000000112002', 'authenticated', 'authenticated', 'wp11-moderation-operator@example.invalid', 'x', now(), '{}', '{}', now(), now()),
-  ('00000000-0000-4000-8000-000000112003', 'authenticated', 'authenticated', 'wp11-moderation-client@example.invalid', 'x', now(), '{}', '{}', now(), now());
+  ('00000000-0000-4000-8000-000000112003', 'authenticated', 'authenticated', 'wp11-moderation-client@example.invalid', 'x', now(), '{}', '{}', now(), now()),
+  ('00000000-0000-4000-8000-000000112004', 'authenticated', 'authenticated', 'wp11-moderation-admin-muted@example.invalid', 'x', now(), '{}', '{}', now(), now()),
+  ('00000000-0000-4000-8000-000000112005', 'authenticated', 'authenticated', 'wp11-moderation-admin-blocked@example.invalid', 'x', now(), '{}', '{}', now(), now());
 
 INSERT INTO public.user_roles (user_id, role) VALUES
   ('00000000-0000-4000-8000-000000112001', 'admin'),
-  ('00000000-0000-4000-8000-000000112002', 'operator')
+  ('00000000-0000-4000-8000-000000112002', 'operator'),
+  ('00000000-0000-4000-8000-000000112004', 'admin'),
+  ('00000000-0000-4000-8000-000000112005', 'admin')
 ON CONFLICT (user_id, role) DO NOTHING;
+
+INSERT INTO public.notification_settings (user_id, new_report_enabled)
+VALUES ('00000000-0000-4000-8000-000000112004', false)
+ON CONFLICT (user_id) DO UPDATE SET new_report_enabled = false;
+
+UPDATE public.profiles SET status = 'blocked'
+WHERE user_id = '00000000-0000-4000-8000-000000112005';
 
 INSERT INTO public.operators (id, user_id, full_name) VALUES
   ('00000000-0000-4000-8000-000000112101', '00000000-0000-4000-8000-000000112002', 'WP11 Moderation Operator');
@@ -22,7 +33,7 @@ INSERT INTO public.operators (id, user_id, full_name) VALUES
 INSERT INTO public.operator_client_reports (id, operator_id, client_id, reason) VALUES
   ('00000000-0000-4000-8000-000000112201', '00000000-0000-4000-8000-000000112101', '00000000-0000-4000-8000-000000112003', 'Fixture report');
 
-SELECT plan(19);
+SELECT plan(23);
 
 SELECT is(
   (SELECT count(*) FROM public.notifications
@@ -36,6 +47,32 @@ SELECT is(
    WHERE user_id = '00000000-0000-4000-8000-000000112002'
      AND metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'),
   0::bigint, 'The operator report does not notify the reporting operator'
+);
+SELECT is(
+  (SELECT count(*) FROM public.notifications
+   WHERE user_id = '00000000-0000-4000-8000-000000112001'
+     AND (metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'
+       OR metadata->>'operator_report_id' = '00000000-0000-4000-8000-000000112201')),
+  1::bigint, 'An operator report emits one admin notification across both event formats'
+);
+SELECT is(
+  (SELECT count(*) FROM public.notifications
+   WHERE user_id = '00000000-0000-4000-8000-000000112004'
+     AND (metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'
+       OR metadata->>'operator_report_id' = '00000000-0000-4000-8000-000000112201')),
+  0::bigint, 'An admin who muted reports receives no report notification'
+);
+SELECT is(
+  (SELECT count(*) FROM public.notifications
+   WHERE user_id = '00000000-0000-4000-8000-000000112005'
+     AND (metadata->>'report_id' = '00000000-0000-4000-8000-000000112201'
+       OR metadata->>'operator_report_id' = '00000000-0000-4000-8000-000000112201')),
+  0::bigint, 'A blocked admin is not a report notification recipient'
+);
+SELECT is(
+  (SELECT count(*) FROM public.analytics_events WHERE event_name = 'operator_report_submitted'
+     AND metadata->>'operator_report_id' = '00000000-0000-4000-8000-000000112201'),
+  1::bigint, 'Removing duplicate notifications does not remove the report analytics event'
 );
 
 SET LOCAL ROLE anon;
