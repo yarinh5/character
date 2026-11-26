@@ -31,6 +31,46 @@ const NAV = [
   { to: "/app/support", label: "תמיכה", icon: LifeBuoy },
 ] as const;
 
+function hasRequiredOnboardingFields(
+  profile: {
+    onboarding_completed_at: string | null;
+    computed_age: number | null;
+    age: number | null;
+    first_name: string | null;
+    last_name: string | null;
+    city_id: string | null;
+    bio: string | null;
+    relationship_status: string | null;
+    smoking_status: string | null;
+    preferred_min_age: number | null;
+    preferred_max_age: number | null;
+    preferred_distance_km: number | null;
+    content_preferences: unknown;
+    character_preferences: unknown;
+  } | null,
+) {
+  if (!profile?.onboarding_completed_at) return false;
+  const age = profile.computed_age ?? profile.age;
+  return (
+    age !== null &&
+    age >= 18 &&
+    age <= 120 &&
+    !!profile.first_name?.trim() &&
+    !!profile.last_name?.trim() &&
+    profile.city_id != null &&
+    !!profile.bio?.trim() &&
+    profile.relationship_status != null &&
+    profile.smoking_status != null &&
+    profile.preferred_min_age != null &&
+    profile.preferred_max_age != null &&
+    profile.preferred_distance_km != null &&
+    Array.isArray(profile.content_preferences) &&
+    profile.content_preferences.length > 0 &&
+    Array.isArray(profile.character_preferences) &&
+    profile.character_preferences.length > 0
+  );
+}
+
 export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { signOut } = useAuth();
@@ -140,14 +180,20 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
 export function RequireClient({ children }: { children: ReactNode }) {
   const { loading, session, role, signOut } = useAuth();
+  const sessionUserId = session?.user.id;
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [statusLoading, setStatusLoading] = useState(true);
+  const [statusFailed, setStatusFailed] = useState(false);
+  const [statusRefresh, setStatusRefresh] = useState(0);
   const [clientStatus, setClientStatus] = useState<string | null>(null);
-  const [onboardingGate, setOnboardingGate] = useState<"loading" | "allowed" | "redirecting">(
-    "loading",
-  );
+  const [checkedStatusUserId, setCheckedStatusUserId] = useState<string | null>(null);
+  const [onboardingGate, setOnboardingGate] = useState<
+    "loading" | "allowed" | "redirecting" | "error"
+  >("loading");
+  const [checkedOnboardingKey, setCheckedOnboardingKey] = useState<string | null>(null);
   const [onboardingRefresh, setOnboardingRefresh] = useState(0);
+  const onboardingKey = `${sessionUserId ?? ""}:${pathname}`;
 
   useEffect(() => {
     if (loading) return;
@@ -162,33 +208,50 @@ export function RequireClient({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
-    if (!session?.user || role !== "client") {
+    if (!sessionUserId || role !== "client") {
       setStatusLoading(false);
       return;
     }
 
     let alive = true;
     setStatusLoading(true);
-    supabase
-      .from("profiles")
-      .select("status, deleted_at")
-      .eq("user_id", session.user.id)
-      .maybeSingle()
-      .then(async ({ data }) => {
+    setStatusFailed(false);
+    Promise.resolve(
+      supabase
+        .from("profiles")
+        .select("status, deleted_at, pii_archived_at")
+        .eq("user_id", sessionUserId)
+        .maybeSingle(),
+    )
+      .then(async ({ data, error }) => {
         if (!alive) return;
-        const status = data?.deleted_at ? "archived" : (data?.status ?? "active");
+        if (error || !data) {
+          setStatusFailed(true);
+          setCheckedStatusUserId(sessionUserId);
+          setStatusLoading(false);
+          return;
+        }
+        const status = data.deleted_at || data.pii_archived_at ? "archived" : data.status;
         setClientStatus(status);
+        setCheckedStatusUserId(sessionUserId);
         setStatusLoading(false);
         if (status !== "active") {
           await signOut();
           navigate({ to: "/login" });
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setStatusFailed(true);
+          setCheckedStatusUserId(sessionUserId);
+          setStatusLoading(false);
         }
       });
 
     return () => {
       alive = false;
     };
-  }, [loading, navigate, role, session?.user, signOut]);
+  }, [loading, navigate, role, sessionUserId, signOut, statusRefresh]);
 
   useEffect(() => {
     const refresh = () => setOnboardingRefresh((version) => version + 1);
@@ -198,7 +261,7 @@ export function RequireClient({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
-    if (!session?.user || role !== "client") {
+    if (!sessionUserId || role !== "client") {
       setOnboardingGate("allowed");
       return;
     }
@@ -214,45 +277,83 @@ export function RequireClient({ children }: { children: ReactNode }) {
         .maybeSingle(),
       supabase
         .from("client_profiles")
-        .select("onboarding_completed_at")
-        .eq("user_id", session.user.id)
+        .select(
+          "onboarding_completed_at, computed_age, age, first_name, last_name, city_id, bio, relationship_status, smoking_status, preferred_min_age, preferred_max_age, preferred_distance_km, content_preferences, character_preferences",
+        )
+        .eq("user_id", sessionUserId)
         .maybeSingle(),
-    ]).then(([{ data: setting }, { data: profile }]) => {
-      if (!alive) return;
+    ])
+      .then(([{ data: setting, error: settingError }, { data: profile, error: profileError }]) => {
+        if (!alive) return;
+        if (settingError || profileError || typeof setting?.value !== "boolean") {
+          setOnboardingGate("error");
+          setCheckedOnboardingKey(onboardingKey);
+          return;
+        }
 
-      const mandatory = setting?.value === true;
-      const completed = !!profile?.onboarding_completed_at;
-      const isOnboardingRoute = pathname.startsWith("/app/onboarding");
+        const mandatory = setting.value;
+        const completed = hasRequiredOnboardingFields(profile);
+        const isOnboardingRoute = pathname.startsWith("/app/onboarding");
 
-      if (mandatory && !completed && !isOnboardingRoute) {
-        setOnboardingGate("redirecting");
-        navigate({ to: "/app/onboarding", replace: true });
-        return;
-      }
+        if (mandatory && !completed && !isOnboardingRoute) {
+          setOnboardingGate("redirecting");
+          setCheckedOnboardingKey(onboardingKey);
+          navigate({ to: "/app/onboarding", replace: true });
+          return;
+        }
 
-      if (pathname === "/app" || pathname === "/app/") {
-        setOnboardingGate("redirecting");
-        navigate({ to: "/app/characters", replace: true });
-        return;
-      }
+        if (pathname === "/app" || pathname === "/app/") {
+          setOnboardingGate("redirecting");
+          setCheckedOnboardingKey(onboardingKey);
+          navigate({ to: "/app/characters", replace: true });
+          return;
+        }
 
-      setOnboardingGate("allowed");
-    });
+        setOnboardingGate("allowed");
+        setCheckedOnboardingKey(onboardingKey);
+      })
+      .catch(() => {
+        if (alive) {
+          setOnboardingGate("error");
+          setCheckedOnboardingKey(onboardingKey);
+        }
+      });
 
     return () => {
       alive = false;
     };
-  }, [loading, navigate, onboardingRefresh, pathname, role, session?.user]);
+  }, [loading, navigate, onboardingKey, onboardingRefresh, pathname, role, sessionUserId]);
 
   if (
     loading ||
     statusLoading ||
+    (session && role === "client" && checkedStatusUserId !== sessionUserId) ||
+    (session && role === "client" && checkedOnboardingKey !== onboardingKey) ||
     onboardingGate === "loading" ||
     onboardingGate === "redirecting"
   ) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  if (session && role === "client" && (statusFailed || onboardingGate === "error")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
+        <div role="alert" className="space-y-3 text-center">
+          <p>לא ניתן לאמת את מצב החשבון כרגע.</p>
+          <Button
+            type="button"
+            onClick={() => {
+              setStatusRefresh((version) => version + 1);
+              setOnboardingRefresh((version) => version + 1);
+            }}
+          >
+            נסה שוב
+          </Button>
+        </div>
       </div>
     );
   }

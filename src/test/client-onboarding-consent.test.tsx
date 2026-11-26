@@ -125,6 +125,22 @@ beforeEach(() => {
 });
 
 describe("client onboarding consent contract", () => {
+  it("opens a legacy completed profile at the earliest missing step without dropping existing fields", async () => {
+    readTable.mockImplementation((table: string) => {
+      const result = queryResult(table);
+      if (table !== "client_profiles") return result;
+      return { ...result, data: { ...result.data, city_id: null, onboarding_step: 3 } };
+    });
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByText("1 מתוך 3")).toBeInTheDocument();
+    expect(screen.getByLabelText("שם פרטי")).toHaveValue("אייל");
+    expect(screen.getByLabelText("תאריך לידה")).toHaveValue("1995-01-01");
+    expect(screen.getByRole("button", { name: "שמירה והמשך" })).toBeInTheDocument();
+    expect(rpc.mock.calls.some(([name]) => name === "save_client_onboarding_step")).toBe(false);
+  });
+
   it("requires every configured document and records its exact version before completion", async () => {
     render(<OnboardingPage />);
 

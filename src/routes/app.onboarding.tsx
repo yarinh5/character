@@ -217,7 +217,7 @@ function OnboardingPage() {
           profileImageUrl,
           stringArray(profile?.profile_image_urls),
         );
-        setForm({
+        const nextForm: Form = {
           firstName: profile?.first_name ?? displayName[0] ?? "",
           lastName: profile?.last_name ?? displayName.slice(1).join(" ") ?? "",
           dateOfBirth: profile?.date_of_birth ?? "",
@@ -234,8 +234,22 @@ function OnboardingPage() {
           characterPreferences: stringArray(profile?.character_preferences),
           profileImageUrl,
           profileImageUrls,
-        });
-        setStep(Math.max(1, Math.min(3, profile?.onboarding_step || 1)));
+        };
+        setForm(nextForm);
+        const firstIncompleteStep =
+          nextForm.firstName.trim().length < 2 ||
+          nextForm.lastName.trim().length < 2 ||
+          (!nextForm.dateOfBirth && !profile?.age) ||
+          !nextForm.cityId
+            ? 1
+            : nextForm.bio.trim().length < 10 ||
+                !nextForm.relationshipStatus ||
+                !nextForm.smokingStatus
+              ? 2
+              : 3;
+        setStep(
+          Math.min(Math.max(1, Math.min(3, profile?.onboarding_step || 1)), firstIncompleteStep),
+        );
       } catch {
         if (alive) setProfileLoadFailed(true);
       } finally {
