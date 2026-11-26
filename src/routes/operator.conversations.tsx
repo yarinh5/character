@@ -157,11 +157,18 @@ export function OperatorConversationsPage() {
     }
     const userQueryPrefix = ["operator-conversations", user.id] as const;
     let disposed = false;
+    let joined = false;
+    let readinessTimer: number | undefined;
     setAccessChannelState("checking");
     qc.removeQueries({ queryKey: userQueryPrefix });
     const invalidateCurrentUser = () => {
       qc.removeQueries({ queryKey: userQueryPrefix });
       setAccessGeneration((current) => current + 1);
+    };
+    const failAccess = () => {
+      window.clearTimeout(readinessTimer);
+      qc.removeQueries({ queryKey: userQueryPrefix });
+      setAccessChannelState("error");
     };
     const ch = supabase
       .channel("operator-conversations-list")
@@ -193,20 +200,34 @@ export function OperatorConversationsPage() {
           invalidateCurrentUser();
         },
       )
+      .on("system", {}, (payload: { extension?: string; status?: string }) => {
+        if (disposed || !joined || payload.extension !== "postgres_changes") return;
+        if (payload.status !== "ok") {
+          failAccess();
+          return;
+        }
+        window.clearTimeout(readinessTimer);
+        invalidateCurrentUser();
+        setAccessChannelState("ready");
+      })
       .subscribe((status) => {
         if (disposed) return;
         if (status === "SUBSCRIBED") {
+          joined = true;
           invalidateCurrentUser();
-          setAccessChannelState("ready");
+          setAccessChannelState("checking");
+          window.clearTimeout(readinessTimer);
+          readinessTimer = window.setTimeout(failAccess, 12_000);
           return;
         }
         if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
-          qc.removeQueries({ queryKey: userQueryPrefix });
-          setAccessChannelState("error");
+          joined = false;
+          failAccess();
         }
       });
     return () => {
       disposed = true;
+      window.clearTimeout(readinessTimer);
       supabase.removeChannel(ch);
       qc.removeQueries({ queryKey: userQueryPrefix });
     };
@@ -425,6 +446,13 @@ export function OperatorConversationsPage() {
                         גיל {c.client_context.client_age}
                       </span>
                     )}
+                    <span className="text-xs text-muted-foreground">
+                      {c.client_context?.client_online === true
+                        ? "פעילות לאחרונה"
+                        : c.client_context?.client_online === false
+                          ? "לא זוהתה פעילות"
+                          : "נוכחות לא ידועה"}
+                    </span>
                     <ConversationStatusBadge status={c.status} />
                     {c.client_context?.under_other_operator && (
                       <span className="text-xs font-medium">קריאה בלבד</span>

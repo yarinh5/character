@@ -14,6 +14,7 @@ type ConversationRow = {
   client_context?: {
     client_age: number | null;
     client_city: string | null;
+    client_online?: boolean | null;
     under_other_operator: boolean;
   };
 };
@@ -28,10 +29,15 @@ const query = vi.hoisted(() => ({
 
 const rpc = vi.hoisted(() => vi.fn());
 const queryClient = vi.hoisted(() => ({ invalidateQueries: vi.fn(), removeQueries: vi.fn() }));
+let systemCallback: ((payload: { extension: string; status: string }) => void) | undefined;
 const channel = {
-  on: vi.fn(() => channel),
+  on: vi.fn((kind: string, _filter: unknown, callback: typeof systemCallback) => {
+    if (kind === "system") systemCallback = callback;
+    return channel;
+  }),
   subscribe: vi.fn((callback?: (status: string) => void) => {
     callback?.("SUBSCRIBED");
+    systemCallback?.({ extension: "postgres_changes", status: "ok" });
     return channel;
   }),
 };
@@ -134,9 +140,26 @@ beforeEach(() => {
   queryClient.removeQueries.mockClear();
   channel.on.mockClear();
   channel.subscribe.mockClear();
+  systemCallback = undefined;
 });
 
 describe("ONLINE conversation list", () => {
+  it("distinguishes active, expired and unknown without using the last message", () => {
+    query.data = rows.map((row, i) => ({
+      ...row,
+      client_context: {
+        client_city: null,
+        client_age: null,
+        under_other_operator: false,
+        client_online: i === 0 ? true : i === 1 ? false : null,
+      },
+    }));
+    renderPage();
+    expect(screen.getByRole("link", { name: /אייל/ })).toHaveTextContent("פעילות לאחרונה");
+    expect(screen.getByRole("link", { name: /בר/ })).toHaveTextContent("לא זוהתה פעילות");
+    expect(screen.getByRole("link", { name: /גיל/ })).toHaveTextContent("נוכחות לא ידועה");
+  });
+
   it("finds a conversation by authorized city or exact age and identifies read-only rows", () => {
     renderPage();
     const search = screen.getByRole("textbox");

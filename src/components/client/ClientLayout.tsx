@@ -74,8 +74,31 @@ function hasRequiredOnboardingFields(
 
 export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { signOut } = useAuth();
+  const { loading, role, session, signOut, user } = useAuth();
   const navigate = useNavigate();
+  const activeClientId =
+    !loading && role === "client" && session?.user.id === user?.id ? user?.id : undefined;
+
+  useEffect(() => {
+    if (!activeClientId) return;
+    let nextActivityAt = 0;
+    const recordActivity = () => {
+      const now = Date.now();
+      if (document.visibilityState !== "visible" || now < nextActivityAt) return;
+      nextActivityAt = now + 45_000;
+      // Activity is best-effort. A failed request makes no presence claim and is not retried.
+      void supabase.rpc("record_client_app_activity").then(
+        () => undefined,
+        () => undefined,
+      );
+    };
+    document.addEventListener("pointerdown", recordActivity, true);
+    document.addEventListener("keydown", recordActivity, true);
+    return () => {
+      document.removeEventListener("pointerdown", recordActivity, true);
+      document.removeEventListener("keydown", recordActivity, true);
+    };
+  }, [activeClientId]);
 
   const handleLogout = async () => {
     await signOut();

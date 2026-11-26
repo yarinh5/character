@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   userId: "user-a" as string | undefined,
   accessCallback: null as null | (() => void),
   subscriptionCallback: null as null | ((status: string) => void),
+  systemCallback: null as null | ((payload: { extension: string; status: string }) => void),
   contextAllowed: true,
   contextFieldsAvailable: true,
   contextCall: vi.fn(),
@@ -97,10 +98,17 @@ function queryFor(table: string): Query {
 }
 
 const channel = {
-  on: vi.fn((_kind: string, filter: { table?: string }, callback: () => void) => {
-    if (filter.table === "user_conversation_access_versions") state.accessCallback = callback;
-    return channel;
-  }),
+  on: vi.fn(
+    (
+      kind: string,
+      filter: { table?: string },
+      callback: (payload?: { extension: string; status: string }) => void,
+    ) => {
+      if (filter.table === "user_conversation_access_versions") state.accessCallback = callback;
+      if (kind === "system") state.systemCallback = callback;
+      return channel;
+    },
+  ),
   subscribe: vi.fn((callback?: (status: string) => void) => {
     state.subscriptionCallback = callback ?? null;
     return channel;
@@ -122,6 +130,7 @@ beforeEach(() => {
   state.userId = "user-a";
   state.accessCallback = null;
   state.subscriptionCallback = null;
+  state.systemCallback = null;
   state.contextAllowed = true;
   state.contextFieldsAvailable = true;
   state.contextCall.mockReset().mockImplementation(async () => ({
@@ -141,7 +150,32 @@ beforeEach(() => {
   channel.subscribe.mockClear();
 });
 
+function connectPostgres() {
+  state.subscriptionCallback?.("SUBSCRIBED");
+  state.systemCallback?.({ extension: "postgres_changes", status: "ok" });
+}
+
 describe("operator conversation list access lifecycle", () => {
+  it("waits for Postgres subscription readiness and hides cached rows on a system failure", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OperatorConversationsPage />
+      </QueryClientProvider>,
+    );
+    await act(async () => state.subscriptionCallback?.("SUBSCRIBED"));
+    expect(state.contextCall).not.toHaveBeenCalled();
+    expect(screen.queryByText("Sensitive Client")).not.toBeInTheDocument();
+    act(() => state.systemCallback?.({ extension: "system", status: "ok" }));
+    expect(state.contextCall).not.toHaveBeenCalled();
+    act(() => state.systemCallback?.({ extension: "postgres_changes", status: "ok" }));
+    await screen.findByText("Sensitive City");
+
+    act(() => state.systemCallback?.({ extension: "postgres_changes", status: "error" }));
+    expect(screen.queryByText("Sensitive City")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
   it("hides the whole row if authority is lost between list and context reads", async () => {
     state.contextAllowed = false;
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -150,7 +184,7 @@ describe("operator conversation list access lifecycle", () => {
         <OperatorConversationsPage />
       </QueryClientProvider>,
     );
-    act(() => state.subscriptionCallback?.("SUBSCRIBED"));
+    act(connectPostgres);
     expect(await screen.findByText("אין שיחות")).toBeInTheDocument();
     expect(screen.queryByText("Sensitive preview")).not.toBeInTheDocument();
     expect(state.contextCall).toHaveBeenCalledWith("get_operator_online_context", {
@@ -165,7 +199,7 @@ describe("operator conversation list access lifecycle", () => {
         <OperatorConversationsPage />
       </QueryClientProvider>,
     );
-    act(() => state.subscriptionCallback?.("SUBSCRIBED"));
+    act(connectPostgres);
     await screen.findByText("Sensitive City");
     expect(screen.getByText("גיל 29")).toBeInTheDocument();
 
@@ -187,7 +221,7 @@ describe("operator conversation list access lifecycle", () => {
     );
     expect(screen.queryByText("Sensitive Client")).not.toBeInTheDocument();
 
-    act(() => state.subscriptionCallback?.("SUBSCRIBED"));
+    act(connectPostgres);
     await screen.findByText("Sensitive Client");
     expect(
       queryClient.getQueryCache().findAll({ queryKey: ["operator-conversations", "user-a"] }),

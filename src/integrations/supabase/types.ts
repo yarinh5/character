@@ -4345,6 +4345,7 @@ export type Database = {
         Returns: {
           client_age: number | null;
           client_city: string | null;
+          client_online: boolean | null;
           conversation_id: string;
           under_other_operator: boolean;
         }[];
@@ -4484,6 +4485,7 @@ export type Database = {
         Returns: boolean;
       };
       operator_heartbeat: { Args: never; Returns: Json };
+      record_client_app_activity: { Args: never; Returns: undefined };
       release_admin_character_media_reservation: {
         Args: { _reservation_id: string };
         Returns: Json;
