@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     clearMocks: true,
     environment: "node",
+    fileParallelism: false,
     include: ["supabase/tests/http/**/*.integration.test.ts"],
     restoreMocks: true,
   },
