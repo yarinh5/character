@@ -51,8 +51,8 @@ UPDATE public.profiles SET created_at = '2099-04-01 00:00Z', display_name = 'Arc
 WHERE user_id = '00000000-0000-4000-8000-000000119005';
 UPDATE public.profiles SET created_at = '2099-03-31 00:00Z', display_name = 'Older'
 WHERE user_id = '00000000-0000-4000-8000-000000119006';
-UPDATE public.credit_wallets SET balance = 42
-WHERE user_id = '00000000-0000-4000-8000-000000119003';
+INSERT INTO public.credit_wallets (user_id, balance)
+VALUES ('00000000-0000-4000-8000-000000119003', 42);
 DELETE FROM public.credit_wallets WHERE user_id = '00000000-0000-4000-8000-000000119002';
 
 INSERT INTO public.characters (id, name)

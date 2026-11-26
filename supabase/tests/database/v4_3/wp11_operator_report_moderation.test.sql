@@ -131,7 +131,7 @@ SELECT is(
    WHERE entity_type = 'operator_client_report'
      AND entity_id = '00000000-0000-4000-8000-000000112201'
      AND action = 'operator_client_report.moderated'
-   ORDER BY created_at DESC LIMIT 1),
+     AND metadata->>'version' = '4'),
   'Global restriction documented', 'Audit preserves the global-action note'
 );
 

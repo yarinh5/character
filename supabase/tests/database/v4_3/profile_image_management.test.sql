@@ -124,6 +124,8 @@ SELECT throws_like(
 RESET ROLE;
 
 -- Simulate a pre-existing legacy row without weakening the production guard.
+-- Flush pending avatar projections before toggling a trigger on this table.
+SET CONSTRAINTS public.sync_client_profile_avatar IMMEDIATE;
 ALTER TABLE public.client_profiles DISABLE TRIGGER validate_client_profile_images;
 UPDATE public.client_profiles
 SET profile_image_urls = ARRAY[

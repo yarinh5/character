@@ -103,10 +103,12 @@ SELECT is(
   2::BIGINT,
   'resolution does not force notification read state'
 );
+RESET ROLE;
 SELECT ok(
   (SELECT responded_at IS NOT NULL FROM private.conversation_operational_wait_cycles WHERE conversation_id = '50000000-0000-4000-8000-000000000021' LIMIT 1),
   'the canonical wait cycle preserves its response timestamp'
 );
+SET LOCAL ROLE service_role;
 
 UPDATE public.conversations
 SET needs_handling = TRUE, pending_since = clock_timestamp() - interval '421 seconds'
@@ -122,42 +124,50 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.role" = 'authenticated';
 SET LOCAL "request.jwt.claim.sub" = '50000000-0000-4000-8000-000000000103';
 SELECT throws_ok(
-  $$SELECT public.send_operator_message('50000000-0000-4000-8000-000000000021', 'not allowed')$$,
-  '42501',
-  NULL,
+  $$SELECT public.send_operator_message('50000000-0000-4000-8000-000000000021', 'not allowed', NULL::UUID)$$,
+  'P0001',
+  'operator_record_required',
   'failed send is rejected'
 );
 SELECT ok(
   (SELECT needs_handling FROM public.conversations WHERE id = '50000000-0000-4000-8000-000000000021'),
   'failed send does not close the wait'
 );
+RESET ROLE;
 SELECT is(
   (SELECT count(*) FROM public.notifications WHERE conversation_id = '50000000-0000-4000-8000-000000000021' AND metadata ->> 'state' = 'active'),
   2::BIGINT,
   'failed send does not resolve the active alert'
 );
 
+SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '50000000-0000-4000-8000-000000000103';
 SELECT is(
   (SELECT availability_status::TEXT FROM public.get_character_live_availability(ARRAY['50000000-0000-4000-8000-000000000010'::UUID])),
   'available',
   'an assigned active connected operator makes the character available'
 );
+RESET ROLE;
 UPDATE public.operators SET last_seen_at = clock_timestamp() - interval '3 minutes' WHERE id = '50000000-0000-4000-8000-000000000001';
+SET LOCAL ROLE authenticated;
 SELECT is(
   (SELECT availability_status::TEXT FROM public.get_character_live_availability(ARRAY['50000000-0000-4000-8000-000000000010'::UUID])),
   'offline',
   'an expired heartbeat removes online availability'
 );
+RESET ROLE;
 INSERT INTO public.character_operator_assignments (character_id, operator_id)
 VALUES ('50000000-0000-4000-8000-000000000010', '50000000-0000-4000-8000-000000000002');
 UPDATE public.operators SET last_seen_at = clock_timestamp() WHERE id = '50000000-0000-4000-8000-000000000002';
+SET LOCAL ROLE authenticated;
 SELECT is(
   (SELECT availability_status::TEXT FROM public.get_character_live_availability(ARRAY['50000000-0000-4000-8000-000000000010'::UUID])),
   'available',
   'another assigned operator with a valid heartbeat keeps the character available'
 );
+RESET ROLE;
 UPDATE public.operators SET is_active = FALSE WHERE id = '50000000-0000-4000-8000-000000000002';
+SET LOCAL ROLE authenticated;
 SELECT is(
   (SELECT availability_status::TEXT FROM public.get_character_live_availability(ARRAY['50000000-0000-4000-8000-000000000010'::UUID])),
   'offline',
@@ -179,10 +189,12 @@ SELECT ok(
   (SELECT oldest_wait_seconds >= 420 FROM public.get_admin_operational_wait_summary()),
   'wait age is derived from server timestamps continuously'
 );
+RESET ROLE;
 SELECT lives_ok(
   $$SELECT private.run_new_sla_critical_scheduler()$$,
   'the existing scheduler entry point is connected to the operational alert path'
 );
+SET LOCAL ROLE authenticated;
 SELECT is(
   (SELECT count(*) FROM public.notifications WHERE type = 'operational_wait_alert' AND metadata ? 'wait_event_key'),
   4::BIGINT,
