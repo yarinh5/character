@@ -255,13 +255,13 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     await ensureNotAdminTarget(data.user_id);
     const { data: profile, error: lookupError } = await supabaseAdmin
       .from("profiles")
-      .select("email")
+      .select("email, deleted_at")
       .eq("user_id", data.user_id)
       .maybeSingle();
     if (lookupError) throw new Error(lookupError.message);
     if (!profile) throw new Error("משתמש לא נמצא");
     await setAuthBan(data.user_id, true);
-    const deletedAt = new Date().toISOString();
+    const deletedAt = profile.deleted_at ?? new Date().toISOString();
     const tag = `deleted+${Date.now()}@deleted.local`;
     const { error: profileError } = await supabaseAdmin
       .from("profiles")

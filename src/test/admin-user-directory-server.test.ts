@@ -444,6 +444,43 @@ describe("admin user directory server boundary", () => {
     expect(io.audit).toHaveBeenCalledOnce();
   });
 
+  it("preserves the original archive time when finishing a repeated soft delete", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
+    const originalDeletedAt = "2026-11-25T08:30:00.000Z";
+    const profileWrite = vi.fn().mockReturnValue({ eq: async () => ({ error: null }) });
+    const operatorWrite = vi.fn().mockReturnValue({ eq: async () => ({ error: null }) });
+    io.from.mockImplementation((table: string) => {
+      if (table === "user_roles")
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
+      if (table === "profiles")
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { email: "deleted@example.test", deleted_at: originalDeletedAt },
+                error: null,
+              }),
+            }),
+          }),
+          update: profileWrite,
+        };
+      if (table === "operators") return { update: operatorWrite };
+      throw new Error(`Unexpected service-role table: ${table}`);
+    });
+
+    const userId = "00000000-0000-4000-8000-000000000002";
+    await expect(softDelete({ data: { user_id: userId }, context: context() })).resolves.toEqual({
+      ok: true,
+    });
+    expect(profileWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "blocked", deleted_at: originalDeletedAt }),
+    );
+    expect(operatorWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ is_active: false, deleted_at: originalDeletedAt }),
+    );
+  });
+
   it("rejects deletion of another admin before any mutation", async () => {
     await expect(
       softDelete({
