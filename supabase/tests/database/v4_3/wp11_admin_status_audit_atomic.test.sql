@@ -75,6 +75,16 @@ SELECT is((SELECT count(*)::integer FROM public.audit_logs
   WHERE entity_id = '00000000-0000-4000-8000-000000119503'
     AND action = 'user.status_changed'), 2,
   'The preparation block and combined edit each audit status');
+SELECT is(public.admin_update_user_db('00000000-0000-4000-8000-000000119503',
+  'Reactivated Operator', 'reactivated@example.invalid', 'active', 'operator'), true,
+  'Combined reactivation and promotion uses the resulting active status');
+SELECT ok(EXISTS (SELECT 1 FROM public.profiles AS p
+  JOIN public.user_roles AS r ON r.user_id = p.user_id
+  JOIN public.operators AS o ON o.user_id = p.user_id
+  WHERE p.user_id = '00000000-0000-4000-8000-000000119503'
+    AND p.status = 'active' AND p.email = 'reactivated@example.invalid'
+    AND r.role = 'operator'::public.app_role),
+  'Combined transaction leaves an active operator and updated directory email');
 
 RESET ROLE;
 CREATE FUNCTION pg_temp.wp11_reject_status_audit()
