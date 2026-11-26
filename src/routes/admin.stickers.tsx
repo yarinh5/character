@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useMediaViewUrl } from "@/hooks/useMediaViewUrl";
+import { signedMediaUploadUrl } from "@/lib/signed-browser-storage-url";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -203,12 +204,14 @@ function AdminStickersPage() {
         },
       });
       const intent = (data ?? {}) as UploadIntent;
-      if (error || typeof intent.sticker_id !== "string" || typeof intent.upload_url !== "string") {
+      const uploadUrl = signedMediaUploadUrl(intent.upload_url, "sticker-media");
+      if (error || typeof intent.sticker_id !== "string" || !uploadUrl) {
         throw error ?? new Error("invalid_upload_intent");
       }
 
-      const put = await fetch(intent.upload_url, {
+      const put = await fetch(uploadUrl, {
         method: "PUT",
+        redirect: "error",
         headers: { "Content-Type": "image/webp", "x-upsert": "false" },
         body: render,
       });

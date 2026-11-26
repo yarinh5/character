@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { signedMediaViewUrl } from "@/lib/signed-browser-storage-url";
 
 export type MediaViewKind =
   | "message_attachment"
@@ -20,38 +21,6 @@ type ViewUrlResponse = {
   url?: unknown;
   expires_at?: unknown;
 };
-
-function signedStorageUrl(value: unknown) {
-  if (typeof value !== "string") return null;
-  const base =
-    import.meta.env.VITE_SUPABASE_URL ||
-    (typeof process !== "undefined" ? process.env.SUPABASE_URL : undefined);
-  if (!base) return null;
-
-  try {
-    const gateway = new URL(base);
-    const signed = new URL(value);
-    const tokens = signed.searchParams.getAll("token");
-    if (
-      !["http:", "https:"].includes(gateway.protocol) ||
-      !["http:", "https:"].includes(signed.protocol) ||
-      signed.username ||
-      signed.password ||
-      signed.hash ||
-      !/^\/storage\/v1\/object\/sign\/(character-media|client-media|sticker-media)\/.+/.test(
-        signed.pathname,
-      ) ||
-      tokens.length !== 1 ||
-      !tokens[0]
-    )
-      return null;
-
-    // Edge may sign through the internal gateway. Never navigate to the returned host.
-    return new URL(`${signed.pathname}${signed.search}`, gateway.origin).href;
-  } catch {
-    return null;
-  }
-}
 
 export function useMediaViewUrl(
   kind: MediaViewKind,
@@ -106,7 +75,7 @@ export function useMediaViewUrl(
       return;
 
     const response = (data ?? {}) as ViewUrlResponse;
-    const url = signedStorageUrl(response.url);
+    const url = signedMediaViewUrl(response.url);
     if (error || !url || typeof response.expires_at !== "string") {
       setState({ status: "error", url: null });
       return;

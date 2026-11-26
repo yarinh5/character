@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CharacterMediaDialog } from "@/components/admin/CharacterMediaDialog";
 
 type RpcReply = { data: unknown; error: unknown };
@@ -164,7 +164,40 @@ beforeEach(() => {
   setDefaultReads();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 describe("admin character media read states", () => {
+  it("uploads through the configured gateway before processing the signed asset", async () => {
+    vi.stubEnv("VITE_SUPABASE_URL", "http://127.0.0.1:62021");
+    const put = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", put);
+    io.invoke.mockResolvedValueOnce({
+      data: {
+        asset_id: "new-asset",
+        upload_url:
+          "http://kong:8000/storage/v1/object/upload/sign/character-media/assets/new/source.webp?token=signed",
+      },
+      error: null,
+    });
+    io.invoke.mockResolvedValueOnce({ data: {}, error: null });
+    renderMedia();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("admin media file input not found");
+    const file = new File(["synthetic"], "photo.webp", { type: "image/webp" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(io.invoke).toHaveBeenCalledTimes(2));
+    expect(put).toHaveBeenCalledWith(
+      "http://127.0.0.1:62021/storage/v1/object/upload/sign/character-media/assets/new/source.webp?token=signed",
+      expect.objectContaining({ body: file, method: "PUT" }),
+    );
+    expect(io.invoke).toHaveBeenNthCalledWith(2, "process-character-media", {
+      body: { asset_id: "new-asset", mode: "standard" },
+    });
+  });
+
   it("shows initial loading without an empty state, then shows the true empty state", async () => {
     const assetsRead = deferred<RpcReply>();
     const tagsRead = deferred<RpcReply>();

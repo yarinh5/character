@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(38);
+SELECT plan(44);
 
 SELECT has_table('public', 'character_media_asset_characters', 'WP05 character assignments exist');
 SELECT has_table('public', 'character_media_asset_tags', 'WP05 tag assignments exist');
@@ -275,6 +275,41 @@ SELECT throws_like(
   'A tag cannot be assigned without its owning character'
 );
 RESET ROLE;
+
+-- The first upload for a new character must not require pre-seeded media tags.
+INSERT INTO public.characters (id, name)
+VALUES ('00000000-0000-4000-8000-000000050205', 'WP05 new character');
+INSERT INTO public.media_tags (character_id, name)
+VALUES ('00000000-0000-4000-8000-000000050205', 'מדיה כללית');
+SET LOCAL ROLE service_role;
+SET LOCAL "request.jwt.claim.role" = 'service_role';
+SELECT lives_ok(
+  $$SELECT * FROM public.create_character_media_upload_intent_for_server(
+    '00000000-0000-4000-8000-000000050001', '00000000-0000-4000-8000-000000050205',
+    'image/webp', 'First synthetic media')$$,
+  'The first upload intent provisions the missing default tag');
+SELECT lives_ok(
+  $$SELECT * FROM public.create_character_media_upload_intent_for_server(
+    '00000000-0000-4000-8000-000000050001', '00000000-0000-4000-8000-000000050205',
+    'image/webp', 'Second synthetic media')$$,
+  'Another upload intent reuses the existing default tag');
+SELECT throws_ok(
+  $$SELECT * FROM public.create_character_media_upload_intent_for_server(
+    '00000000-0000-4000-8000-000000050003', '00000000-0000-4000-8000-000000050205',
+    'image/webp', 'Not an admin')$$,
+  'P0001', 'admin_required', 'Provisioning does not allow a non-admin asset intent');
+RESET ROLE;
+SELECT is((SELECT count(*) FROM public.media_tags
+  WHERE character_id = '00000000-0000-4000-8000-000000050205' AND is_default),
+  1::bigint, 'The character has exactly one default tag');
+SELECT is((SELECT is_default FROM public.media_tags
+  WHERE character_id = '00000000-0000-4000-8000-000000050205' AND name = 'מדיה כללית'),
+  false, 'The existing user-created tag is not promoted or renamed');
+SELECT is((SELECT count(*) FROM public.character_media_assets a
+  JOIN public.character_media_asset_tags link ON link.media_asset_id = a.id AND link.media_tag_id = a.media_tag_id
+  JOIN public.media_tags tag ON tag.id = link.media_tag_id AND tag.is_default AND tag.character_id = a.character_id
+  WHERE a.character_id = '00000000-0000-4000-8000-000000050205'),
+  2::bigint, 'Both intents link their asset to the canonical default tag');
 
 SELECT * FROM finish();
 ROLLBACK;

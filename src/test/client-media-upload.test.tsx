@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientMediaUploadButton } from "@/components/chat/ClientMediaUploadButton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -25,7 +25,8 @@ function deferred<T>() {
 
 const intent = {
   upload_id: "00000000-0000-4000-8000-000000000001",
-  upload_url: "https://upload.test/file",
+  upload_url:
+    "http://kong:8000/storage/v1/object/upload/sign/client-media/client-a/photo.png?token=proof",
 };
 const message = {
   id: "message-1",
@@ -73,9 +74,12 @@ async function choose(file = imageFile()) {
 
 beforeEach(() => {
   io.invoke.mockReset();
+  vi.stubEnv("VITE_SUPABASE_URL", "http://127.0.0.1:62021");
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002");
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("client media upload", () => {
   it("uploads and finalizes once before publishing the returned message", async () => {
@@ -90,7 +94,7 @@ describe("client media upload", () => {
 
     await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
     expect(fetch).toHaveBeenCalledWith(
-      intent.upload_url,
+      "http://127.0.0.1:62021/storage/v1/object/upload/sign/client-media/client-a/photo.png?token=proof",
       expect.objectContaining({ method: "PUT", body: expect.any(File) }),
     );
     expect(io.invoke).toHaveBeenNthCalledWith(2, "client-media-finalize", {
@@ -103,6 +107,23 @@ describe("client media upload", () => {
       expect.objectContaining({ id: message.id, message_attachments: [attachment] }),
       40,
     );
+  });
+
+  it.each([
+    "http://kong:8000/storage/v1/object/sign/client-media/client-a/photo.png?token=proof",
+    "http://kong:8000/storage/v1/object/upload/sign/character-media/client-a/photo.png?token=proof",
+    "http://kong:8000/storage/v1/object/upload/sign/client-media/client-a/photo.png?token=one&token=two",
+    "http://kong:8000/storage/v1/object/upload/sign/client-media/client-a/photo.png",
+  ])("does not upload or finalize an invalid signed destination: %s", async (uploadUrl) => {
+    io.invoke.mockImplementation(async (name) =>
+      name === "client-media-upload-intent"
+        ? { data: { ...intent, upload_url: uploadUrl }, error: null }
+        : { data: { message, attachment, balance: 40 }, error: null },
+    );
+    renderUpload();
+    await choose();
+    await waitFor(() => expect(io.invoke).toHaveBeenCalledTimes(1));
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("creates only one upload intent when the file input fires twice before the first intent resolves", async () => {

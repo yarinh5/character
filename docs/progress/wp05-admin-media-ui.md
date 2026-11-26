@@ -210,3 +210,21 @@ the final test image. Final pgTAP: 38/38 plus 77 related checks. Full Vitest:
 821/821; typecheck passed. Evidence:
 `F:/project love/character/.codex-task/wp05-picker-20261126-01/REPORT.md`.
 Admin browser workflow, formal Product and launch acceptance remain open.
+
+## Admin upload and catalog lifecycle, 2026-11-26
+
+A real first upload on `74760de` exposed two independent failures: the new
+character had no required default tag, and the signed PUT returned an
+internal gateway origin. The upload intent now creates one default tag
+without repurposing user tags. Browser signed reads and uploads use the
+configured gateway; uploads require their exact bucket/path and one token.
+
+The admin uploaded and processed a private WebP, added a tag, filtered the
+catalog, then disabled and restored the same asset. A real operator saw
+the tagged asset as non-reservable when disabled and reservable after
+restore. Original and derivative objects were independently verified.
+Two overlapping first intents, including alongside a custom tag create,
+shared one default without changing the custom tag. pgTAP 44/44, full
+Vitest 826/826 and typecheck passed. Evidence:
+`F:/project love/character/.codex-task/wp05-admin-20261126-01/REPORT.md`.
+No hard-delete acceptance, production run or Product PASS is implied.

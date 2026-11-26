@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import type { ChatMessageAttachment } from "@/components/chat/MessageAttachment";
+import { signedMediaUploadUrl } from "@/lib/signed-browser-storage-url";
 
 const ACCEPTED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
@@ -122,12 +123,14 @@ export function ClientMediaUploadButton({
       });
       if (requestVersion !== requestVersionRef.current) return;
       const intent = (data ?? {}) as IntentResponse;
-      if (error || typeof intent.upload_id !== "string" || typeof intent.upload_url !== "string") {
+      const uploadUrl = signedMediaUploadUrl(intent.upload_url, "client-media");
+      if (error || typeof intent.upload_id !== "string" || !uploadUrl) {
         throw new Error("upload_intent_invalid");
       }
 
-      const upload = await fetch(intent.upload_url, {
+      const upload = await fetch(uploadUrl, {
         method: "PUT",
+        redirect: "error",
         headers: { "Content-Type": file.type, "x-upsert": "false" },
         body: file,
       });

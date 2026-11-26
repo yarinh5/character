@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useMediaViewUrl } from "@/hooks/useMediaViewUrl";
+import { signedMediaUploadUrl } from "@/lib/signed-browser-storage-url";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -732,12 +733,14 @@ export function CharacterMediaDialog({
         body: { character_id: character.id, content_type: file.type, display_name: file.name },
       });
       const intent = (data ?? {}) as UploadIntentResponse;
-      if (error || typeof intent.asset_id !== "string" || typeof intent.upload_url !== "string") {
+      const uploadUrl = signedMediaUploadUrl(intent.upload_url, "character-media");
+      if (error || typeof intent.asset_id !== "string" || !uploadUrl) {
         throw error ?? new Error("upload_intent_invalid");
       }
 
-      const upload = await fetch(intent.upload_url, {
+      const upload = await fetch(uploadUrl, {
         method: "PUT",
+        redirect: "error",
         headers: { "Content-Type": file.type, "x-upsert": "false" },
         body: file,
       });
