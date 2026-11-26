@@ -3528,6 +3528,20 @@ export type Database = {
         Args: { _user_id: string };
         Returns: boolean;
       };
+      admin_set_user_status: {
+        Args: { _user_id: string; _status: string };
+        Returns: boolean;
+      };
+      admin_update_user_db: {
+        Args: {
+          _user_id: string;
+          _display_name?: string | null;
+          _email?: string | null;
+          _status?: string | null;
+          _role?: Database["public"]["Enums"]["app_role"] | null;
+        };
+        Returns: boolean;
+      };
       admin_adjust_operator_points: {
         Args: { _amount: number; _operator_id: string; _reason: string };
         Returns: Json;

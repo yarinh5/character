@@ -144,9 +144,12 @@ describe("admin user directory server boundary", () => {
       update({ data: { user_id: targetId, role: "operator" }, context: context() }),
     ).resolves.toEqual({ ok: true });
     expect(io.from).toHaveBeenCalledExactlyOnceWith("user_roles");
-    expect(io.rpc).toHaveBeenCalledExactlyOnceWith("admin_set_user_role", {
+    expect(io.rpc).toHaveBeenCalledExactlyOnceWith("admin_update_user_db", {
       _user_id: targetId,
-      _new_role: "operator",
+      _display_name: null,
+      _email: null,
+      _status: null,
+      _role: "operator",
     });
   });
 
@@ -160,7 +163,7 @@ describe("admin user directory server boundary", () => {
     io.rpc.mockResolvedValueOnce({ data: false, error: null });
     await expect(
       update({ data: { user_id: targetId, role: "client" }, context: context() }),
-    ).rejects.toThrow("role_change_not_confirmed");
+    ).rejects.toThrow("user_update_not_confirmed");
   });
 
   it("provisions a new user's role through the same authenticated transaction", async () => {
@@ -268,24 +271,11 @@ describe("admin user directory server boundary", () => {
     io.from.mockImplementation((table: string) => {
       if (table === "user_roles")
         return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
-      if (table === "profiles")
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({
-                data: { deleted_at: null, pii_archived_at: null },
-                error: null,
-              }),
-            }),
-          }),
-          update: () => ({
-            eq: async () => {
-              writes.push("profile-block");
-              return { error: null };
-            },
-          }),
-        };
       throw new Error(`Unexpected service-role table: ${table}`);
+    });
+    io.rpc.mockImplementation(async () => {
+      writes.push("status-rpc");
+      return { data: true, error: null };
     });
     await expect(
       setStatus({
@@ -296,7 +286,8 @@ describe("admin user directory server boundary", () => {
     expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
       ban_duration: "876000h",
     });
-    expect(writes).toEqual(["auth-ban", "profile-block"]);
+    expect(writes).toEqual(["auth-ban", "status-rpc"]);
+    expect(io.audit).not.toHaveBeenCalled();
   });
 
   it("does not claim a status change if Auth rejects the ban", async () => {
@@ -321,9 +312,9 @@ describe("admin user directory server boundary", () => {
     io.from.mockImplementation((table: string) => {
       if (table === "user_roles")
         return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: io.role }) }) }) };
-      if (table === "profiles") return { update: () => ({ eq: async () => ({ error: null }) }) };
       throw new Error(`Unexpected service-role table: ${table}`);
     });
+    io.rpc.mockResolvedValueOnce({ data: true, error: null });
     await expect(
       update({
         data: { user_id: "00000000-0000-4000-8000-000000000002", status: "blocked" },
@@ -333,6 +324,42 @@ describe("admin user directory server boundary", () => {
     expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
       ban_duration: "876000h",
     });
+  });
+
+  it("routes edited status through the authenticated, audited DB boundary", async () => {
+    io.role.mockResolvedValueOnce({ data: { role: "admin" }, error: null });
+    io.role.mockResolvedValueOnce({ data: null, error: null });
+    const userId = "00000000-0000-4000-8000-000000000002";
+    io.rpc.mockResolvedValueOnce({ data: true, error: null });
+    await expect(
+      update({ data: { user_id: userId, status: "blocked" }, context: context() }),
+    ).resolves.toEqual({ ok: true });
+    expect(io.rpc).toHaveBeenCalledExactlyOnceWith("admin_update_user_db", {
+      _user_id: userId,
+      _display_name: null,
+      _email: null,
+      _status: "blocked",
+      _role: null,
+    });
+    expect(io.from).not.toHaveBeenCalledWith("profiles");
+    expect(io.audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a blocked privileged-role edit before touching Auth", async () => {
+    for (const role of ["admin", "operator"] as const) {
+      await expect(
+        update({
+          data: {
+            user_id: "00000000-0000-4000-8000-000000000002",
+            status: "blocked",
+            role,
+          },
+          context: context(),
+        }),
+      ).rejects.toThrow("blocked_privileged_role_forbidden");
+    }
+    expect(io.authUpdate).not.toHaveBeenCalled();
+    expect(io.rpc).not.toHaveBeenCalled();
   });
 
   it("blocks self-status changes before touching Auth or profile", async () => {
@@ -364,12 +391,6 @@ describe("admin user directory server boundary", () => {
               }),
             }),
           }),
-          update: () => ({
-            eq: async () => {
-              writes.push("profile-active");
-              return { error: null };
-            },
-          }),
         };
       if (table === "account_deletion_requests")
         return {
@@ -389,6 +410,10 @@ describe("admin user directory server boundary", () => {
       writes.push("auth-unban");
       return { error: null };
     });
+    io.rpc.mockImplementation(async () => {
+      writes.push("status-rpc");
+      return { data: true, error: null };
+    });
     await expect(
       setStatus({
         data: { user_id: "00000000-0000-4000-8000-000000000002", status: "active" },
@@ -398,7 +423,7 @@ describe("admin user directory server boundary", () => {
     expect(io.authUpdate).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000002", {
       ban_duration: "none",
     });
-    expect(writes).toEqual(["profile-active", "auth-unban"]);
+    expect(writes).toEqual(["status-rpc", "auth-unban"]);
   });
 
   it("does not mutate a user when the Auth ban for soft delete fails", async () => {

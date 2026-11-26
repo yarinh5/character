@@ -39,6 +39,40 @@ async function setSingleRole(supabase: SupabaseClient<Database>, userId: string,
   if (data !== true) throw new Error("role_change_not_confirmed");
 }
 
+async function setUserStatus(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  status: "active" | "blocked",
+) {
+  const { data, error } = await supabase.rpc("admin_set_user_status", {
+    _user_id: userId,
+    _status: status,
+  });
+  if (error) throw new Error(error.message);
+  if (data !== true) throw new Error("status_change_not_confirmed");
+}
+
+async function updateUserDb(
+  supabase: SupabaseClient<Database>,
+  data: {
+    user_id: string;
+    display_name?: string;
+    email?: string;
+    status?: "active" | "blocked";
+    role?: AppRole;
+  },
+) {
+  const { data: confirmed, error } = await supabase.rpc("admin_update_user_db", {
+    _user_id: data.user_id,
+    _display_name: data.display_name ?? null,
+    _email: data.email ?? null,
+    _status: data.status ?? null,
+    _role: data.role ?? null,
+  });
+  if (error) throw new Error(error.message);
+  if (confirmed !== true) throw new Error("user_update_not_confirmed");
+}
+
 async function setAuthBan(userId: string, blocked: boolean) {
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
     ban_duration: blocked ? "876000h" : "none",
@@ -168,6 +202,9 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.status && data.user_id === context.userId) {
       throw new Error("לא ניתן לשנות את הסטטוס של עצמך מכאן");
     }
+    if (data.status === "blocked" && (data.role === "admin" || data.role === "operator")) {
+      throw new Error("blocked_privileged_role_forbidden");
+    }
     if (data.status) await ensureNotAdminTarget(data.user_id);
     if (data.status === "active") await ensureReactivatable(data.user_id);
 
@@ -180,25 +217,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
     }
 
-    const profileUpdate: {
-      display_name?: string;
-      email?: string;
-      status?: string;
-    } = {};
-    if (data.display_name !== undefined) profileUpdate.display_name = data.display_name;
-    if (data.email !== undefined) profileUpdate.email = data.email;
-    if (data.status !== undefined) profileUpdate.status = data.status;
-    if (Object.keys(profileUpdate).length) {
-      const { error } = await supabaseAdmin
-        .from("profiles")
-        .update(profileUpdate)
-        .eq("user_id", data.user_id);
-      if (error) throw new Error(error.message);
-    }
-
-    if (data.role) {
-      await setSingleRole(context.supabase, data.user_id, data.role);
-    }
+    await updateUserDb(context.supabase, data);
     if (data.status === "active") await setAuthBan(data.user_id, false);
 
     return { ok: true };
@@ -232,15 +251,8 @@ export const adminSetStatus = createServerFn({ method: "POST" })
     await ensureNotAdminTarget(data.user_id);
     if (data.status === "active") await ensureReactivatable(data.user_id);
     if (data.status === "blocked") await setAuthBan(data.user_id, true);
-    const { error } = await supabaseAdmin
-      .from("profiles")
-      .update({ status: data.status })
-      .eq("user_id", data.user_id);
-    if (error) throw new Error(error.message);
+    await setUserStatus(context.supabase, data.user_id, data.status);
     if (data.status === "active") await setAuthBan(data.user_id, false);
-    await logAudit(context.userId, "user.status_changed", "user", data.user_id, {
-      status: data.status,
-    });
     return { ok: true };
   });
 
