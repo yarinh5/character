@@ -73,6 +73,8 @@ export async function validateAndSanitizeClientImage(
         throw new ClientMediaValidationError("client_media_dimensions_invalid");
       }
       image.strip();
+      // Bound encoder effort on the request worker; keep the codec quality and dimensions.
+      image.settings.setDefine(MagickFormat.WebP, "method", 2);
       return {
         width,
         height,

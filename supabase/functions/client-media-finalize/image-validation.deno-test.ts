@@ -1,3 +1,4 @@
+import { ImageMagick, MagickFormat } from "npm:@imagemagick/magick-wasm@0.0.30";
 import {
   ClientMediaValidationError,
   detectClientImageMime,
@@ -127,4 +128,51 @@ Deno.test("a valid declared image produces a metadata-free WebP derivative", asy
   const result = await validateAndSanitizeClientImage(ONE_PIXEL_PNG, "image/png");
   assertEquals(result.contentType, "image/webp");
   assertEquals(detectClientImageMime(result.bytes), "image/webp");
+});
+
+Deno.test("client previews use the measured low-CPU WebP method without resizing", async () => {
+  const size = 256;
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, size);
+  view.setUint32(4, size);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const stride = size * 3 + 1;
+  const pixels = new Uint8Array(stride * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const offset = y * stride + 1 + x * 3;
+      pixels[offset] = x ^ y ^ 152;
+      pixels[offset + 1] = 3 * y + x + 152;
+      pixels[offset + 2] = x * y;
+    }
+  }
+  const compressed = new Uint8Array(
+    await new Response(
+      new Blob([pixels]).stream().pipeThrough(new CompressionStream("deflate")),
+    ).arrayBuffer(),
+  );
+  const source = concat(
+    ONE_PIXEL_PNG.slice(0, 8),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", compressed),
+    pngChunk("IEND", new Uint8Array()),
+  );
+
+  const result = await validateAndSanitizeClientImage(source, "image/png");
+  const expected = ImageMagick.read(source, (image) => {
+    image.strip();
+    image.settings.setDefine(MagickFormat.WebP, "method", 2);
+    return image.write(MagickFormat.WebP, (bytes) => bytes.slice());
+  });
+  ImageMagick.read(result.bytes, (preview) => {
+    assertEquals(preview.width, size);
+    assertEquals(preview.height, size);
+  });
+  assertEquals(result.bytes.length, expected.length);
+  assertEquals(
+    result.bytes.every((byte, index) => byte === expected[index]),
+    true,
+  );
 });

@@ -55,6 +55,21 @@
   This does not establish the cause of CPU consumption inside the worker, hosted capacity,
   registration under load or Product PASS.
 
+- WP06/WP12 response-loss follow-up: a local profile of the identical pinned ImageMagick WASM
+  isolated WebP encoding as the dominant cost. The client preview now uses WebP method 2; file
+  and pixel limits, metadata stripping, dimensions, authorization, idempotency and cleanup are
+  unchanged. Same-input interleaved samples at 1024 and 2048 pixels cut median whole
+  processing wall time from 393/1673 ms to 150/602 ms; derivatives were about 7.3/7.5% larger
+  with no PSNR decrease in this synthetic sample. The new Deno test was RED on the default
+  encoder and GREEN after the change (5/5); 26 related source tests passed.
+  On a fresh local stack, all 30 real signed PNG uploads and finalizes passed (26 at 256,
+  three at 1024, one at 2048 square, concurrency 3). All also replayed with the same identity,
+  served the expected WebP to the owner, denied another client and had exactly one debit.
+  Readback found 30 cleanup schedules, 30 previews and no retained originals from these
+  requests. Edge still retired one worker at its CPU soft limit, but none of these requests
+  lost a response. Evidence: `F:/project love/character/.codex-task/wp06-client-media-cost-20261126-01/REPORT.md`.
+  This is focused corrective evidence; the mixed 300/30 load, higher tiers and Product remain open.
+
 - AC32 recovery evidence follow-up: migration `20261126110000` rejects non-finite snapshot/coverage dates, post-generation coverage, backwards coverage, and complete claims that stop before the source snapshot. A valid append invalidates old approval readiness and replay authorization atomically without changing the import version or external lock. Final local application from 169 to 170 migrations kept RPC privileges unchanged; 42/42 rollback-only pgTAP and 14/14 focused Vitest passed. Invalid historical timing and stale approval each failed migration preflight without rewriting data. Recovery writers must be disabled and drained for rollout; no live provider import, release, replay, RTO/RPO or Product acceptance was exercised. Both test environments were cleaned with unrelated inventory unchanged. Evidence: `F:/project love/character/.codex-task/wp12-recovery-coverage-final-20261126-01/REPORT.md`.
 
 - AC32 restored-database financial freeze: the recovery pgTAP suite now checks a real authorized admin credit adjustment before the gate closes and rejection afterward. 28/28 passed on the isolated restored PostgreSQL target. The credit wallet and ledger were unchanged by the rejected write, and an in-app alert record was written for the synthetic admin only. ROLLBACK restored the before-state and zero fixture users/wallet/ledger rows; the owned target returned to Exited. Direct Node contract and focused Vitest 14/14 passed. A separate code review found missing ordering checks on the recovery manifest coverage watermark, which remains OPEN. No manifest import, external alert delivery, replay/release or Product acceptance was exercised. Evidence: `F:/project love/character/.codex-task/wp12-recovery-credit-freeze-20261126-01/REPORT.md`.
