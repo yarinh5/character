@@ -704,7 +704,7 @@ The current candidate inventory is deliberately split as follows:
 
 | Inventory                                               | Count | Gate                                                               |
 | ------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
-| Product Offline tests under `src/**`                    |    83 | `npm exec -- vitest run src`                                       |
+| Product Offline tests under `src/**`                    |    85 | `npm exec -- vitest run src`                                       |
 | HTTP integration tests under `supabase/tests/http/**`   |     8 | the separate HTTP runner in section H                              |
 | Deno decoder test                                       |     1 | the explicit `deno test --node-modules-dir=none ...` command above |
 | Direct Offline DB/migration contract files              |    22 | nineteen files in section G, plus three direct packaging regressions |

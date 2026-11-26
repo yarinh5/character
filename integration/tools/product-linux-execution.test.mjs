@@ -1002,7 +1002,9 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   assert.ok(selected.includes("src/test/admin-dashboard-aggregate.test.ts"));
   assert.ok(selected.includes("src/test/admin-mobile-navigation.test.tsx"));
   assert.ok(selected.includes("src/test/support-route-retry.test.tsx"));
-  assert.equal(selected.length, 83);
+  assert.ok(selected.includes("src/test/deletion-storage-verification.test.ts"));
+  assert.ok(selected.includes("src/test/http-fixture-target.test.ts"));
+  assert.equal(selected.length, 85);
 
   const http = testFiles.filter((path) => path.startsWith("supabase/tests/http/"));
   assert.deepEqual(http, PRODUCT_HTTP_FILES);
@@ -1016,6 +1018,7 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   assert.deepEqual(nodeTest, [
     "integration/tools/product-linux-execution.test.mjs",
     "integration/tools/product-service-log-collector.test.mjs",
+    "supabase/tests/concurrency/local-target.safety.mjs",
     "supabase/tests/concurrency/read-access-revocation-concurrency.orchestration.safety.mjs",
     "supabase/tests/database/v4_3/cycle_bound_operator_send.offline.test.mjs",
     "supabase/tests/database/v4_3/handling_claim_expiry.offline.test.mjs",
