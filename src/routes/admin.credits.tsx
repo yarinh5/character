@@ -173,16 +173,22 @@ function AdminCreditsPage() {
 export function CreditRequestsTab() {
   const queryClient = useQueryClient();
   const writeInFlight = useRef(false);
+  const [view, setView] = useState<"pending" | "history">("pending");
+  const pending = view === "pending";
   const requests = useQuery({
-    queryKey: ["admin-credit-requests"],
+    queryKey: ["admin-credit-requests", view],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const query = supabase
         .from("credit_requests")
         .select(
           "id, client_id, package_name_snapshot, credits_snapshot, status, requested_at, resolved_at",
-        )
-        .order("requested_at", { ascending: true })
-        .order("id", { ascending: true })
+        );
+      const { data, error } = await (
+        pending
+          ? query.eq("status", "pending").order("requested_at", { ascending: true })
+          : query.neq("status", "pending").order("resolved_at", { ascending: false })
+      )
+        .order("id", { ascending: pending })
         .limit(100);
       if (error) throw error;
       const rows = data ?? [];
@@ -223,17 +229,17 @@ export function CreditRequestsTab() {
       return { id, decision };
     },
     onSuccess: ({ id, decision }) => {
-      queryClient.setQueryData<CreditRequestRow[]>(["admin-credit-requests"], (current) =>
-        current?.map((request) =>
-          request.id === id
-            ? { ...request, status: decision, resolved_at: new Date().toISOString() }
-            : request,
-        ),
+      queryClient.setQueryData<CreditRequestRow[]>(
+        ["admin-credit-requests", "pending"],
+        (current) => current?.filter((request) => request.id !== id),
       );
-      void queryClient.invalidateQueries({ queryKey: ["admin-client-credit-rows"] });
       toast.success(decision === "approved" ? "בקשת הקרדיטים אושרה" : "בקשת הקרדיטים נדחתה");
     },
-    onError: () => toast.error("טיפול בבקשת הקרדיטים נכשל. לא בוצע שינוי יתרה."),
+    onError: () => toast.error("לא ניתן לאמת את תוצאת הטיפול בבקשת הקרדיטים."),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-credit-requests"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-client-credit-rows"] });
+    },
   });
   const submit = (id: string, decision: "approved" | "rejected") => {
     if (writeInFlight.current) return;
@@ -257,52 +263,65 @@ export function CreditRequestsTab() {
         </Button>
       </CardHeader>
       <CardContent>
-        {requests.isLoading && <Skeleton className="h-32" />}
-        {requests.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            טעינת בקשות הקרדיטים נכשלה.
-          </p>
-        )}
-        {requests.isSuccess && requests.data.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">אין בקשות קרדיטים.</p>
-        )}
-        {requests.data && requests.data.length > 0 && (
-          <div className="divide-y rounded-md border" aria-busy={requests.isFetching}>
-            {requests.data.map((request) => (
-              <div key={request.id} className="flex flex-wrap items-center gap-3 p-4">
-                <div className="min-w-52 flex-1">
-                  <p className="font-medium">{request.client_name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {request.package_name_snapshot} ·{" "}
-                    {request.credits_snapshot.toLocaleString("he-IL")} קרדיטים
-                  </p>
-                </div>
-                <StatusBadge status={request.status} />
-                {request.status === "pending" && (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => submit(request.id, "approved")}
-                      disabled={resolveRequest.isPending}
-                    >
-                      <CheckCircle2 className="h-4 w-4" /> אשר
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => submit(request.id, "rejected")}
-                      disabled={resolveRequest.isPending}
-                    >
-                      <XCircle className="h-4 w-4" /> דחה
-                    </Button>
+        <Tabs
+          value={view}
+          onValueChange={(value) => setView(value === "history" ? "history" : "pending")}
+        >
+          <TabsList aria-label="סינון בקשות קרדיטים">
+            <TabsTrigger value="pending">ממתינות</TabsTrigger>
+            <TabsTrigger value="history">היסטוריה</TabsTrigger>
+          </TabsList>
+          <TabsContent value={view}>
+            {requests.isLoading && <Skeleton className="h-32" />}
+            {requests.isError && (
+              <p role="alert" className="text-sm text-destructive">
+                טעינת בקשות הקרדיטים נכשלה.
+              </p>
+            )}
+            {requests.isSuccess && requests.data.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {pending ? "אין בקשות קרדיטים ממתינות." : "אין בקשות קרדיטים שטופלו."}
+              </p>
+            )}
+            {requests.data && requests.data.length > 0 && (
+              <div className="divide-y rounded-md border" aria-busy={requests.isFetching}>
+                {requests.data.map((request) => (
+                  <div key={request.id} className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-52 flex-1">
+                      <p className="font-medium">{request.client_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {request.package_name_snapshot} ·{" "}
+                        {request.credits_snapshot.toLocaleString("he-IL")} קרדיטים
+                      </p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                    {request.status === "pending" && (
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => submit(request.id, "approved")}
+                          disabled={resolveRequest.isPending}
+                        >
+                          <CheckCircle2 className="h-4 w-4" /> אשר
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => submit(request.id, "rejected")}
+                          disabled={resolveRequest.isPending}
+                        >
+                          <XCircle className="h-4 w-4" /> דחה
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
   );

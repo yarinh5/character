@@ -96,3 +96,19 @@ AC17–AC20/AC33 are not closed.
 - Focused component regressions cover request creation, canonical approval and malformed results.
   DB/RLS/concurrency cases are written and **NOT RUN**. Payment processing remains absent, and live
   wallet contention, Auth/RLS and browser behavior remain **NOT VERIFIED**.
+
+## Manual credit request acceptance (2026-11-26)
+
+- Reproduced a blocked admin workflow with 100 older rejected requests and two new pending ones.
+  The oldest-first query applied its limit to all statuses, hiding both actionable requests.
+- The initial view now fetches only pending requests in arrival order. Resolved requests have their
+  own bounded history, with the latest decisions first. Resolution refreshes both views and the
+  client balances; an unverified RPC response no longer claims that the balance did not change.
+- Browser and DB evidence from a fresh synthetic local stack: two requests left the wallet at 20.
+  Admin approval credited 25 once, rejection created no transaction, and both decisions were
+  audited. Create and approval replays returned the original records. The opposite decision and
+  resolution by clients were denied, and a different client could not read the requests.
+- The live WP07/WP11 pgTAP file passed 67/67; focused UI tests passed 48/48, the full suite passed
+  830/830, and typecheck passed. The task-owned stack was removed and the previous Docker inventory
+  was unchanged. No payment provider, concurrent credit resolutions, production catalog, or
+  integrated Product acceptance was tested in this run.
