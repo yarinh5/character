@@ -408,13 +408,23 @@ async function supportFirstResponseRace(observer, a, b) {
     `the row lock preserves the first response: ${JSON.stringify(responseTimes)}`);
 }
 
-async function cleanup(observer) {
+async function cleanup(observer, baselineAnalytics) {
+  const baselineIds = (baselineAnalytics ?? []).map(quote).join(",");
+  const events = baselineAnalytics === null ? [] : await observer.json(
+    `SELECT COALESCE(json_agg(json_build_object('id',id,'name',event_name)),'[]'::json)
+     FROM public.analytics_events WHERE id <> ALL(ARRAY[${baselineIds}]::uuid[]);`,
+  );
+  const expectedEvents = new Set(["signup_completed", "conversation_started", "new_claimed", "new_timed_out"]);
+  assert.ok(events.every((event) => expectedEvents.has(event.name)),
+    `unexpected analytics event in fixture window: ${JSON.stringify(events)}`);
   await observer.ok(`\\set ON_ERROR_STOP on
     BEGIN;
+    DELETE FROM public.analytics_events WHERE id IN (${events.map((event) => quote(event.id)).join(",") || "NULL"});
+    DELETE FROM public.notifications WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)});
     DELETE FROM public.support_ticket_messages WHERE ticket_id=${quote(ids.supportTicket)};
     DELETE FROM public.support_tickets WHERE id=${quote(ids.supportTicket)};
     DELETE FROM public.client_media_uploads WHERE id=${quote(ids.upload)};
-    DELETE FROM public.audit_logs WHERE entity_id IN (${quote(ids.conversation)},${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)},${quote(ids.upload)});
+    DELETE FROM public.audit_logs WHERE entity_id IN (${quote(ids.conversation)},${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)},${quote(ids.upload)},${quote(ids.supportTicket)});
     DELETE FROM public.conversation_handling_cycles WHERE conversation_id IN (${quote(ids.conversation)},${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)});
     DELETE FROM public.conversation_work_items WHERE conversation_id IN (${quote(ids.conversation)},${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)});
     DELETE FROM public.conversations WHERE id IN (${quote(ids.conversation)},${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)});
@@ -432,8 +442,10 @@ async function cleanup(observer) {
 const observer = new Session("observer");
 const first = new Session("first");
 const second = new Session("second");
+let baselineAnalytics = null;
 try {
   await Promise.all([observer.initialize(), first.initialize(), second.initialize()]);
+  baselineAnalytics = await observer.json("SELECT COALESCE(json_agg(id),'[]'::json) FROM public.analytics_events;");
   await setup(observer);
   await multiConversationScannerLockOrderRace(observer, first, second);
   await handlingLockOrderRace(observer, first, second);
@@ -448,7 +460,7 @@ try {
   process.exitCode = 1;
 } finally {
   await Promise.allSettled([first.ok("ROLLBACK;"), second.ok("ROLLBACK;")]);
-  await cleanup(observer).catch(() => {
+  await cleanup(observer, baselineAnalytics).catch(() => {
     process.exitCode = 1;
   });
   await Promise.allSettled(sessions.map((session) => session.close()));
