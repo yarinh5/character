@@ -2,9 +2,15 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import {
+  assertValidatedTargetIdentity,
+  discoverLocalDbTarget,
+  resolveLocalTestBinding,
+} from "../run-db-local.mjs";
 import { isProductHttp, runProductHttp } from "./paid-sticker-window.mjs";
 
-const projectId = "qmgkmsarzfjnqltljkjl";
+const binding = resolveLocalTestBinding(process.env);
+const projectId = binding.projectId;
 const dbContainer = `supabase_db_${projectId}`;
 const apiContainer = `supabase_kong_${projectId}`;
 const vitestConfig = resolve("vitest.http.config.ts");
@@ -148,6 +154,7 @@ async function main() {
 }
 
 async function runLegacy() {
+  const frozenTarget = binding.engineId === null ? null : discoverLocalDbTarget();
   const status = spawnSync("supabase", ["status", "--output", "json"], {
     encoding: "utf8",
     windowsHide: true,
@@ -201,6 +208,7 @@ async function runLegacy() {
 
   const vitestBin = resolve("node_modules/vitest/vitest.mjs");
   const args = process.argv.slice(2);
+  if (frozenTarget) assertValidatedTargetIdentity(frozenTarget, discoverLocalDbTarget());
   const result = spawnSync(
     process.execPath,
     [vitestBin, "run", "--config", vitestConfig, ...args],
@@ -218,6 +226,7 @@ async function runLegacy() {
     },
   );
 
+  if (frozenTarget) assertValidatedTargetIdentity(frozenTarget, discoverLocalDbTarget());
   const eventBaselineAfter = readEventBaseline("after");
   if (JSON.stringify(eventBaselineAfter) !== JSON.stringify(eventBaselineBefore)) {
     fail("HTTP fixture event residue changed the verified pre-suite baseline.");
