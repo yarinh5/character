@@ -17,6 +17,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { PRODUCT_HTTP_FILES, runProductHttp } from "../../supabase/tests/http/paid-sticker-window.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const artifact = join(here, "product-linux-execution.sh");
@@ -777,9 +778,11 @@ function markedBashBlock(marker) {
 }
 
 function repositoryFiles(root, predicate) {
+  const generatedRoots = new Set(["node_modules", "dist", "dist-ssr", ".wrangler", ".git"]);
   const result = [];
   function visit(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (directory === root && generatedRoots.has(entry.name)) continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) visit(path);
       else if (predicate(path)) result.push(relative(root, path).replaceAll("\\", "/"));
@@ -997,10 +1000,11 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   assert.ok(selected.includes("src/test/client-withdraw-like.test.tsx"));
   assert.ok(selected.includes("src/test/client-liked-entries.test.tsx"));
   assert.ok(selected.includes("src/test/admin-dashboard-aggregate.test.ts"));
-  assert.equal(selected.length, 71);
+  assert.ok(selected.includes("src/test/admin-mobile-navigation.test.tsx"));
+  assert.equal(selected.length, 82);
 
   const http = testFiles.filter((path) => path.startsWith("supabase/tests/http/"));
-  assert.equal(http.length, 7);
+  assert.deepEqual(http, PRODUCT_HTTP_FILES);
   assert.ok(http.every((path) => !selected.includes(path)));
 
   const repository = resolve(here, "..", "..");
@@ -1024,6 +1028,10 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
     "supabase/tests/database/v4_3/wp09_client_levels_migration.offline.test.mjs",
     "supabase/tests/database/v4_3/wp10_deletion_retention.offline.test.mjs",
     "supabase/tests/database/v4_3/wp10_retention_minimization.offline.test.mjs",
+    "supabase/tests/database/v4_3/wp11_admin_completion_exception_cases.offline.test.mjs",
+    "supabase/tests/database/v4_3/wp11_admin_role_transition.offline.test.mjs",
+    "supabase/tests/database/v4_3/wp11_operator_report_moderation.offline.test.mjs",
+    "supabase/tests/database/v4_3/wp11_operator_report_page.offline.test.mjs",
     "supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs",
     "supabase/tests/local-docker-port-contract.test.mjs",
     "supabase/tests/upgrades/wp01-read-access-117-to-118.orchestration.safety.mjs",
@@ -1037,9 +1045,11 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
     executionText.includes("supabase/tests/local-docker-port-contract.test.mjs"),
     "the approved port-binding contract test must be documented in the node:test inventory",
   );
-  for (const httpPath of http) {
-    assert.ok(executionText.includes(httpPath), `missing HTTPx2 inventory entry: ${httpPath}`);
-  }
+  const commandMatch = executionText.match(
+    /^\| `http\.1` \/ `http\.2`\s*\| `npm run test:http -- ([^`]+)`/m,
+  );
+  assert.ok(commandMatch, "missing the exact shared HTTPx2 command");
+  assert.deepEqual(commandMatch[1].split(/\s+/), http);
   for (const command of [
     "node --test supabase/tests/database/v4_3/p03_p07_profile_images.offline.test.mjs",
     "node --test supabase/tests/database/v4_3/p05_sla_presence.offline.test.mjs",
@@ -1059,6 +1069,44 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   ]) {
     assert.ok(executionText.includes(command), `missing integrated offline command: ${command}`);
   }
+  const wp11Gate = executionText
+    .split(/\r?\n/)
+    .find((line) =>
+      line.startsWith("node --test supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs"),
+    );
+  assert.ok(wp11Gate, "missing the exact WP11 Offline command");
+  assert.deepEqual(
+    wp11Gate.trim().split(/\s+/).slice(2).sort(),
+    nodeTest.filter((path) => /^supabase\/tests\/database\/v4_3\/wp11_.*\.offline\.test\.mjs$/.test(path)),
+    "the existing WP11 command must include all five WP11 Node test files",
+  );
+});
+
+test("Product HTTP rejects incomplete or substituted file inventories before any runtime", async () => {
+  const runtime = () => assert.fail("inventory rejection reached a runtime boundary");
+  const withoutWp11 = PRODUCT_HTTP_FILES.filter((path) => !path.includes("wp11_admin_status"));
+  for (const args of [
+    withoutWp11,
+    [...withoutWp11, withoutWp11[0]],
+    [...withoutWp11, "supabase/tests/http/invented.integration.test.ts"],
+    [...PRODUCT_HTTP_FILES, "--testNamePattern=paid"],
+  ]) {
+    await assert.rejects(
+      runProductHttp({ args, env: {}, cwd: "", config: "", realpath: runtime, invoke: runtime }),
+      /exact Product HTTP inventory/,
+    );
+  }
+  await assert.rejects(
+    runProductHttp({
+      args: [...PRODUCT_HTTP_FILES].reverse(),
+      env: {},
+      cwd: "",
+      config: "",
+      realpath: runtime,
+      invoke: runtime,
+    }),
+    /missing or mismatched Product run and service-lane handoff/,
+  );
 });
 
 for (const marker of ["product-collector-owner-before-readiness", "product-collector-owner-before-stop"]) {

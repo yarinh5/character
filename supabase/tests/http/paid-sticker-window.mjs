@@ -14,6 +14,16 @@ import { posix } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 const paid = "supabase/tests/http/paid_sticker.integration.test.ts";
+export const PRODUCT_HTTP_FILES = Object.freeze([
+  "supabase/tests/http/active_new_responsibility_send.integration.test.ts",
+  "supabase/tests/http/admin_operations_snapshot.integration.test.ts",
+  "supabase/tests/http/authorization_new.integration.test.ts",
+  "supabase/tests/http/authorized_read_access_revocation.integration.test.ts",
+  "supabase/tests/http/client_pii_archive.integration.test.ts",
+  "supabase/tests/http/media_authorization.integration.test.ts",
+  paid,
+  "supabase/tests/http/wp11_admin_status.integration.test.ts",
+]);
 const project = "qmgkmsarzfjnqltljkjl";
 const endpoint = "unix:///run/docker.sock";
 const api = "http://127.0.0.1:60421";
@@ -275,10 +285,10 @@ export async function runProductHttp({
   },
 }) {
   requireProof(
-    new Set(args).size === args.length &&
-      args.includes(paid) &&
-      args.every((arg) => /^supabase\/tests\/http\/[a-z0-9_]+\.integration\.test\.ts$/.test(arg)),
-    "the required invocation must explicitly select the full paid-sticker file without filters",
+    args.length === PRODUCT_HTTP_FILES.length &&
+      new Set(args).size === args.length &&
+      PRODUCT_HTTP_FILES.every((path) => args.includes(path)),
+    "the exact Product HTTP inventory must be selected without filters",
   );
   assertNotInterrupted(signal);
   const { run, evidence, context, engine } = identity(env, cwd, config, realpath, readHandoff);

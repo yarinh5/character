@@ -676,7 +676,7 @@ node --test supabase/tests/database/v4_3/wp08_operator_points_migration.offline.
 node --test supabase/tests/database/v4_3/wp09_client_levels_migration.offline.test.mjs
 node --test supabase/tests/database/v4_3/wp10_deletion_retention.offline.test.mjs
 node --test supabase/tests/database/v4_3/wp10_retention_minimization.offline.test.mjs
-node --test supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs
+node --test supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs supabase/tests/database/v4_3/wp11_admin_completion_exception_cases.offline.test.mjs supabase/tests/database/v4_3/wp11_admin_role_transition.offline.test.mjs supabase/tests/database/v4_3/wp11_operator_report_moderation.offline.test.mjs supabase/tests/database/v4_3/wp11_operator_report_page.offline.test.mjs
 ```
 
 <!-- product-vitest-gate:start -->
@@ -704,15 +704,15 @@ The current candidate inventory is deliberately split as follows:
 
 | Inventory                                               | Count | Gate                                                               |
 | ------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
-| Product Offline tests under `src/**`                    |    71 | `npm exec -- vitest run src`                                       |
-| HTTP integration tests under `supabase/tests/http/**`   |     7 | the separate HTTP runner in section H                              |
+| Product Offline tests under `src/**`                    |    82 | `npm exec -- vitest run src`                                       |
+| HTTP integration tests under `supabase/tests/http/**`   |     8 | the separate HTTP runner in section H                              |
 | Deno decoder test                                       |     1 | the explicit `deno test --node-modules-dir=none ...` command above |
-| Direct Offline DB/migration contract files              |    16 | fifteen Product gates above and one direct packaging regression   |
-| `node:test` tools/orchestration/migration safety suites |    20 | their explicit Node package/orchestration commands; never Vitest   |
+| Direct Offline DB/migration contract files              |    22 | nineteen files in section G, plus three direct packaging regressions |
+| `node:test` tools/orchestration/migration safety suites |    24 | their explicit Node package/orchestration commands; never Vitest   |
 
 The Product inventory includes `src/lib/slaMonitoring.test.ts`, `src/components/ui/dialog.test.tsx`
-and both `src/test/client-withdraw-like.test.tsx` and `src/test/client-liked-entries.test.tsx`. The twenty `node:test` suites comprise the two files under
-`integration/tools`, four orchestration-safety files, eleven direct Offline database/migration
+and both `src/test/client-withdraw-like.test.tsx` and `src/test/client-liked-entries.test.tsx`. The 24 `node:test` suites comprise the two files under
+`integration/tools`, four orchestration-safety files, 17 direct Offline database/migration
 contracts, and the approved shared port-binding contract at
 `supabase/tests/local-docker-port-contract.test.mjs`. Five additional direct contracts are plain
 Node programs rather than `node:test` suites. This revision adds the exact node:test inventory path
@@ -970,7 +970,7 @@ a time with the section F ledger pattern and branch table:
 | `concurrency.cycle-bound-send` | `npm run test:cycle-bound-send-concurrency`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `concurrency.read-access`      | `npm run test:read-access-concurrency`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `concurrency.product`          | `node supabase/tests/concurrency/product-completion-review-concurrency.mjs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `http.1` / `http.2`            | `npm run test:http -- supabase/tests/http/active_new_responsibility_send.integration.test.ts supabase/tests/http/admin_operations_snapshot.integration.test.ts supabase/tests/http/authorization_new.integration.test.ts supabase/tests/http/authorized_read_access_revocation.integration.test.ts supabase/tests/http/client_pii_archive.integration.test.ts supabase/tests/http/media_authorization.integration.test.ts supabase/tests/http/paid_sticker.integration.test.ts` (the complete seven-test HTTP inventory, two planned successful invocations) |
+| `http.1` / `http.2`            | `npm run test:http -- supabase/tests/http/active_new_responsibility_send.integration.test.ts supabase/tests/http/admin_operations_snapshot.integration.test.ts supabase/tests/http/authorization_new.integration.test.ts supabase/tests/http/authorized_read_access_revocation.integration.test.ts supabase/tests/http/client_pii_archive.integration.test.ts supabase/tests/http/media_authorization.integration.test.ts supabase/tests/http/paid_sticker.integration.test.ts supabase/tests/http/wp11_admin_status.integration.test.ts` (the complete eight-file HTTP inventory, two planned successful invocations) |
 
 `supabase start` and `supabase db reset --local --no-seed` mutate only the accepted isolated stack.
 Reset destroys and recreates the disposable local database, applies every migration including the
@@ -1055,7 +1055,7 @@ secondary failure if needed.
 
 PASS requires: DB inventory passed twice; five concurrency suites passed with barriers and zero
 owned residue; all seventeen Edge routes passed the unauthenticated 401 readiness check; the complete
-seven-test HTTP inventory passed twice; direct Storage/RLS denial; one message/charge; same-key replay; real decode;
+eight-file HTTP inventory passed twice; direct Storage/RLS denial; one message/charge; same-key replay; real decode;
 expiry/cleanup; unchanged event-residue counters; and verified fixture, session and lock cleanup.
 
 Official behavior sources:
