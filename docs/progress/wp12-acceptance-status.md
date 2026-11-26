@@ -94,6 +94,18 @@
   or shared settings changed. No signup load or Product PASS is claimed.
   Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-01/REPORT.md`.
 
+- WP12 1,000/100 boot-corrected run on `8255512`: startup pollset 4,096 and listener
+  1,200 verified in the fresh owned Realtime. All 1,100 subscriptions held for 352.286s,
+  with 900 text sends, 100 media flows, both read waves and all 1,100 expected events.
+  Independent SQL verified 1,001 single debits, 101 previews and 100 exact point ledgers.
+  **Acceptance failed at the five-cycle operator maximum:** auto-allocation produced
+  500 active assignments, with nine operators at six, 82 at five and nine at four.
+  No application change was made. Capture contains the allocator, audit rows and
+  capacity counts. The pre-lock capacity read is the leading hypothesis; next
+  reproduce the concurrent allocation deterministically before changing it.
+  Higher-tier load and integrated Product remain open.
+  Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-02/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
