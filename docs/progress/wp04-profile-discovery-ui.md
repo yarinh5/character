@@ -282,3 +282,22 @@ integration are **NOT VERIFIED**; WP04 and AC09–AC11 remain open pending those
   ordering, atomic returned-row verification and retained cleanup. pgTAP Storage/RLS/concurrency
   cases are written and **NOT RUN**. Live Storage, Auth and RLS behavior remains **NOT VERIFIED**;
   no migration was applied.
+
+## Personal hide and canonical resume, 2026-11-26
+
+The existing RPC skipped hidden conversations and created a second history.
+A forward-only migration now restores the owner's hidden, non-closed row
+under the existing pair lock, with WP10 deletion access enforced. The chat
+dialog describes a reversible hide. Existing visible conversations are
+preferred; closed rows and historical duplicates are not merged or revived.
+
+Live pgTAP passed 102/102 after reproducing the duplicate and the review's
+deletion-block edge case. A real two-session race verified that a competing
+admin status change leaves the losing hidden history intact. A synthetic
+browser journey showed an empty list after hide and then the original
+conversation and message after reopen; the original single charge and
+balance were unchanged. Full Vitest passed 817/817 and typecheck passed.
+The task resources were removed without changing the pre-existing inventory.
+Evidence: `wp04-conversation-reopen-20261126-01/REPORT.md` in local task
+evidence. This verifies the scoped AC11 route, not the formal Product run or
+a backfill of previously split histories.

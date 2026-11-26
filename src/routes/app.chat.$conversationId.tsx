@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, Flag, Trash2, Smile } from "lucide-react";
+import { ArrowRight, Send, Flag, EyeOff, Smile } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/chat/$conversationId")({
@@ -388,12 +388,12 @@ function ChatPage() {
     setDeleting(false);
 
     if (error) {
-      toast.error("מחיקת השיחה נכשלה");
+      toast.error("הסתרת השיחה נכשלה");
       return;
     }
 
     setDeleteOpen(false);
-    toast.success("השיחה נמחקה מהרשימה שלך");
+    toast.success("השיחה הוסתרה מהרשימה שלך");
     navigate({ to: "/app/conversations" });
   };
 
@@ -482,7 +482,7 @@ function ChatPage() {
           deleting={deleting}
           trigger={
             <Button variant="ghost" size="icon" aria-label="הסרת השיחה מהרשימה">
-              <Trash2 className="h-5 w-5" />
+              <EyeOff className="h-5 w-5" />
             </Button>
           }
         />
@@ -695,18 +695,17 @@ function DeleteConversationDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent dir="rtl">
         <DialogHeader>
-          <DialogTitle>מחיקת שיחה מהרשימה</DialogTitle>
+          <DialogTitle>הסתרת שיחה מהרשימה</DialogTitle>
         </DialogHeader>
         <DialogDescription className="leading-6">
-          השיחה תוסתר רק אצלך. העובדים והאדמין עדיין יראו את ההיסטוריה, ואם תפתח שוב את אותה דמות
-          תיווצר שיחה חדשה.
+          השיחה תוסתר רק מהרשימה שלך. ההסתרה לא מוחקת את ההיסטוריה. אפשר לחזור לשיחה דרך אותה דמות.
         </DialogDescription>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
             ביטול
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={deleting}>
-            {deleting ? "מוחק..." : "מחק שיחה"}
+          <Button onClick={onConfirm} disabled={deleting}>
+            {deleting ? "מסתיר..." : "הסתר שיחה"}
           </Button>
         </DialogFooter>
       </DialogContent>

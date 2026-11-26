@@ -461,6 +461,79 @@ SELECT is(
   'Opening a conversation does not bypass WP02 allocation'
 );
 
+-- AC11: exercise the same open, send, hide and reopen RPCs as the client.
+UPDATE public.system_settings SET value = 'true'::jsonb WHERE key = 'credits_enabled';
+UPDATE public.system_settings SET value = '10'::jsonb WHERE key = 'client_text_credit_price';
+INSERT INTO public.credit_wallets (user_id, balance)
+VALUES ('00000000-0000-4000-8000-000000040001', 20)
+ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance;
+SELECT set_config('wp04.ac11_conversation', id::text, true)
+FROM public.conversations
+WHERE client_id = '00000000-0000-4000-8000-000000040001'
+  AND character_id = '00000000-0000-4000-8000-000000040301';
+SET LOCAL ROLE authenticated;
+SELECT set_config('wp04.ac11_message',
+  public.send_client_message(current_setting('wp04.ac11_conversation')::uuid,
+    'AC11 synthetic original text') -> 'message' ->> 'id', true);
+RESET ROLE;
+SELECT set_config('wp04.ac11_charge', id::text, true)
+FROM public.credit_transactions
+WHERE message_id = current_setting('wp04.ac11_message')::uuid AND type = 'message_spend';
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+  $$SELECT public.hide_conversation_for_client(current_setting('wp04.ac11_conversation')::uuid)$$,
+  'Client hides their own conversation'
+);
+RESET ROLE;
+SELECT isnt((SELECT client_hidden_at FROM public.conversations
+  WHERE id = current_setting('wp04.ac11_conversation')::uuid), NULL::timestamptz,
+  'Hide sets the client visibility marker');
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT public.send_client_message(current_setting('wp04.ac11_conversation')::uuid, 'Hidden text')$$,
+  'P0001', 'conversation_deleted_for_client', 'A hidden conversation cannot send before reopening'
+);
+SELECT is(public.start_or_get_conversation('00000000-0000-4000-8000-000000040301'),
+  current_setting('wp04.ac11_conversation')::uuid, 'Reopening returns the original conversation');
+SELECT is(public.start_or_get_conversation('00000000-0000-4000-8000-000000040301'),
+  current_setting('wp04.ac11_conversation')::uuid, 'Repeating open returns the same conversation');
+SELECT is((SELECT content FROM public.messages
+  WHERE conversation_id = current_setting('wp04.ac11_conversation')::uuid
+    AND id = current_setting('wp04.ac11_message')::uuid),
+  'AC11 synthetic original text', 'The client can read the original message after reopening');
+RESET ROLE;
+SELECT is((SELECT count(*) FROM public.conversations
+  WHERE client_id = '00000000-0000-4000-8000-000000040001'
+    AND character_id = '00000000-0000-4000-8000-000000040301'),
+  1::bigint, 'Hide and reopen do not create a parallel conversation');
+SELECT is((SELECT count(*) FROM public.client_conversation_deletions
+  WHERE conversation_id = current_setting('wp04.ac11_conversation')::uuid),
+  0::bigint, 'Reopening clears the legacy hide marker too');
+SELECT is((SELECT balance FROM public.credit_wallets
+  WHERE user_id = '00000000-0000-4000-8000-000000040001'),
+  10, 'Hide and reopen do not change the balance after the original send');
+SELECT is((SELECT array_agg(id) FROM public.credit_transactions
+  WHERE user_id = '00000000-0000-4000-8000-000000040001' AND type = 'message_spend'),
+  ARRAY[current_setting('wp04.ac11_charge')::uuid], 'The original charge is neither replaced nor duplicated');
+
+-- A status override cannot turn an administrative deletion block into a personal hide.
+INSERT INTO public.conversations (id, client_id, character_id, status)
+VALUES ('00000000-0000-4000-8000-000000040391', '00000000-0000-4000-8000-000000040001',
+  '00000000-0000-4000-8000-000000040302', 'waiting');
+INSERT INTO public.conversation_deletion_requests (conversation_id, requested_by, idempotency_key, reason, status)
+VALUES ('00000000-0000-4000-8000-000000040391', '00000000-0000-4000-8000-000000040002',
+  '00000000-0000-4000-8000-000000040392', 'AC11 synthetic block', 'access_blocked');
+SET LOCAL ROLE authenticated;
+SELECT throws_ok($$SELECT public.start_or_get_conversation('00000000-0000-4000-8000-000000040302')$$,
+  '42501', 'conversation_access_denied', 'A visible status override cannot return a deletion-blocked conversation');
+SELECT public.hide_conversation_for_client('00000000-0000-4000-8000-000000040391');
+SELECT throws_ok($$SELECT public.start_or_get_conversation('00000000-0000-4000-8000-000000040302')$$,
+  '42501', 'conversation_access_denied', 'A hidden status override cannot resume a deletion-blocked conversation');
+RESET ROLE;
+SELECT is((SELECT count(*) FROM public.client_conversation_deletions
+  WHERE conversation_id = '00000000-0000-4000-8000-000000040391'),
+  1::bigint, 'A deletion-blocked conversation keeps its hide marker');
+
 SELECT is(
   (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'client_consent_policy_enabled'),
   'false',

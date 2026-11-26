@@ -163,6 +163,18 @@ describe("client chat accessibility regressions", () => {
     );
   });
 
+  it("describes hiding as reversible without promising a new conversation", async () => {
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(await screen.findByRole("button", { name: "הסרת השיחה מהרשימה" }));
+    const dialog = await screen.findByRole("dialog", { name: "הסתרת שיחה מהרשימה" });
+    expect(dialog).toHaveAccessibleDescription(
+      "השיחה תוסתר רק מהרשימה שלך. ההסתרה לא מוחקת את ההיסטוריה. אפשר לחזור לשיחה דרך אותה דמות.",
+    );
+    expect(within(dialog).getByRole("button", { name: "הסתר שיחה" })).toBeEnabled();
+  });
+
   it.each([
     ["הסרת השיחה מהרשימה", "Escape"],
     ["הסרת השיחה מהרשימה", "Cancel"],
