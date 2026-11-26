@@ -12,6 +12,7 @@ class Session {
   constructor(label) {
     this.name = `${run}_${label}`;
     this.buffer = "";
+    this.stderr = "";
     this.pending = null;
     this.child = spawn(
       "docker",
@@ -36,6 +37,16 @@ class Session {
       { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.child.stdout.setEncoding("utf8");
+    this.child.stderr.setEncoding("utf8");
+    this.child.stderr.on("data", (chunk) => { this.stderr += chunk; });
+    this.child.on("close", (code) => {
+      if (this.pending) {
+        const pending = this.pending;
+        this.pending = null;
+        clearTimeout(pending.timer);
+        pending.reject(new Error(`psql exited ${code}: ${this.stderr.slice(-2000)}`));
+      }
+    });
     this.child.stdout.on("data", (chunk) => {
       this.buffer += chunk;
       let newline;
@@ -49,7 +60,7 @@ class Session {
           clearTimeout(pending.timer);
           const [, failed, sqlstate, ...message] = line.split(" ");
           pending.resolve({ lines: pending.lines, failed, sqlstate, message: message.join(" ") });
-        } else if (line) pending.lines.push(line);
+        } else if (line) this.pending.lines.push(line);
       }
     });
     this.closed = new Promise((resolve) => this.child.once("close", resolve));
@@ -58,13 +69,16 @@ class Session {
 
   query(sql) {
     assert.equal(this.pending, null);
+    if (this.child.exitCode !== null) {
+      return Promise.reject(new Error(`psql already exited ${this.child.exitCode}: ${this.stderr.slice(-2000)}`));
+    }
     return new Promise((resolve, reject) => {
       const marker = `done_${randomUUID()}`;
       const timer = setTimeout(() => {
         this.pending = null;
         reject(new Error("query watchdog exceeded 15 seconds"));
       }, 15_000);
-      this.pending = { marker, timer, resolve, lines: [] };
+      this.pending = { marker, timer, resolve, reject, lines: [] };
       this.child.stdin.write(`${sql}\n\\echo ${marker} :ERROR :SQLSTATE :LAST_ERROR_MESSAGE\n`);
     });
   }
@@ -96,6 +110,8 @@ class Session {
 const ids = Object.fromEntries(
   [
     "client",
+    "scanClientFirst",
+    "scanClientSecond",
     "operatorUser",
     "adminUser",
     "operator",
@@ -120,15 +136,18 @@ Object.assign(ids, {
 });
 
 async function setup(observer) {
-  await observer.ok(`BEGIN;
+  await observer.ok(`\\set ON_ERROR_STOP on
+    BEGIN;
     INSERT INTO auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
     VALUES
       (${quote(ids.client)},'authenticated','authenticated',${quote(`${run}_client@example.invalid`)},now(),'{}','{}',now(),now()),
-      (${quote(ids.operatorUser)},'authenticated','authenticated',${quote(`${run}_operator@example.invalid`)},now(),'{}','{}',now(),now());
+      (${quote(ids.operatorUser)},'authenticated','authenticated',${quote(`${run}_operator@example.invalid`)},now(),'{}','{}',now(),now()),
+      (${quote(ids.scanClientFirst)},'authenticated','authenticated',${quote(`${run}_scan_first@example.invalid`)},now(),'{}','{}',now(),now()),
+      (${quote(ids.scanClientSecond)},'authenticated','authenticated',${quote(`${run}_scan_second@example.invalid`)},now(),'{}','{}',now(),now());
     INSERT INTO auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
     VALUES (${quote(ids.adminUser)},'authenticated','authenticated',${quote(`${run}_admin@example.invalid`)},now(),'{}','{}',now(),now());
     INSERT INTO public.user_roles(user_id,role) VALUES
-      (${quote(ids.client)},'client'),(${quote(ids.operatorUser)},'operator'),(${quote(ids.adminUser)},'admin');
+      (${quote(ids.operatorUser)},'operator'),(${quote(ids.adminUser)},'admin');
     INSERT INTO public.operators(id,user_id,full_name,is_active,availability_status,presence_status,last_seen_at)
     VALUES (${quote(ids.operator)},${quote(ids.operatorUser)},${quote(run)},true,'available','online',now());
     INSERT INTO public.characters(id,name,is_active,is_visible,availability_status)
@@ -143,12 +162,12 @@ async function setup(observer) {
     VALUES (${quote(ids.cycle)},${quote(ids.conversation)},${quote(ids.item)},${quote(ids.operator)});
     INSERT INTO public.conversations(id,client_id,character_id,assigned_operator_id,status,needs_handling,inactivity_expires_at)
     VALUES
-      (${quote(ids.scanConversationFirst)},${quote(ids.client)},${quote(ids.character)},${quote(ids.operator)},'open',true,now()-interval '2 minutes'),
-      (${quote(ids.scanConversationSecond)},${quote(ids.client)},${quote(ids.character)},${quote(ids.operator)},'open',true,now()-interval '1 minute');
+      (${quote(ids.scanConversationFirst)},${quote(ids.scanClientFirst)},${quote(ids.character)},${quote(ids.operator)},'open',true,now()-interval '2 minutes'),
+      (${quote(ids.scanConversationSecond)},${quote(ids.scanClientSecond)},${quote(ids.character)},${quote(ids.operator)},'open',true,now()-interval '1 minute');
     INSERT INTO public.conversation_work_items(id,conversation_id,client_id,character_id,status,responsible_operator_id,assigned_at,last_activity_at)
     VALUES
-      (${quote(ids.scanItemFirst)},${quote(ids.scanConversationFirst)},${quote(ids.client)},${quote(ids.character)},'assigned',${quote(ids.operator)},now(),now()),
-      (${quote(ids.scanItemSecond)},${quote(ids.scanConversationSecond)},${quote(ids.client)},${quote(ids.character)},'assigned',${quote(ids.operator)},now(),now());
+      (${quote(ids.scanItemFirst)},${quote(ids.scanConversationFirst)},${quote(ids.scanClientFirst)},${quote(ids.character)},'assigned',${quote(ids.operator)},now(),now()),
+      (${quote(ids.scanItemSecond)},${quote(ids.scanConversationSecond)},${quote(ids.scanClientSecond)},${quote(ids.character)},'assigned',${quote(ids.operator)},now(),now());
     INSERT INTO public.conversation_handling_cycles(id,conversation_id,work_item_id,operator_id)
     VALUES
       (${quote(ids.scanCycleFirst)},${quote(ids.scanConversationFirst)},${quote(ids.scanItemFirst)},${quote(ids.operator)}),
@@ -168,18 +187,20 @@ async function setup(observer) {
       'two admins respond concurrently and only the first response timestamp is retained',${quote(randomUUID())},
       now()+interval '1 day',1,'UTC'
     );
-    COMMIT;`);
+    COMMIT;
+    \\set ON_ERROR_STOP off`);
 }
 
 async function waitForLock(observer, session) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const waiting = await observer.json(
-      `SELECT to_json(COALESCE((SELECT wait_event_type='Lock' FROM pg_stat_activity WHERE application_name=${quote(session.name)}),false));`,
+  let activity = null;
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    activity = await observer.json(
+      `SELECT row_to_json(a) FROM (SELECT state,wait_event_type,left(query,120) AS query FROM pg_stat_activity WHERE application_name=${quote(session.name)}) a;`,
     );
-    if (waiting) return;
+    if (activity?.wait_event_type === "Lock") return;
     await delay(10);
   }
-  throw new Error(`${session.name} did not reach the expected row-lock barrier`);
+  throw new Error(`${session.name} did not reach the expected row-lock barrier: ${JSON.stringify(activity)}`);
 }
 
 async function handlingLockOrderRace(observer, admin, timeoutWorker) {
@@ -187,10 +208,10 @@ async function handlingLockOrderRace(observer, admin, timeoutWorker) {
     `UPDATE public.conversations SET inactivity_expires_at=now()+interval '3 minutes' WHERE id=${quote(ids.conversation)};`,
   );
   await admin.ok(`BEGIN;
+    SELECT id FROM public.conversations WHERE id=${quote(ids.conversation)} FOR UPDATE;
     SET LOCAL ROLE authenticated;
     SET LOCAL "request.jwt.claim.role"='authenticated';
-    SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};
-    SELECT id FROM public.conversations WHERE id=${quote(ids.conversation)} FOR UPDATE;`);
+    SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};`);
 
   const timeout = timeoutWorker.query(
     `SELECT private.finish_handling_cycle(${quote(ids.conversation)},${quote(ids.operator)},'timeout',clock_timestamp(),${quote(ids.cycle)});`,
@@ -215,11 +236,19 @@ async function handlingLockOrderRace(observer, admin, timeoutWorker) {
 }
 
 async function multiConversationScannerLockOrderRace(observer, admin, timeoutWorker) {
+  const candidates = await observer.json(`SELECT COALESCE(json_agg(row_to_json(candidate)),'[]'::json) FROM (
+    SELECT conversation.id,conversation.status,conversation.inactivity_expires_at,cycle.ended_at
+    FROM public.conversations conversation
+    JOIN public.conversation_handling_cycles cycle ON cycle.conversation_id=conversation.id
+    WHERE conversation.id IN (${quote(ids.scanConversationFirst)},${quote(ids.scanConversationSecond)})
+    ORDER BY conversation.id
+  ) candidate;`);
+  assert.equal(candidates?.length, 2, `scanner fixture candidates: ${JSON.stringify(candidates)}`);
   await admin.ok(`BEGIN;
+    SELECT id FROM public.conversations WHERE id=${quote(ids.scanConversationSecond)} FOR UPDATE;
     SET LOCAL ROLE authenticated;
     SET LOCAL "request.jwt.claim.role"='authenticated';
-    SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};
-    SELECT id FROM public.conversations WHERE id=${quote(ids.scanConversationSecond)} FOR UPDATE;`);
+    SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};`);
 
   const timeoutScan = timeoutWorker.query("SELECT private.return_stale_work_items_to_new();");
   await waitForLock(observer, timeoutWorker);
@@ -341,20 +370,21 @@ async function cleanupLeaseRace(observer, a, b) {
 }
 
 async function supportFirstResponseRace(observer, a, b) {
-  const sessionSetup = `BEGIN;
-    SET LOCAL ROLE authenticated;
+  const sessionSetup = `SET LOCAL ROLE authenticated;
     SET LOCAL "request.jwt.claim.role"='authenticated';
     SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};`;
-  await Promise.all([a.ok(sessionSetup), b.ok(sessionSetup)]);
-  const outcomes = await Promise.all([
-    a.query(
-      `SELECT public.admin_add_support_ticket_message(${quote(ids.supportTicket)},'first concurrent answer','client',${quote(ids.supportReplyFirst)}); COMMIT;`,
-    ),
-    b.query(
-      `SELECT public.admin_add_support_ticket_message(${quote(ids.supportTicket)},'second concurrent answer','client',${quote(ids.supportReplySecond)}); COMMIT;`,
-    ),
-  ]);
+  await a.ok(`BEGIN; SELECT id FROM public.support_tickets WHERE id=${quote(ids.supportTicket)} FOR UPDATE; ${sessionSetup}`);
+  await b.ok(`BEGIN; ${sessionSetup}`);
+  const waitingResponse = b.query(
+    `SELECT row_to_json(response) FROM public.admin_add_support_ticket_message(${quote(ids.supportTicket)},'second concurrent answer','client',${quote(ids.supportReplySecond)}) response; COMMIT;`,
+  );
+  await waitForLock(observer, b);
+  const firstResponse = await a.query(
+    `SELECT row_to_json(response) FROM public.admin_add_support_ticket_message(${quote(ids.supportTicket)},'first concurrent answer','client',${quote(ids.supportReplyFirst)}) response; COMMIT;`,
+  );
+  const outcomes = [firstResponse, await waitingResponse];
   assert.ok(outcomes.every((outcome) => outcome.failed === "false"));
+  const firstCreatedAt = JSON.parse(firstResponse.lines.at(-1)).created_at;
   assert.equal(
     await observer.json(
       `SELECT to_json(count(*)) FROM public.support_ticket_messages WHERE ticket_id=${quote(ids.supportTicket)} AND visibility='client';`,
@@ -362,24 +392,25 @@ async function supportFirstResponseRace(observer, a, b) {
     2,
     "both distinct client-visible responses are stored",
   );
-  assert.equal(
-    await observer.json(
-      `SELECT to_json(ticket.first_human_response_at = messages.first_created_at)
+  const responseTimes = await observer.json(
+      `SELECT json_build_object('first',ticket.first_human_response_at,'earliest',messages.first_created_at,'messages',messages.message_times)
        FROM public.support_tickets ticket
        CROSS JOIN LATERAL (
-         SELECT min(created_at) AS first_created_at
+         SELECT min(created_at) AS first_created_at,array_agg(created_at ORDER BY created_at) AS message_times
          FROM public.support_ticket_messages
          WHERE ticket_id=ticket.id AND author_kind='admin' AND visibility='client'
        ) messages
        WHERE ticket.id=${quote(ids.supportTicket)};`,
-    ),
-    true,
-    "the row lock preserves exactly the earliest committed human response timestamp",
   );
+  assert.equal(responseTimes.first, firstCreatedAt,
+    `first response timestamp tracks the first committed message: ${JSON.stringify(responseTimes)}`);
+  assert.equal(responseTimes.first, responseTimes.earliest,
+    `the row lock preserves the first response: ${JSON.stringify(responseTimes)}`);
 }
 
 async function cleanup(observer) {
-  await observer.ok(`BEGIN;
+  await observer.ok(`\\set ON_ERROR_STOP on
+    BEGIN;
     DELETE FROM public.support_ticket_messages WHERE ticket_id=${quote(ids.supportTicket)};
     DELETE FROM public.support_tickets WHERE id=${quote(ids.supportTicket)};
     DELETE FROM public.client_media_uploads WHERE id=${quote(ids.upload)};
@@ -391,9 +422,10 @@ async function cleanup(observer) {
     DELETE FROM public.characters WHERE id=${quote(ids.character)};
     DELETE FROM public.operators WHERE id=${quote(ids.operator)};
     DELETE FROM public.credit_wallets WHERE user_id=${quote(ids.client)};
-    DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)});
-    DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)});
-    DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)});
+    DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)},${quote(ids.scanClientFirst)},${quote(ids.scanClientSecond)});
+    DELETE FROM public.client_profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)},${quote(ids.scanClientFirst)},${quote(ids.scanClientSecond)});
+    DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)},${quote(ids.scanClientFirst)},${quote(ids.scanClientSecond)});
+    DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.operatorUser)},${quote(ids.adminUser)},${quote(ids.scanClientFirst)},${quote(ids.scanClientSecond)});
     COMMIT;`);
 }
 
