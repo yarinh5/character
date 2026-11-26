@@ -4340,6 +4340,15 @@ export type Database = {
           state: string;
         }[];
       };
+      get_operator_online_context: {
+        Args: { _conversation_ids: string[] };
+        Returns: {
+          client_age: number | null;
+          client_city: string | null;
+          conversation_id: string;
+          under_other_operator: boolean;
+        }[];
+      };
       get_operator_media_catalog: {
         Args: { _conversation_id: string };
         Returns: {

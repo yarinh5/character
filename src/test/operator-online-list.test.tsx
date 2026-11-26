@@ -11,6 +11,11 @@ type ConversationRow = {
   client_id: string;
   characters: { id: string; name: string; avatar_url: string | null };
   profiles: { display_name: string; avatar_url: string | null };
+  client_context?: {
+    client_age: number | null;
+    client_city: string | null;
+    under_other_operator: boolean;
+  };
 };
 
 const query = vi.hoisted(() => ({
@@ -89,6 +94,7 @@ const rows: ConversationRow[] = [
     client_id: "client-a",
     characters: { id: "character-a", name: "נועה", avatar_url: null },
     profiles: { display_name: "אייל", avatar_url: null },
+    client_context: { client_age: 29, client_city: "נמל הבדיקה", under_other_operator: true },
   },
   {
     id: "conversation-newest",
@@ -99,6 +105,7 @@ const rows: ConversationRow[] = [
     client_id: "client-b",
     characters: { id: "character-b", name: "מאיה", avatar_url: null },
     profiles: { display_name: "בר", avatar_url: null },
+    client_context: { client_age: 48, client_city: "גבעת הבדיקה", under_other_operator: false },
   },
   {
     id: "conversation-closed",
@@ -130,10 +137,28 @@ beforeEach(() => {
 });
 
 describe("ONLINE conversation list", () => {
+  it("finds a conversation by authorized city or exact age and identifies read-only rows", () => {
+    renderPage();
+    const search = screen.getByRole("textbox");
+    fireEvent.change(search, { target: { value: "נמל הבדיקה" } });
+    const match = screen.getByRole("link", { name: /אייל/ });
+    expect(match).toHaveTextContent("נמל הבדיקה");
+    expect(match).toHaveTextContent("29");
+    expect(match).toHaveTextContent("קריאה בלבד");
+    expect(screen.queryByText("בר")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "48" } });
+    expect(screen.getByRole("link", { name: /בר/ })).toBeInTheDocument();
+    expect(screen.queryByText("אייל")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "4" } });
+    expect(screen.getByText("לא נמצאו שיחות תואמות")).toBeInTheDocument();
+  });
+
   it("keeps search and filters labelled with 44px minimum touch targets", () => {
     renderPage();
 
-    expect(screen.getByRole("textbox", { name: "חיפוש שיחות לפי שם לקוח" })).toHaveClass(
+    expect(screen.getByRole("textbox", { name: "חיפוש שיחות לפי שם, עיר או גיל" })).toHaveClass(
       "min-h-11",
     );
     for (const name of ["הכל", "ממתינות", "פתוחות", "נענו", "סגורות", "כל הדמויות", "מאיה"]) {
@@ -166,14 +191,14 @@ describe("ONLINE conversation list", () => {
   it("keeps local search and status and character filters", () => {
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "בר" },
     });
     expect(screen.getByText("בר")).toBeInTheDocument();
     expect(screen.queryByText("אייל")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "הכל" }));
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: "סגורות" }));
@@ -225,7 +250,7 @@ describe("ONLINE conversation list", () => {
 
     query.data = rows;
     view.rerender(<ConversationsPage />);
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "לא קיים" },
     });
     expect(screen.getByText("לא נמצאו שיחות תואמות")).toBeInTheDocument();

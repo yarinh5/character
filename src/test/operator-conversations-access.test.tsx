@@ -6,6 +6,9 @@ const state = vi.hoisted(() => ({
   userId: "user-a" as string | undefined,
   accessCallback: null as null | (() => void),
   subscriptionCallback: null as null | ((status: string) => void),
+  contextAllowed: true,
+  contextFieldsAvailable: true,
+  contextCall: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -108,6 +111,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     channel: vi.fn(() => channel),
     from: vi.fn((table: string) => queryFor(table)),
+    rpc: state.contextCall,
     removeChannel: vi.fn(),
   },
 }));
@@ -118,11 +122,62 @@ beforeEach(() => {
   state.userId = "user-a";
   state.accessCallback = null;
   state.subscriptionCallback = null;
+  state.contextAllowed = true;
+  state.contextFieldsAvailable = true;
+  state.contextCall.mockReset().mockImplementation(async () => ({
+    data: state.contextAllowed
+      ? [
+          {
+            conversation_id: "conversation-a",
+            client_age: state.contextFieldsAvailable ? 29 : null,
+            client_city: state.contextFieldsAvailable ? "Sensitive City" : null,
+            under_other_operator: false,
+          },
+        ]
+      : [],
+    error: null,
+  }));
   channel.on.mockClear();
   channel.subscribe.mockClear();
 });
 
 describe("operator conversation list access lifecycle", () => {
+  it("hides the whole row if authority is lost between list and context reads", async () => {
+    state.contextAllowed = false;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OperatorConversationsPage />
+      </QueryClientProvider>,
+    );
+    act(() => state.subscriptionCallback?.("SUBSCRIBED"));
+    expect(await screen.findByText("אין שיחות")).toBeInTheDocument();
+    expect(screen.queryByText("Sensitive preview")).not.toBeInTheDocument();
+    expect(state.contextCall).toHaveBeenCalledWith("get_operator_online_context", {
+      _conversation_ids: ["conversation-a"],
+    });
+  });
+
+  it("clears cached age and city when the access version changes", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OperatorConversationsPage />
+      </QueryClientProvider>,
+    );
+    act(() => state.subscriptionCallback?.("SUBSCRIBED"));
+    await screen.findByText("Sensitive City");
+    expect(screen.getByText("גיל 29")).toBeInTheDocument();
+
+    state.contextFieldsAvailable = false;
+    act(() => state.accessCallback?.());
+    expect(screen.queryByText("Sensitive City")).not.toBeInTheDocument();
+    await screen.findByText("Sensitive Client");
+    expect(screen.queryByText("גיל 29")).not.toBeInTheDocument();
+    const cache = queryClient.getQueriesData({ queryKey: ["operator-conversations", "user-a"] });
+    expect(JSON.stringify(cache)).not.toContain("Sensitive City");
+  });
+
   it("gates the user-bound cache on subscription health and clears it on failure/logout", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(

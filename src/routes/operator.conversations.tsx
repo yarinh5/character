@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
 import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
@@ -16,6 +17,9 @@ export const Route = createFileRoute("/operator/conversations")({
   component: OperatorConversationsPage,
 });
 
+type OnlineContext =
+  Database["public"]["Functions"]["get_operator_online_context"]["Returns"][number];
+
 type Row = {
   id: string;
   status: string;
@@ -27,6 +31,7 @@ type Row = {
   sla_minutes_waiting?: number;
   characters: { id: string; name: string; avatar_url: string | null } | null;
   profiles: { display_name: string | null; avatar_url: string | null } | null;
+  client_context: OnlineContext;
 };
 
 const FILTERS = [
@@ -113,18 +118,32 @@ export function OperatorConversationsPage() {
         );
       }
 
-      const [unread, slaRisks] = await Promise.all([
-        fetchUnreadCounts((data ?? []).map((c) => c.id)),
+      const conversationIds = (data ?? []).map((c) => c.id);
+      if (conversationIds.length === 0) return [];
+      const [unread, slaRisks, context] = await Promise.all([
+        fetchUnreadCounts(conversationIds),
         fetchSlaRiskConversations(100),
+        supabase.rpc("get_operator_online_context", { _conversation_ids: conversationIds }),
       ]);
+      if (context.error) throw context.error;
       const slaMap = new Map(slaRisks.map((risk) => [risk.conversation_id, risk]));
-      return (data ?? []).map((c) => ({
-        ...c,
-        operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
-        is_sla_risk: slaMap.has(c.id),
-        sla_minutes_waiting: slaMap.get(c.id)?.minutes_waiting,
-        profiles: profileMap.get(c.client_id) ?? null,
-      })) as Row[];
+      const contextsByConversation = new Map(
+        (context.data ?? []).map((row) => [row.conversation_id, row]),
+      );
+      return (data ?? []).flatMap((c): Row[] => {
+        const clientContext = contextsByConversation.get(c.id);
+        if (!clientContext) return [];
+        return [
+          {
+            ...c,
+            operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
+            is_sla_risk: slaMap.has(c.id),
+            sla_minutes_waiting: slaMap.get(c.id)?.minutes_waiting,
+            profiles: profileMap.get(c.client_id) ?? null,
+            client_context: clientContext,
+          },
+        ];
+      });
     },
     enabled: Boolean(user?.id) && accessChannelState === "ready",
     refetchInterval: 30000,
@@ -207,7 +226,12 @@ export function OperatorConversationsPage() {
     if (characterFilter !== "all") list = list.filter((c) => c.characters?.id === characterFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((c) => (c.profiles?.display_name ?? "").toLowerCase().includes(q));
+      list = list.filter(
+        (c) =>
+          (c.profiles?.display_name ?? "").toLowerCase().includes(q) ||
+          (c.client_context?.client_city ?? "").toLowerCase().includes(q) ||
+          String(c.client_context?.client_age ?? "") === q,
+      );
     }
     // unread first, then last_message_at
     return [...list].sort((a, b) => {
@@ -246,8 +270,8 @@ export function OperatorConversationsPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            aria-label="חיפוש שיחות לפי שם לקוח"
-            placeholder="חיפוש לפי שם לקוח..."
+            aria-label="חיפוש שיחות לפי שם, עיר או גיל"
+            placeholder="שם, עיר או גיל"
             className="min-h-11 pr-9"
           />
         </div>
@@ -391,7 +415,20 @@ export function OperatorConversationsPage() {
                     <span className="text-xs text-muted-foreground truncate">
                       {c.profiles?.display_name ?? "לקוח"}
                     </span>
+                    {c.client_context?.client_city && (
+                      <span className="text-xs text-muted-foreground break-words">
+                        {c.client_context.client_city}
+                      </span>
+                    )}
+                    {c.client_context?.client_age != null && (
+                      <span className="text-xs text-muted-foreground">
+                        גיל {c.client_context.client_age}
+                      </span>
+                    )}
                     <ConversationStatusBadge status={c.status} />
+                    {c.client_context?.under_other_operator && (
+                      <span className="text-xs font-medium">קריאה בלבד</span>
+                    )}
                     {c.is_sla_risk && (
                       <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
                         בסיכון {c.sla_minutes_waiting} דק׳

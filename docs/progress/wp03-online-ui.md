@@ -54,3 +54,29 @@ The defined frontend-only ONLINE alignment slice is implemented and verified. Th
 - Cause: ONLINE search inherited a 36px input, and status/character filter buttons had no 44px minimum target or pressed-state semantics. The search input had only placeholder text, not an accessible name.
 - Change: search, filter, retry and reset controls now have `min-h-11`; search has a name and both filter groups expose `aria-pressed`. Query, authorization, subscription and filtering logic are unchanged.
 - Evidence: the new regression failed on the old DOM and passed after the edit. The ONLINE list/routing/access suites passed 12/12, full Vitest 783/783, typecheck, changed-file lint/format and client/SSR build passed. Live authenticated browser measurement, mobile layout and Product acceptance remain NOT RUN.
+
+## Authorized search and read-only state (2026-11-26)
+
+- Live RED: the old URL redirected correctly and the viewer saw only their assigned character's
+  conversations, but neither an existing city nor an exact age matched the name-only search.
+- The list now uses one bounded server projection also checked against current read authority.
+  It adds only city, age and whether an active cycle belongs to another operator. It drops
+  rows that lose authorization between the list and context reads. It does not grant raw
+  profile access or acquire or change responsibility. Retired cities are not returned.
+- Browser at 375px RTL: no horizontal overflow, 44px search, city and age matches. The reader's
+  composer and media controls were disabled, while the owner could use the composer. Real Auth
+  and PostgREST denied unrelated metadata, the client role, a non-owner send and the retired
+  outreach action. The owner cycle and conversation history were unchanged.
+- Profile/deletion state and recovery transitions notify the existing per-user access version;
+  no profile, deletion or incident content is published. After confirmed PostgreSQL subscription
+  registration, a live reader received only `user_id`, `version` and `updated_at`, and the next
+  read withheld age and city. A channel join acknowledgement alone did not establish CDC
+  readiness; delivery during the initial subscription setup window is not proven.
+- Final PostgreSQL TAP: 50/50 access and 42/42 recovery. Full Vitest: 833/833; typecheck and
+  affected lint/format passed. Both local synthetic stacks were removed after ownership and
+  references were checked; existing inventories matched. Evidence is in
+  `F:/project love/character/.codex-task/wp03-online-browser-20261126-01` and
+  `F:/project love/character/.codex-task/wp03-online-final-20261126-02`.
+
+General client activity presence (R03.5) remains open; last-message activity and the separate
+P05 operator-heartbeat projection are not substitutes. This is not integrated Product PASS.
