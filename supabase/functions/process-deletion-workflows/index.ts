@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { runDeletionWorkflowStep, type DeletionKind } from "./orchestration.ts";
+import { storageObjectExistsByInfo } from "./storage-verification.ts";
 
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
@@ -65,14 +66,9 @@ Deno.serve(async (request) => {
           if (error) throw new Error("storage_delete_failed");
         },
         async storageObjectExists(bucketId, objectPath) {
-          const separator = objectPath.lastIndexOf("/");
-          const folder = separator < 0 ? "" : objectPath.slice(0, separator);
-          const name = separator < 0 ? objectPath : objectPath.slice(separator + 1);
-          const { data, error } = await trusted.storage
-            .from(bucketId)
-            .list(folder, { limit: 2, search: name });
-          if (error) throw new Error("storage_verification_failed");
-          return (data ?? []).some((entry) => entry.name === name);
+          return storageObjectExistsByInfo(objectPath, (path) =>
+            trusted.storage.from(bucketId).info(path),
+          );
         },
         async completeStorageObject(requestKind, requestId, claimToken, object) {
           const { error } = await trusted.rpc("complete_deletion_storage_object_for_server", {
