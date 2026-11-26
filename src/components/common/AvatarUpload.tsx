@@ -38,6 +38,7 @@ export function AvatarUpload({
   cancelCompletionOnUnmount = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadButtonRef = useRef<HTMLButtonElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const alive = useRef(true);
   const [busy, setBusy] = useState(false);
@@ -170,6 +171,7 @@ export function AvatarUpload({
           />
           <div className="flex flex-wrap gap-2">
             <Button
+              ref={uploadButtonRef}
               type="button"
               variant="outline"
               size="sm"
@@ -205,7 +207,16 @@ export function AvatarUpload({
           else if (!busy) clearSelection();
         }}
       >
-        <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogContent
+          dir="rtl"
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            const opener = uploadButtonRef.current;
+            if (!opener || opener.disabled) return;
+            event.preventDefault();
+            opener.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>חיתוך תמונת פרופיל</DialogTitle>
           </DialogHeader>

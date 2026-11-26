@@ -301,3 +301,26 @@ The task resources were removed without changing the pre-existing inventory.
 Evidence: `wp04-conversation-reopen-20261126-01/REPORT.md` in local task
 evidence. This verifies the scoped AC11 route, not the formal Product run or
 a backfill of previously split histories.
+
+## Profile images in a browser, 2026-11-26
+
+- The authenticated profile owner uploaded two synthetic WebP files via the
+  browser crop dialog. Both served from Storage and decoded at 512×512.
+  Choosing a different primary and reordering by keyboard persisted through
+  reload. Removing the primary selected the remaining image and updated the
+  avatar projection. The old object stayed in Storage under the owner's
+  folder, with one `pending_reference_check` row, not a client-side deletion.
+- The crop dialog sent focus to the document body on Escape. Its custom
+  file chooser opener is not a Radix dialog trigger, so the close handler
+  now explicitly restores focus to that button when available. Escape and
+  keyboard Cancel returned focus in the browser; the 375px RTL Escape check
+  showed no horizontal overflow. Two direct regressions were RED before the
+  change. No upload or image change occurred on cancellation.
+- Live SQL suites passed 146/146, including 12 image management checks;
+  full Vitest passed 828/828, typecheck passed, and the final focused
+  Vitest run passed 63/63.
+  A different authenticated user received `profile_image_not_owned`
+  when trying to persist the owner's object. The task removed only its own
+  resources. Evidence:
+  `F:/project love/character/.codex-task/wp04-profile-20261126-01/REPORT.md`.
+  Onboarding, provider delivery and formal Product acceptance are separate.
