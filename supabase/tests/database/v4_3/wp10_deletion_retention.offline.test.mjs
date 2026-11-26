@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const baseMigrationUrl = new URL(
@@ -45,6 +45,42 @@ function intervalDays(fragment) {
   assert.ok(match, `expected a day interval in ${fragment}`);
   return Number(match[1]);
 }
+
+test("conversation status and client text writers check the deletion gate under the row lock", () => {
+  const directory = new URL("../../../migrations/", import.meta.url);
+  const migrations = readdirSync(directory)
+    .filter((entry) => entry.endsWith(".sql"))
+    .sort()
+    .reverse();
+  for (const [name, mutation] of [
+    ["admin_set_conversation_status", /UPDATE public\.conversations/i],
+    ["send_client_message", /INSERT INTO public\.credit_wallets/i],
+  ]) {
+    const declaration = new RegExp(
+      `CREATE(?: OR REPLACE)? FUNCTION\\s+public\\.${name}\\s*\\(`,
+      "i",
+    );
+    let body;
+    for (const migration of migrations) {
+      const source = readFileSync(new URL(migration, directory), "utf8");
+      const start = source.search(declaration);
+      if (start < 0) continue;
+      const definition = source.slice(start);
+      const delimiter = /\bAS\s+(\$\w*\$)/i.exec(definition);
+      assert.ok(delimiter, `${name} must have a body`);
+      const bodyStart = delimiter.index + delimiter[0].length;
+      const bodyEnd = definition.indexOf(delimiter[1], bodyStart);
+      assert.ok(bodyEnd > bodyStart, `${name} must have a complete body`);
+      body = definition.slice(bodyStart, bodyEnd);
+      break;
+    }
+    assert.ok(body, `${name} must have an effective definition`);
+    const rowLock = body.search(/FOR UPDATE/i);
+    const gate = body.indexOf("private.conversation_deletion_blocks_access(");
+    const write = body.search(mutation);
+    assert.ok(rowLock >= 0 && gate > rowLock && write > gate, `${name}: gate must precede writes`);
+  }
+});
 
 test("confirmation establishes immutable server-time cancellation and content deadlines", () => {
   const body = functionBody("verify_account_deletion_for_server");
