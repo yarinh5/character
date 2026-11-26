@@ -485,13 +485,78 @@ export function discoverReadAccessTarget() {
   const cliVersion = run(SUPABASE_CLI_EXECUTABLE, ["--version"]).trim();
   assert.equal(cliVersion, "2.95.4");
   const dockerContext = run("docker", ["context", "show"]).trim();
-  const dockerEngineId = run("docker", ["info", "--format", "{{.ID}}"]).trim();
-  assert.match(dockerEngineId, /^[0-9a-f-]{36}$/i);
-  if (dockerContext === "default") {
+  const {
+    PRODUCT_DOCKER_CONTEXT: productContext,
+    PRODUCT_DOCKER_ENDPOINT: productEndpoint,
+    PRODUCT_EXPECTED_ENGINE_ID: expectedEngine,
+    PRODUCT_FORBIDDEN_ENGINE_ID: forbiddenEngine,
+  } = process.env;
+  const productBound = [productContext, productEndpoint, expectedEngine, forbiddenEngine].some(
+    (value) => value !== undefined,
+  );
+  const engineIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  let dockerEndpoint = null;
+  if (productBound) {
+    // These values are bound by the Product entrypoint; discovery does not select another target.
+    for (const key of ["DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"]) {
+      assert.ok(!process.env[key], `${key} override is not permitted in Product`);
+    }
+    assert.match(
+      productContext ?? "",
+      /^[a-z0-9][a-z0-9_.-]*$/i,
+      "missing or invalid Product context",
+    );
+    assert.ok(
+      !["default", "desktop-linux"].includes(productContext),
+      "Product requires its own named context",
+    );
+    assert.equal(process.env.DOCKER_CONTEXT, productContext, "Product DOCKER_CONTEXT mismatch");
+    assert.equal(dockerContext, productContext, "Product Docker context drift");
+    assert.equal(
+      productEndpoint,
+      "unix:///run/docker.sock",
+      "Product requires the local Docker socket",
+    );
+    assert.match(
+      expectedEngine ?? "",
+      engineIdPattern,
+      "missing or invalid Product expected engine ID",
+    );
+    assert.match(
+      forbiddenEngine ?? "",
+      engineIdPattern,
+      "missing or invalid Product forbidden engine ID",
+    );
+    assert.notEqual(
+      expectedEngine.toLowerCase(),
+      forbiddenEngine.toLowerCase(),
+      "Product cannot bind the shared engine",
+    );
+    dockerEndpoint = run("docker", [
+      "context",
+      "inspect",
+      productContext,
+      "--format",
+      "{{.Endpoints.docker.Host}}",
+    ]).trim();
+    assert.equal(dockerEndpoint, productEndpoint, "Product Docker endpoint drift");
+  } else if (dockerContext === "default") {
     assert.equal(process.env.DOCKER_HOST, "unix:///var/run/docker.sock");
-    assert.equal(dockerEngineId, process.env.CODEX_ISOLATED_DOCKER_ENGINE_ID);
   } else {
     assert.equal(dockerContext, "desktop-linux");
+  }
+
+  const dockerEngineId = run("docker", ["info", "--format", "{{.ID}}"]).trim();
+  assert.match(dockerEngineId, /^[0-9a-f-]{36}$/i);
+  if (productBound) {
+    assert.notEqual(
+      dockerEngineId.toLowerCase(),
+      forbiddenEngine.toLowerCase(),
+      "Product reached the shared engine",
+    );
+    assert.equal(dockerEngineId, expectedEngine, "Product Docker engine drift");
+  } else if (dockerContext === "default") {
+    assert.equal(dockerEngineId, process.env.CODEX_ISOLATED_DOCKER_ENGINE_ID);
   }
   const status = JSON.parse(supabase(["status", "--output", "json"]));
   for (const [label, value, expectedPort] of [
@@ -510,6 +575,7 @@ export function discoverReadAccessTarget() {
     db: inspect(dbName, "5432/tcp", dbPort, true),
     dbPort,
     dockerContext,
+    dockerEndpoint,
     dockerEngineId,
     projectId,
   };
@@ -521,6 +587,7 @@ export function assertFrozenReadAccessTarget(reference, candidate, options = {})
     "configHash",
     "cliVersion",
     "dockerContext",
+    "dockerEndpoint",
     "dockerEngineId",
     "apiPort",
     "dbPort",

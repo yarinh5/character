@@ -108,6 +108,18 @@ async function attributedSubprocessReport(error, options = {}) {
 }
 
 test("discovery retains running and DB-health guards without requiring API health", (t) => {
+  for (const key of [
+    "PRODUCT_DOCKER_CONTEXT",
+    "PRODUCT_DOCKER_ENDPOINT",
+    "PRODUCT_EXPECTED_ENGINE_ID",
+    "PRODUCT_FORBIDDEN_ENGINE_ID",
+  ]) {
+    const original = process.env[key];
+    delete process.env[key];
+    t.after(() => {
+      if (original !== undefined) process.env[key] = original;
+    });
+  }
   const config = readFileSync(new URL("../../config.toml", import.meta.url), "utf8");
   const configuredPort = (section) =>
     Number(config.match(new RegExp(`\\[${section}\\][\\s\\S]*?\\nport\\s*=\\s*(\\d+)`))[1]);
@@ -122,6 +134,7 @@ test("discovery retains running and DB-health guards without requiring API healt
       return "2.95.4";
     }
     if (args[0] === "context") return "desktop-linux";
+    if (args[0] === "info") return "11111111-2222-4333-8444-555555555555";
     if (args[0] === "status") {
       return JSON.stringify({
         API_URL: `http://127.0.0.1:${apiPort}`,
@@ -158,6 +171,110 @@ test("discovery retains running and DB-health guards without requiring API healt
     dbHealth = "starting";
     assert.throws(() => discoverReadAccessTarget(), /healthy/);
   } finally {
+    mock.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test("Product read-access discovery requires the admitted local Docker binding", (t) => {
+  const context = "product-owned-fixture";
+  const endpoint = "unix:///run/docker.sock";
+  const engine = "11111111-2222-4333-8444-555555555555";
+  const forbidden = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const baseline = {
+    DOCKER_CONTEXT: context,
+    DOCKER_HOST: undefined,
+    DOCKER_TLS_VERIFY: undefined,
+    DOCKER_CERT_PATH: undefined,
+    PRODUCT_DOCKER_CONTEXT: context,
+    PRODUCT_DOCKER_ENDPOINT: endpoint,
+    PRODUCT_EXPECTED_ENGINE_ID: engine,
+    PRODUCT_FORBIDDEN_ENGINE_ID: forbidden,
+  };
+  const originals = Object.fromEntries(Object.keys(baseline).map((key) => [key, process.env[key]]));
+  function configure(values) {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+  const config = readFileSync(new URL("../../config.toml", import.meta.url), "utf8");
+  const port = (section) =>
+    Number(config.match(new RegExp(`\\[${section}\\][\\s\\S]*?\\nport\\s*=\\s*(\\d+)`))[1]);
+  const observed = { context, endpoint, engine };
+  const queries = [];
+  const mock = t.mock.method(childProcess, "execFileSync", (command, args) => {
+    queries.push([command, ...args]);
+    if (command === SUPABASE_CLI_EXECUTABLE && args[0] === "--version") return "2.95.4";
+    if (args[0] === "context" && args[1] === "show") return observed.context;
+    if (args[0] === "context" && args[1] === "inspect") {
+      assert.deepEqual(args, [
+        "context",
+        "inspect",
+        context,
+        "--format",
+        "{{.Endpoints.docker.Host}}",
+      ]);
+      return observed.endpoint;
+    }
+    if (args[0] === "info") return observed.engine;
+    if (args[0] === "status") {
+      return JSON.stringify({
+        API_URL: `http://127.0.0.1:${port("api")}`,
+        DB_URL: `postgresql://127.0.0.1:${port("db")}/postgres`,
+      });
+    }
+    assert.equal(args[0], "inspect");
+    const db = args[1].startsWith("supabase_db_");
+    return JSON.stringify([
+      {
+        Name: `/${args[1]}`,
+        Id: (db ? "d" : "a").repeat(64),
+        State: { Running: true, Health: { Status: "healthy" } },
+        NetworkSettings: {
+          Ports: {
+            [db ? "5432/tcp" : "8000/tcp"]: [{ HostPort: String(port(db ? "db" : "api")) }],
+          },
+        },
+      },
+    ]);
+  });
+  syncBuiltinESMExports();
+  try {
+    configure(baseline);
+    const discovered = discoverReadAccessTarget();
+    assert.equal(discovered.dockerContext, context);
+    assert.equal(discovered.dockerEndpoint, endpoint);
+    assert.equal(discovered.dockerEngineId, engine);
+    assert.throws(
+      () =>
+        assertFrozenReadAccessTarget(discovered, { ...discovered, dockerEndpoint: "ssh://other" }),
+      /dockerEndpoint drift/,
+    );
+    for (const [override, drift, error] of [
+      [{ PRODUCT_FORBIDDEN_ENGINE_ID: undefined }, {}, /forbidden engine ID/],
+      [{ PRODUCT_EXPECTED_ENGINE_ID: forbidden }, {}, /shared engine/],
+      [{ DOCKER_CONTEXT: "default" }, {}, /DOCKER_CONTEXT/],
+      [{ DOCKER_HOST: "unix:///var/run/docker.sock" }, {}, /DOCKER_HOST/],
+      [{ DOCKER_TLS_VERIFY: "1" }, {}, /DOCKER_TLS_VERIFY/],
+      [{ DOCKER_CERT_PATH: "foreign" }, {}, /DOCKER_CERT_PATH/],
+      [{ PRODUCT_DOCKER_ENDPOINT: "tcp://127.0.0.1:2375" }, {}, /local Docker socket/],
+      [{}, { context: "desktop-linux" }, /Docker context drift/],
+      [{}, { endpoint: "ssh://other" }, /Docker endpoint drift/],
+      [{}, { engine: forbidden }, /Docker engine drift|shared engine/],
+      [{}, { engine: "22222222-3333-4444-8555-666666666666" }, /Docker engine drift/],
+    ]) {
+      configure({ ...baseline, ...override });
+      Object.assign(observed, { context, endpoint, engine }, drift);
+      queries.length = 0;
+      assert.throws(() => discoverReadAccessTarget(), error);
+      assert.equal(
+        queries.some(([, command]) => command === "status" || command === "inspect"),
+        false,
+      );
+    }
+  } finally {
+    configure(originals);
     mock.mock.restore();
     syncBuiltinESMExports();
   }
