@@ -255,29 +255,16 @@ export const adminSoftDeleteUser = createServerFn({ method: "POST" })
     await ensureNotAdminTarget(data.user_id);
     const { data: profile, error: lookupError } = await supabaseAdmin
       .from("profiles")
-      .select("email, deleted_at")
+      .select("user_id")
       .eq("user_id", data.user_id)
       .maybeSingle();
     if (lookupError) throw new Error(lookupError.message);
     if (!profile) throw new Error("משתמש לא נמצא");
     await setAuthBan(data.user_id, true);
-    const deletedAt = profile.deleted_at ?? new Date().toISOString();
-    const tag = `deleted+${Date.now()}@deleted.local`;
-    const { error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .update({
-        status: "blocked",
-        deleted_at: deletedAt,
-        display_name: "משתמש מחוק",
-        email: tag,
-      })
-      .eq("user_id", data.user_id);
-    if (profileError) throw new Error(profileError.message);
-    const { error: operatorError } = await supabaseAdmin
-      .from("operators")
-      .update({ is_active: false, availability_status: "offline", deleted_at: deletedAt })
-      .eq("user_id", data.user_id);
-    if (operatorError) throw new Error(operatorError.message);
-    await logAudit(context.userId, "user.soft_deleted", "user", data.user_id);
+    const { data: archived, error } = await context.supabase.rpc("admin_soft_delete_user", {
+      _user_id: data.user_id,
+    });
+    if (error) throw new Error(error.message);
+    if (archived !== true) throw new Error("soft_delete_not_confirmed");
     return { ok: true };
   });
