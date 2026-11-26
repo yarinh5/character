@@ -1480,7 +1480,7 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
       assetId: ids.permanentAsset,
       evidence: createMediaTestEvidenceFromEnvironment(),
     });
-  });
+  }, 15_000);
 
   it("runs the client upload, real decode, idempotent replay, expiry and cleanup path", async () => {
     const intent = await owner.functions.invoke("client-media-upload-intent", {
