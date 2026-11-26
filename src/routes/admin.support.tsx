@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { formatSupportTarget, getSupportFirstResponseState } from "@/lib/supportSla";
+import { submitSupportAttempt } from "@/lib/supportWorkflow";
 
 export const Route = createFileRoute("/admin/support")({ component: AdminSupportPage });
 
@@ -39,6 +40,7 @@ const responseStateLabels: Record<string, string> = {
 
 function AdminSupportPage() {
   const qc = useQueryClient();
+  const pendingSubmissions = useRef(new Map<string, string>());
   const [ticketFilter, setTicketFilter] = useState("open");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [fromDate, setFromDate] = useState("");
@@ -170,15 +172,23 @@ function AdminSupportPage() {
       visibility: "client" | "internal";
     }) => {
       if (!selected) throw new Error("ticket_required");
-      const { data, error } = await supabase.rpc("admin_add_support_ticket_message", {
-        _ticket_id: selected.id,
-        _body: body.trim(),
-        _visibility: visibility,
-        _idempotency_key: crypto.randomUUID(),
-      });
-      if (error) throw error;
-      if (!data?.[0]?.id) throw new Error("support_message_not_verified");
-      return data[0];
+      const ticketId = selected.id;
+      const text = body.trim();
+      return submitSupportAttempt(
+        pendingSubmissions.current,
+        ["admin-message", ticketId, visibility, text],
+        async (idempotencyKey) => {
+          const { data, error } = await supabase.rpc("admin_add_support_ticket_message", {
+            _ticket_id: ticketId,
+            _body: text,
+            _visibility: visibility,
+            _idempotency_key: idempotencyKey,
+          });
+          if (error) throw error;
+          if (!data?.[0]?.id) throw new Error("support_message_not_verified");
+          return data[0];
+        },
+      );
     },
     onSuccess: async (_, variables) => {
       if (variables.visibility === "client") setReply("");
@@ -188,22 +198,33 @@ function AdminSupportPage() {
         variables.visibility === "client" ? "התשובה נשמרה ונמסרה במוצר" : "ההערה הפנימית נשמרה",
       );
     },
-    onError: () => toast.error("ההודעה לא נשמרה; לא הוצגה הצלחה"),
+    onError: () => toast.error("לא ניתן לאשר שההודעה נשמרה. אפשר לשלוח שוב את אותה הטיוטה."),
   });
   const createIncident = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.rpc("admin_create_support_incident", {
-        _incident_type: incident.incidentType,
-        _severity: incident.severity,
-        _title: incident.title.trim(),
-        _details: incident.details.trim(),
-        _owner_admin_id: draftAssignee || null,
-        _ticket_ids: selected ? [selected.id] : [],
-        _idempotency_key: crypto.randomUUID(),
-      });
-      if (error) throw error;
-      if (!data?.[0]?.id) throw new Error("incident_not_verified");
-      return data[0];
+      const { incidentType, severity } = incident;
+      const title = incident.title.trim();
+      const details = incident.details.trim();
+      const ticketId = selected?.id ?? null;
+      const ownerId = draftAssignee || null;
+      return submitSupportAttempt(
+        pendingSubmissions.current,
+        ["incident", incidentType, severity, title, details, ownerId, ticketId],
+        async (idempotencyKey) => {
+          const { data, error } = await supabase.rpc("admin_create_support_incident", {
+            _incident_type: incidentType,
+            _severity: severity,
+            _title: title,
+            _details: details,
+            _owner_admin_id: ownerId,
+            _ticket_ids: ticketId ? [ticketId] : [],
+            _idempotency_key: idempotencyKey,
+          });
+          if (error) throw error;
+          if (!data?.[0]?.id) throw new Error("incident_not_verified");
+          return data[0];
+        },
+      );
     },
     onSuccess: async (saved) => {
       setIncident((value) => ({ ...value, title: "", details: "" }));
@@ -214,7 +235,7 @@ function AdminSupportPage() {
           : "האירוע נשמר והסלמה פנימית נוצרה",
       );
     },
-    onError: () => toast.error("האירוע לא נשמר"),
+    onError: () => toast.error("לא ניתן לאשר שהאירוע נשמר. אפשר לשלוח שוב את אותה הטיוטה."),
   });
   const updateIncident = useMutation({
     mutationFn: async () => {

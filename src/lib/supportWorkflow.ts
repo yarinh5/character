@@ -1,12 +1,21 @@
 export type SupportCategory =
-  | "account"
-  | "conversation"
-  | "billing"
-  | "privacy"
-  | "technical"
-  | "other";
+  "account" | "conversation" | "billing" | "privacy" | "technical" | "other";
 
 export type SupportTicketStatus = "new" | "in_progress" | "waiting_for_client" | "closed";
+
+export async function submitSupportAttempt<T>(
+  pending: Map<string, string>,
+  identity: readonly (string | null)[],
+  submit: (idempotencyKey: string) => Promise<T>,
+) {
+  const fingerprint = JSON.stringify(identity);
+  const key = pending.get(fingerprint) ?? crypto.randomUUID();
+  pending.set(fingerprint, key);
+  // A rejected response does not tell us whether the server committed the write.
+  const confirmed = await submit(key);
+  pending.delete(fingerprint);
+  return confirmed;
+}
 
 export type CreateSupportTicketInput = {
   subject: string;

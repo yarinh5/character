@@ -1001,7 +1001,8 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   assert.ok(selected.includes("src/test/client-liked-entries.test.tsx"));
   assert.ok(selected.includes("src/test/admin-dashboard-aggregate.test.ts"));
   assert.ok(selected.includes("src/test/admin-mobile-navigation.test.tsx"));
-  assert.equal(selected.length, 82);
+  assert.ok(selected.includes("src/test/support-route-retry.test.tsx"));
+  assert.equal(selected.length, 83);
 
   const http = testFiles.filter((path) => path.startsWith("supabase/tests/http/"));
   assert.deepEqual(http, PRODUCT_HTTP_FILES);

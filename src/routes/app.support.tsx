@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { LifeBuoy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,7 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { formatSupportTarget, getSupportFirstResponseState } from "@/lib/supportSla";
-import { createSupportTicketWithDependencies, type SupportCategory } from "@/lib/supportWorkflow";
+import {
+  createSupportTicketWithDependencies,
+  submitSupportAttempt,
+  type SupportCategory,
+} from "@/lib/supportWorkflow";
 
 export const Route = createFileRoute("/app/support")({ component: ClientSupportPage });
 
@@ -31,6 +35,7 @@ const responseStateLabels: Record<string, string> = {
 
 function ClientSupportPage() {
   const qc = useQueryClient();
+  const pendingSubmissions = useRef(new Map<string, string>());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState({ subject: "", category: "technical", description: "" });
   const [message, setMessage] = useState("");
@@ -69,26 +74,27 @@ function ClientSupportPage() {
 
   const createTicket = useMutation({
     mutationFn: async () =>
-      createSupportTicketWithDependencies(
-        {
-          ...form,
-          category: form.category as SupportCategory,
-          idempotencyKey: crypto.randomUUID(),
-        },
-        {
-          async create(input) {
-            const { data, error } = await supabase.rpc("create_support_ticket", {
-              _subject: input.subject,
-              _category: input.category,
-              _description: input.description,
-              _idempotency_key: input.idempotencyKey,
-            });
-            if (error) throw error;
-            const saved = data?.[0];
-            if (!saved?.id) throw new Error("support_ticket_not_verified");
-            return saved;
-          },
-        },
+      submitSupportAttempt(
+        pendingSubmissions.current,
+        ["ticket", form.subject.trim(), form.category, form.description.trim()],
+        (idempotencyKey) =>
+          createSupportTicketWithDependencies(
+            { ...form, category: form.category as SupportCategory, idempotencyKey },
+            {
+              async create(input) {
+                const { data, error } = await supabase.rpc("create_support_ticket", {
+                  _subject: input.subject,
+                  _category: input.category,
+                  _description: input.description,
+                  _idempotency_key: input.idempotencyKey,
+                });
+                if (error) throw error;
+                const saved = data?.[0];
+                if (!saved?.id) throw new Error("support_ticket_not_verified");
+                return saved;
+              },
+            },
+          ),
       ),
     onSuccess: async (saved) => {
       setForm({ subject: "", category: "technical", description: "" });
@@ -96,21 +102,28 @@ function ClientSupportPage() {
       await qc.invalidateQueries({ queryKey: ["client-support-tickets"] });
       toast.success(`הפנייה נשמרה: ${saved.id}`);
     },
-    onError: () => toast.error("הפנייה לא נשמרה. ניתן לנסות שוב במפורש."),
+    onError: () => toast.error("לא ניתן לאשר שהפנייה נשמרה. אפשר לשלוח שוב את אותה הטיוטה."),
   });
 
   const addMessage = useMutation({
     mutationFn: async () => {
       if (!activeId) throw new Error("ticket_required");
-      const { data, error } = await supabase.rpc("add_support_ticket_message", {
-        _ticket_id: activeId,
-        _body: message.trim(),
-        _idempotency_key: crypto.randomUUID(),
-      });
-      if (error) throw error;
-      const saved = data?.[0];
-      if (!saved?.id) throw new Error("support_message_not_verified");
-      return saved;
+      const body = message.trim();
+      return submitSupportAttempt(
+        pendingSubmissions.current,
+        ["client-message", activeId, body],
+        async (idempotencyKey) => {
+          const { data, error } = await supabase.rpc("add_support_ticket_message", {
+            _ticket_id: activeId,
+            _body: body,
+            _idempotency_key: idempotencyKey,
+          });
+          if (error) throw error;
+          const saved = data?.[0];
+          if (!saved?.id) throw new Error("support_message_not_verified");
+          return saved;
+        },
+      );
     },
     onSuccess: async () => {
       setMessage("");
@@ -120,7 +133,7 @@ function ClientSupportPage() {
       ]);
       toast.success("המידע נוסף לפנייה");
     },
-    onError: () => toast.error("המידע לא נשמר. הפנייה הקיימת לא שונתה."),
+    onError: () => toast.error("לא ניתן לאשר שהמידע נשמר. אפשר לשלוח שוב את אותה הטיוטה."),
   });
 
   const submitTicket = (event: FormEvent) => {
