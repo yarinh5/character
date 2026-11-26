@@ -126,6 +126,18 @@
   and 2,000/100 load results are still unproven.
   Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-03/REPORT.md`.
 
+- The corrected 1,000/100 mixed workload on `e690662` **passed** on a fresh isolated local
+  project with 180 ordered migrations. All 1,101 fixture accounts logged in; 1,100 Realtime
+  joins stayed connected through both waves, and all expected client/operator deliveries were
+  observed. The two waves completed 900 text sends, 100 media sends plus one control, 100
+  operator-point adjustments and 2 x 1,101 reads without failures. An independent DB readback
+  found exactly 500 active cycles (five for each of 100 operators), zero over-capacity or
+  assignment mismatches, 500 automatic-assignment audits, exactly one debit for each of 1,001
+  messages, and 101 media debits/preview objects. The task's seven containers, three volumes
+  and network were removed after ownership checks; unrelated inventory matched before/after.
+  This closes the scoped 1,000/100 workload, not the 2,000/100 tier or formal Product acceptance.
+  Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-04/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
