@@ -17,8 +17,38 @@ describe("deletion Storage verification", () => {
     expect(info).toHaveBeenCalledExactlyOnceWith(path);
   });
 
-  it.each([403, 500, undefined])("blocks an uncertain Storage error (%s)", async (status) => {
+  it("accepts the Storage service's HTTP 400 response only when its statusCode is 404", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ statusCode: "404", error: "not_found", message: "Object not found" }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    );
+    const client = createClient("http://127.0.0.1:9999", "synthetic-key", {
+      global: { fetch },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    await expect(
+      storageObjectExistsByInfo(path, (value) => client.storage.from("private-bucket").info(value)),
+    ).resolves.toBe(false);
+  });
+
+  it.each([400, 403, 500, undefined])("blocks an uncertain Storage error (%s)", async (status) => {
     const info = vi.fn().mockResolvedValue({ data: null, error: { status } });
+    await expect(storageObjectExistsByInfo(path, info)).rejects.toThrow(
+      "storage_verification_failed",
+    );
+  });
+
+  it("blocks HTTP 400 with a different Storage statusCode", async () => {
+    const info = vi.fn().mockResolvedValue({
+      data: null,
+      error: { status: 400, statusCode: "403" },
+    });
     await expect(storageObjectExistsByInfo(path, info)).rejects.toThrow(
       "storage_verification_failed",
     );

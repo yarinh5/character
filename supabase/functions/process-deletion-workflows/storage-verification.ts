@@ -1,6 +1,6 @@
 type StorageInfoResult = {
   data: unknown;
-  error: { status?: number } | null;
+  error: { status?: number; statusCode?: string } | null;
 };
 
 export async function storageObjectExistsByInfo(
@@ -9,7 +9,9 @@ export async function storageObjectExistsByInfo(
 ): Promise<boolean> {
   const { data, error } = await info(objectPath);
   if (error) {
-    if (error.status === 404) return false;
+    if (error.status === 404 || (error.status === 400 && error.statusCode === "404")) {
+      return false;
+    }
     throw new Error("storage_verification_failed");
   }
   if (data == null) throw new Error("storage_verification_failed");
