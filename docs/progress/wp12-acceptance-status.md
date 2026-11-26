@@ -1,5 +1,17 @@
 # WP12 acceptance status (2026-11-26)
 
+- Scoped WP11 admin exception UI (2026-11-27): on the dedicated disposable
+  local project, a synthetic admin saw one failed account-deletion case in the
+  operations count and in `/admin/exceptions`. A synthetic client attempting
+  that URL was redirected to `/app/characters`, without rendering the case.
+  The initial dashboard analytics error was traced to the test Vite process
+  missing its server-only local service key; with that variable supplied, the
+  analytics panel rendered and the operations count remained one. No product
+  code changed. Exact-project teardown left 0 task containers, volumes,
+  networks and port listeners. This is one local cross-role journey, not
+  full AC31/WP11 or Product PASS. Evidence:
+  `F:/project love/character/.codex-task/db-runner-isolated-1126-01/evidence-wp11-admin-ui-20261127-01/README.md`.
+
 - Scoped WP11 admin exception-case DB check (2026-11-27): the current and
   task-copy `wp11_admin_completion_exception_cases.test.sql` matched by SHA-256.
   On the dedicated disposable local Engine, `psql` with `ON_ERROR_STOP=1`
