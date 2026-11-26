@@ -145,6 +145,24 @@ describe("client chat accessibility regressions", () => {
     expect(screen.getByRole("button", { name: "שליחת הודעה" })).toBeInTheDocument();
   });
 
+  it("gives the message composer a stable accessible name", async () => {
+    renderChat();
+
+    expect(await screen.findByRole("textbox", { name: "הודעה" })).toBeInTheDocument();
+  });
+
+  it("associates both report fields with their visible labels", async () => {
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(await screen.findByRole("button", { name: "דיווח על השיחה" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("textbox", { name: "סיבה" })).toEqual(dialog.getByLabelText("סיבה"));
+    expect(dialog.getByRole("textbox", { name: "פירוט (אופציונלי)" })).toEqual(
+      dialog.getByLabelText("פירוט (אופציונלי)"),
+    );
+  });
+
   it.each([
     ["הסרת השיחה מהרשימה", "Escape"],
     ["הסרת השיחה מהרשימה", "Cancel"],

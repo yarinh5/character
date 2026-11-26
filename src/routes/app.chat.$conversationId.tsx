@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
@@ -601,6 +601,7 @@ function ChatPage() {
         )}
         <div className="flex gap-2 items-end">
           <Textarea
+            aria-label="הודעה"
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
@@ -725,6 +726,7 @@ function ReportDialog({
   userId: string | undefined;
   trigger: ReactElement;
 }) {
+  const reportId = useId();
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -761,8 +763,11 @@ function ReportDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <label className="text-sm font-medium">סיבה</label>
+            <label className="text-sm font-medium" htmlFor={`${reportId}-reason`}>
+              סיבה
+            </label>
             <Input
+              id={`${reportId}-reason`}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               maxLength={200}
@@ -770,8 +775,11 @@ function ReportDialog({
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">פירוט (אופציונלי)</label>
+            <label className="text-sm font-medium" htmlFor={`${reportId}-details`}>
+              פירוט (אופציונלי)
+            </label>
             <Textarea
+              id={`${reportId}-details`}
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               maxLength={1000}
