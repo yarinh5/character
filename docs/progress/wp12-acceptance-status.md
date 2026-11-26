@@ -1,5 +1,14 @@
 # WP12 acceptance status (2026-11-26)
 
+- Scoped WP11 admin exception-case DB check (2026-11-27): the current and
+  task-copy `wp11_admin_completion_exception_cases.test.sql` matched by SHA-256.
+  On the dedicated disposable local Engine, `psql` with `ON_ERROR_STOP=1`
+  completed its rollback-only file with 20/20 TAP assertions and zero failures.
+  Start/test/stop each exited 0; the final task inventory was 0 containers,
+  volumes and networks. This is live authorization/pagination coverage for one
+  file, not UI drilldown, scale evidence or Product PASS. Raw TAP and teardown
+  evidence: `F:/project love/character/.codex-task/db-runner-isolated-1126-01/evidence-wp11-admin-cases-20261127-01/`.
+
 - Scoped AC31 local client journey (2026-11-27): the current worktree's app ran
   against a task-only Supabase project on the dedicated local Engine, with a
   loopback Vite server. A synthetic admin-provisioned client signed in, reached
