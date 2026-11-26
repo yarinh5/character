@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
-SELECT plan(42);
+SELECT plan(53);
 
 SELECT has_table('private', 'restore_recovery_events', 'restore recovery event ledger exists');
 SELECT has_table('private', 'restore_recovery_requirements', 'recovery requirements exist');
@@ -204,6 +204,65 @@ SELECT lives_ok(
      ) $$,
   'partial coverage may be recorded without claiming completeness'
 );
+SAVEPOINT interrupted_manifest_import;
+SELECT public.fail_restore_recovery_import_for_server(
+  '00000000-0000-4000-8000-0000000d0605', 1, 'synthetic_later_step_failure'
+);
+SELECT results_eq(
+  $$ SELECT event_version, status FROM public.begin_restore_recovery_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 'fixture-recovery-lock', 'fixture-authority',
+       'fixture-snapshot', now(), '00000000-0000-4000-8000-0000000d0601', repeat('a', 64)
+     ) $$,
+  $$ VALUES (2, 'failed'::TEXT) $$,
+  'the same failed event resumes at its current version without reopening access'
+);
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 2, 'partial', 'fixture-authority',
+       1, NULL, repeat('b', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'a failed import may reuse its exact latest manifest at the new event version'
+);
+SELECT lives_ok(
+  $$ SELECT public.record_restore_reconciliation_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 2, 'partial',
+       'credit_ledger', 'matched', 0, 0, 0, repeat('e', 64)
+     ) $$,
+  'reconciliation resumes after the identical manifest is accepted'
+);
+RESET ROLE;
+SELECT results_eq(
+  $$ SELECT access_state, recovery_deletion_replay_enabled
+     FROM private.restore_recovery_control WHERE singleton $$,
+  $$ VALUES ('blocked'::TEXT, FALSE) $$,
+  'retry does not release access or enable deletion replay'
+);
+ROLLBACK TO SAVEPOINT interrupted_manifest_import;
+SET LOCAL ROLE service_role;
+SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'partial', 'fixture-authority',
+       1, NULL, repeat('b', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'an identical latest manifest is accepted when a later import step must resume'
+);
+SELECT throws_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', NULL, 'partial', 'fixture-authority',
+       1, NULL, repeat('b', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'P0001', 'restore_recovery_event_stale',
+  'an exact manifest retry still requires the current event version'
+);
+SELECT throws_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'partial', 'fixture-authority',
+       1, NULL, repeat('a', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'P0001', 'restore_authority_manifest_conflict',
+  'a retry with changed evidence under the same manifest ID is rejected'
+);
 SELECT throws_ok(
   $$ DO $fixture$ BEGIN
        PERFORM public.import_restore_recovery_manifest_for_server(
@@ -228,6 +287,14 @@ SELECT lives_ok(
        3, repeat('c', 64), repeat('d', 64), now(), now(), TRUE
      ) $$,
   'a later manifest may preserve the previous coverage watermark'
+);
+SELECT throws_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 1, 'partial', 'fixture-authority',
+       1, NULL, repeat('b', 64), now() - interval '1 second', now(), FALSE
+     ) $$,
+  'P0001', 'restore_authority_manifest_sequence_gap',
+  'an old manifest cannot be replayed after a successor exists'
 );
 RESET ROLE;
 
@@ -268,6 +335,30 @@ SELECT results_eq(
      WHERE id = '00000000-0000-4000-8000-0000000d0605' $$,
   ARRAY['ready_for_approval'], 'the finalized evidence can reach readiness before a successor arrives'
 );
+
+SAVEPOINT ready_retry;
+SET LOCAL ROLE service_role;
+SET LOCAL request.jwt.claims = '{"role":"service_role"}';
+SELECT lives_ok(
+  $$ SELECT public.import_restore_recovery_manifest_for_server(
+       '00000000-0000-4000-8000-0000000d0605', 3, 'equal-watermark', 'fixture-authority',
+       3, repeat('c', 64), repeat('d', 64), now(), now(), TRUE
+     ) $$,
+  'retrying the latest exact manifest is accepted after readiness'
+);
+RESET ROLE;
+SELECT results_eq(
+  $$ SELECT status FROM private.restore_recovery_events
+     WHERE id = '00000000-0000-4000-8000-0000000d0605' $$,
+  ARRAY['reconciling'], 'an exact manifest retry revokes readiness before later import steps'
+);
+SELECT results_eq(
+  $$ SELECT requirement_name || ':' || status FROM private.restore_recovery_requirements
+     WHERE event_id = '00000000-0000-4000-8000-0000000d0605' ORDER BY requirement_name $$,
+  ARRAY['deletion_replay:pending', 'external_lock:verified', 'ledger_reconciliation:pending', 'personal_data_review:pending'],
+  'an exact retry invalidates dependent evidence while retaining the external lock'
+);
+ROLLBACK TO SAVEPOINT ready_retry;
 
 SET LOCAL ROLE service_role;
 SET LOCAL request.jwt.claims = '{"role":"service_role"}';
