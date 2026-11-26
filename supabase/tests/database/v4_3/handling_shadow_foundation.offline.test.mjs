@@ -362,10 +362,12 @@ test("atomic legacy-lock claim checks a single message, cycle-bound authority an
 
 test("the final three allocation paths do not make a legacy lock an independent claim veto", () => {
   const allocation = readMigration("20261105090000_wp016_wp02_handling_allocation.sql");
+  const capacity = "20261126152000_recheck_locked_auto_allocation_capacity.sql";
   for (const name of ["private.acquire_operator_send_authority", "public.claim_new_conversation", "private.allocate_new_conversations"]) {
     let effective;
     for (const file of files) effective = definition(readMigration(file), name) ?? effective;
     const expected = name === "private.acquire_operator_send_authority" ? allocation
+      : name === "private.allocate_new_conversations" && files.includes(capacity) ? readMigration(capacity)
       : readMigration("20261123110000_enforce_handling_claim_expiry.sql");
     assert.equal(effective, definition(expected, name), "review must follow the final definition " + name);
     assert.doesNotMatch(effective, /conversation_locks|conversation_locked_by_other_operator|assert_operator_can_send_conversation_message/);

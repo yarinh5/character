@@ -64,3 +64,17 @@ verification. None of those live gates ran in this offline package.
   and repeat-finish cases and adds an explicit missing-current-cycle case. The SQL suite is written
   but **NOT RUN**; this is static/offline evidence only and does not close the concurrency or live DB
   acceptance gap.
+
+## Automatic allocation at capacity (2026-11-26)
+
+- Two allocator transactions could both read four active cycles before either acquired the operator
+  row. A controlled PostgreSQL schedule reproduced six active cycles after both transactions committed.
+- Forward migration `20261126152000` rechecks the count in a separate statement after the operator
+  row is locked, before creating a cycle. The same schedule left five cycles and kept the sixth
+  request in `new` with its original waiting timestamp. Function ACLs were unchanged.
+- Both offline suites passed 37/37. A fresh DB applied all 180 migrations and passed the expiry
+  pgTAP 30/30. With no diagnostic hook installed, 20 authenticated `operator_heartbeat` calls filled
+  100 slots, five per operator; six requests stayed in `new` and all 100 assignments matched their
+  work item, conversation owner and audit record. This is scoped capacity evidence, not the two
+  formal WP02 DB passes or a full Product run.
+- Evidence: `F:/project love/character/.codex-task/wp02-capacity-race-20261126-01/REPORT.md`.

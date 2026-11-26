@@ -13,6 +13,7 @@ const migrations = new URL("supabase/migrations/", repository);
 const names = readdirSync(migrations).filter((name) => name.endsWith(".sql")).sort();
 const previous = "20261105090000_wp016_wp02_handling_allocation.sql";
 const forward = "20261123110000_enforce_handling_claim_expiry.sql";
+const capacityForward = "20261126152000_recheck_locked_auto_allocation_capacity.sql";
 const read = (name) => readFileSync(new URL(name, migrations), "utf8").replace(/\r\n/g, "\n");
 const before = read(previous);
 function definition(sql, name) {
@@ -32,6 +33,7 @@ const claimName = "public.claim_new_conversation";
 const autoName = "private.allocate_new_conversations";
 const claim = effective(claimName);
 const allocation = effective(autoName);
+const expiryAllocation = definition(read(forward), autoName);
 const claimBlock = `  IF _conversation.inactivity_expires_at IS NULL
      OR _conversation.inactivity_expires_at <= clock_timestamp() THEN
     RAISE EXCEPTION 'conversation_claim_state_expired';
@@ -46,6 +48,16 @@ const autoBlock = `    IF _conversation.inactivity_expires_at IS NULL
 `;
 const filter = `      AND conversation.inactivity_expires_at IS NOT NULL
       AND conversation.inactivity_expires_at > clock_timestamp()
+`;
+const capacityBlock = `    -- The ranking count can predate another allocator's commit. Count again
+    -- in a new statement while holding the operator row lock.
+    IF (
+      SELECT count(*) FROM public.conversation_handling_cycles active_cycle
+      WHERE active_cycle.operator_id = _operator_id AND active_cycle.ended_at IS NULL
+    ) >= 5 THEN
+      CONTINUE;
+    END IF;
+
 `;
 function assertClaimGuard(body) {
   assert.equal(body.split(claimBlock).length - 1, 1, "one fail-closed claim expiry gate");
@@ -72,13 +84,23 @@ test("allocation filters stale candidates before LIMIT and checks the locked con
 test("the forward migration contains only the two definitions and exactly the three expiry additions", () => {
   assert.ok(names.includes(forward), "forward migration required");
   let sql = read(forward);
-  for (const [name, body] of [[claimName, claim], [autoName, allocation]]) {
-    assert.equal(definition(sql, name), body, "latest definition must be the forward definition");
+  for (const [name, body] of [[claimName, claim], [autoName, expiryAllocation]]) {
+    assert.equal(definition(sql, name), body, "each expected historical definition is exact");
     sql = sql.replace(body, "");
   }
   assert.equal(claim.replace(claimBlock, ""), definition(before, claimName));
-  assert.equal(allocation.replace(filter, "").replace(autoBlock, ""), definition(before, autoName));
+  assert.equal(expiryAllocation.replace(filter, "").replace(autoBlock, ""), definition(before, autoName));
   assert.equal(sql.replace(/^--[^\n]*/gm, "").trim(), "", "no extra DDL, grants or business logic");
+});
+test("the allocator rechecks live capacity under the operator lock before any assignment write", () => {
+  const lock = allocation.indexOf("FOR UPDATE OF operator SKIP LOCKED");
+  const write = allocation.indexOf("    UPDATE public.conversations");
+  const gate = allocation.indexOf(capacityBlock);
+  assert.ok(lock >= 0 && gate > lock && write > gate, "the separate locked capacity gate must precede the first write");
+  assert.equal(allocation.replace(capacityBlock, ""), expiryAllocation, "eligibility, ranking, lock order and writes must stay intact");
+  const sql = read(capacityForward);
+  assert.equal(definition(sql, autoName), allocation);
+  assert.equal(sql.replace(allocation, "").replace(/^--[^\n]*/gm, "").trim(), "", "no extra DDL or grants");
 });
 test("replay keeps the exact original idempotent return and does not refresh the deadline", () => {
   assert.equal(replay(claim), replay(definition(before, claimName)));

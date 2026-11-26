@@ -106,6 +106,14 @@
   Higher-tier load and integrated Product remain open.
   Evidence: `F:/project love/character/.codex-task/wp12-mixed-load-1000-100-20261126-02/REPORT.md`.
 
+- Capacity follow-up: a controlled live PostgreSQL race reproduced the sixth assignment from a
+  pre-lock count of four. With forward migration `20261126152000`, the same schedule reached five
+  cycles and left the sixth request pending. A clean 180-migration DB also passed 30/30 expiry
+  assertions and a separate authenticated heartbeat check with 100 assignments across 20 operators,
+  each at five, and six requests still waiting. The 1,000/100 workload has not been rerun on the
+  repaired revision; 2,000/100 and formal integrated Product remain open.
+  Evidence: `F:/project love/character/.codex-task/wp02-capacity-race-20261126-01/REPORT.md`.
+
 - WP06 AC16-A HTTP/Storage follow-up on the same commit, after the workload ended: a separate
   synthetic fixture had its linked 24-hour window aged before signing, with clocks unchanged.
   The actual URL served WebP before the deadline and Storage rejected the identical URL after
