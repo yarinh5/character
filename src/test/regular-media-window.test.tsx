@@ -79,6 +79,27 @@ describe("regular media 60-second policy UI", () => {
     expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
   });
 
+  it("executes the lazy completion request at the server deadline", async () => {
+    const execute = vi.fn();
+    rpc.mockImplementationOnce(() => ({
+      then: (resolve: (value: { data: { completed: boolean }; error: null }) => unknown) => {
+        execute();
+        return Promise.resolve({ data: { completed: true }, error: null }).then(resolve);
+      },
+    }));
+    render(
+      <MessageAttachment
+        attachment={attachment}
+        access={activeRegularWindow}
+        accessStatus="ready"
+        refreshAccess={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("completes an active window when the parent replaces the refresh callback", async () => {
     const refreshAccess = vi.fn().mockResolvedValue(null);
     const view = render(
@@ -103,6 +124,34 @@ describe("regular media 60-second policy UI", () => {
         );
       }
     }
+
+    expect(rpc).toHaveBeenCalledWith("complete_free_view_once_attachment", {
+      _attachment_id: attachment.id,
+    });
+    expect(refreshAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes when access changes to seen at the server deadline", async () => {
+    const refreshAccess = vi.fn().mockResolvedValue(null);
+    const view = render(
+      <MessageAttachment
+        attachment={attachment}
+        access={activeRegularWindow}
+        accessStatus="ready"
+        refreshAccess={() => refreshAccess()}
+      />,
+    );
+
+    await act(async () => vi.advanceTimersByTime(59_999));
+    view.rerender(
+      <MessageAttachment
+        attachment={attachment}
+        access={{ ...activeRegularWindow, render_state: "view_once_seen" }}
+        accessStatus="ready"
+        refreshAccess={() => refreshAccess()}
+      />,
+    );
+    await act(async () => vi.advanceTimersByTime(1));
 
     expect(rpc).toHaveBeenCalledWith("complete_free_view_once_attachment", {
       _attachment_id: attachment.id,

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageAttachment } from "@/components/chat/MessageAttachment";
 import type { MessageAttachmentAccess } from "@/hooks/useMessageAttachmentAccessMap";
@@ -49,6 +49,48 @@ afterEach(() => {
 });
 
 describe("paid image local expiry", () => {
+  it("executes the lazy session completion request after a paid open", async () => {
+    const execute = vi.fn();
+    const refreshAccess = vi.fn().mockResolvedValue(activeAccess);
+    rpc.mockResolvedValueOnce({ data: { session_id: "paid-session-1" }, error: null });
+    const view = render(
+      <MessageAttachment
+        attachment={attachment}
+        access={{ ...activeAccess, render_state: "paid_open_available" }}
+        accessStatus="ready"
+        refreshAccess={refreshAccess}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "פתח תמונה" }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", { name: "פתח תמונה" }),
+      );
+      await Promise.resolve();
+    });
+    rpc.mockImplementationOnce(() => ({
+      then: (resolve: (value: { data: null; error: null }) => unknown) => {
+        execute();
+        return Promise.resolve({ data: null, error: null }).then(resolve);
+      },
+    }));
+    view.rerender(
+      <MessageAttachment
+        attachment={attachment}
+        access={activeAccess}
+        accessStatus="ready"
+        refreshAccess={refreshAccess}
+      />,
+    );
+
+    await act(async () => vi.advanceTimersByTime(1_000));
+    expect(rpc).toHaveBeenCalledWith("complete_paid_message_attachment_session", {
+      _session_id: "paid-session-1",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("hides loaded bytes at expiry even when access refresh leaves the old state", () => {
     const refreshAccess = vi.fn().mockResolvedValue(null);
     const view = render(

@@ -59,6 +59,8 @@ export function MessageAttachment({
   const viewOnceIdempotencyKeyRef = useRef<string | null>(null);
   const paidOpenIdempotencyKeyRef = useRef<string | null>(null);
   const paidOpenSessionIdRef = useRef<string | null>(null);
+  const refreshAccessRef = useRef(refreshAccess);
+  refreshAccessRef.current = refreshAccess;
   const isViewOnce = access?.view_mode === "view_once";
   const isPaidOpen = access?.view_mode === "paid_open";
   const isExpiredClientMedia =
@@ -67,6 +69,12 @@ export function MessageAttachment({
     accessStatus === "ready" && isViewOnce && access?.render_state === "view_once_available";
   const activeViewOnceSessionKey =
     access?.render_state === "view_once_active" && access.session_expires_at
+      ? `${attachment.id}:${access.session_expires_at}`
+      : null;
+  const completionViewOnceSessionKey =
+    isViewOnce &&
+    (access?.render_state === "view_once_active" || access?.render_state === "view_once_seen") &&
+    access.session_expires_at
       ? `${attachment.id}:${access.session_expires_at}`
       : null;
   const activeViewOnceSessionExpiry = access?.session_expires_at
@@ -121,28 +129,17 @@ export function MessageAttachment({
   }, [attachment.id]);
 
   useEffect(() => {
-    if (
-      !isViewOnce ||
-      access?.render_state !== "view_once_active" ||
-      !activeViewOnceSessionKey ||
-      !Number.isFinite(activeViewOnceSessionExpiry)
-    )
-      return;
+    if (!completionViewOnceSessionKey || !Number.isFinite(activeViewOnceSessionExpiry)) return;
     const remainingMilliseconds = Math.max(0, activeViewOnceSessionExpiry - Date.now());
     const timeout = window.setTimeout(() => {
-      setExpiredViewOnceSessionKey(activeViewOnceSessionKey);
-      void supabase.rpc("complete_free_view_once_attachment", { _attachment_id: attachment.id });
-      void refreshAccess();
+      setExpiredViewOnceSessionKey(completionViewOnceSessionKey);
+      // PostgREST builders are lazy; consuming the thenable starts completion.
+      void supabase
+        .rpc("complete_free_view_once_attachment", { _attachment_id: attachment.id })
+        .then(() => refreshAccessRef.current());
     }, remainingMilliseconds);
     return () => window.clearTimeout(timeout);
-  }, [
-    access?.render_state,
-    activeViewOnceSessionExpiry,
-    activeViewOnceSessionKey,
-    attachment.id,
-    isViewOnce,
-    refreshAccess,
-  ]);
+  }, [activeViewOnceSessionExpiry, completionViewOnceSessionKey, attachment.id]);
 
   useEffect(() => {
     if (
@@ -158,9 +155,12 @@ export function MessageAttachment({
       setExpiredPaidSessionKey(activePaidSessionKey);
       const sessionId = paidOpenSessionIdRef.current;
       if (sessionId) {
-        void supabase.rpc("complete_paid_message_attachment_session", { _session_id: sessionId });
+        void supabase
+          .rpc("complete_paid_message_attachment_session", { _session_id: sessionId })
+          .then(() => refreshAccess());
+      } else {
+        void refreshAccess();
       }
-      void refreshAccess();
     }, remainingMilliseconds);
 
     return () => window.clearTimeout(timeout);
