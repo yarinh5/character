@@ -103,3 +103,9 @@ verification. None of those live gates ran in this offline package.
   global readiness/consistency cases against this reused task DB. Their cause remains unproven;
   this run is **not** a passing regression or integrated Product acceptance. A clean isolated DB
   pass and the formal Product gates remain required.
+- The dedicated project `product-current-20261127-01-lf` remains available with task-owned
+  synthetic Admin user `fbf4c614-ead5-4579-b3c1-08cb5d94e982`, operator users
+  `fba5eb65-b407-4ec1-9a17-709c8dcb2376` and
+  `1f79c5ba-34f3-4ecd-af42-96109027e195`, and their conversation history. Exact credentials
+  remain only in task-local fixture records on F:. The task-owned WSL holder was released and no
+  Worker listener remains. None of those task records were deleted; QA was not touched.
