@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import { ImagePlus, LoaderCircle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
+async function isInsufficientCredits(error: unknown) {
+  if (!(error instanceof FunctionsHttpError)) return false;
+  const response = error.context;
+  if (!(response instanceof Response) || response.status !== 402) return false;
+  try {
+    const body: unknown = await response.clone().json();
+    return isRecord(body) && body.code === "insufficient_credits";
+  } catch {
+    return false;
+  }
+}
+
 export function ClientMediaUploadButton({
   conversationId,
   identityKey,
@@ -77,9 +90,11 @@ export function ClientMediaUploadButton({
       typeof attachment.id !== "string" ||
       attachment.message_id !== message.id
     ) {
+      const insufficientCredits = await isInsufficientCredits(error);
+      if (requestVersion !== requestVersionRef.current) return;
       setPendingFinalize(pending);
       toast.error(
-        error?.message?.includes("insufficient_credits")
+        insufficientCredits
           ? "אין מספיק קרדיטים לשליחת תמונה."
           : "לא ניתן לאמת אם שליחת התמונה הושלמה. אפשר לנסות להשלים בלי להעלות שוב.",
       );

@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { FunctionsHttpError } from "@supabase/supabase-js";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientMediaUploadButton } from "@/components/chat/ClientMediaUploadButton";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -194,6 +196,44 @@ describe("client media upload", () => {
       expect.objectContaining({ id: message.id, message_attachments: [attachment] }),
       40,
     );
+  });
+
+  it("shows the server's insufficient-credit response instead of an ambiguous failure", async () => {
+    io.invoke.mockImplementation(async (name) =>
+      name === "client-media-upload-intent"
+        ? { data: intent, error: null }
+        : {
+            data: null,
+            error: new FunctionsHttpError(
+              new Response(JSON.stringify({ code: "insufficient_credits" }), { status: 402 }),
+            ),
+          },
+    );
+    const { onSent } = renderUpload();
+    await choose();
+
+    await screen.findByRole("button", { name: "ניסיון נוסף להשלמת שליחת התמונה" });
+    expect(toast.error).toHaveBeenCalledWith("אין מספיק קרדיטים לשליחת תמונה.");
+    expect(onSent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a different code", JSON.stringify({ code: "client_media_finalize_failed" })],
+    ["invalid JSON", "not-json"],
+  ])("keeps %s on the ambiguous retry path", async (_, body) => {
+    io.invoke.mockImplementation(async (name) =>
+      name === "client-media-upload-intent"
+        ? { data: intent, error: null }
+        : { data: null, error: new FunctionsHttpError(new Response(body, { status: 402 })) },
+    );
+    const { onSent } = renderUpload();
+    await choose();
+
+    await screen.findByRole("button", { name: "ניסיון נוסף להשלמת שליחת התמונה" });
+    expect(toast.error).toHaveBeenCalledWith(
+      "לא ניתן לאמת אם שליחת התמונה הושלמה. אפשר לנסות להשלים בלי להעלות שוב.",
+    );
+    expect(onSent).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported files before creating an upload intent", async () => {
