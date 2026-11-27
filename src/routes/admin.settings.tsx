@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { PageHeader } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +67,13 @@ const KEYS = [
   { key: "service_disclaimer_text", label: "טקסט גילוי נאות", type: "textarea", default: "" },
 ] as const;
 
+type SettingValue = Tables<"system_settings">["value"];
+type SettingsForm = Partial<Record<(typeof KEYS)[number]["key"], SettingValue>>;
+
+function settingInputValue(value: SettingValue | undefined, fallback = ""): string | number {
+  return typeof value === "number" ? value : String(value ?? fallback);
+}
+
 function SettingsPage() {
   const qc = useQueryClient();
   const { user, role } = useAuth();
@@ -73,7 +81,7 @@ function SettingsPage() {
     queryKey: ["admin-settings"],
     queryFn: async () => {
       const { data } = await supabase.from("system_settings").select("key, value");
-      const map = new Map<string, any>();
+      const map = new Map<string, SettingValue>();
       (data ?? []).forEach((r) => map.set(r.key, r.value));
       return map;
     },
@@ -103,7 +111,7 @@ function SettingsPage() {
     },
   });
 
-  const [form, setForm] = useState<Record<string, any>>({});
+  const [form, setForm] = useState<SettingsForm>({});
   const [busy, setBusy] = useState(false);
   const [registrationChangeReason, setRegistrationChangeReason] = useState("");
   const [supportForm, setSupportForm] = useState({
@@ -126,7 +134,7 @@ function SettingsPage() {
 
   useEffect(() => {
     if (!data) return;
-    const init: Record<string, any> = {};
+    const init: SettingsForm = {};
     KEYS.forEach((k) => {
       const stored = data.get(k.key);
       init[k.key] = stored !== undefined && stored !== null ? stored : k.default;
@@ -238,8 +246,15 @@ function SettingsPage() {
       setRegistrationChangeReason("");
       qc.invalidateQueries({ queryKey: ["admin-settings"] });
       qc.invalidateQueries({ queryKey: ["support-operations-config"] });
-    } catch (e: any) {
-      toast.error("שמירה נכשלה: " + e.message);
+    } catch (error) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof error.message === "string"
+          ? error.message
+          : "שגיאה לא צפויה";
+      toast.error("שמירה נכשלה: " + message);
     } finally {
       setBusy(false);
     }
@@ -361,20 +376,20 @@ function SettingsPage() {
                           <Input
                             id={`system-setting-${k.key}`}
                             type="number"
-                            value={form[k.key] ?? ""}
+                            value={settingInputValue(form[k.key])}
                             onChange={(e) => setForm({ ...form, [k.key]: Number(e.target.value) })}
                           />
                         ) : k.type === "textarea" ? (
                           <Textarea
                             id={`system-setting-${k.key}`}
                             rows={3}
-                            value={form[k.key] ?? ""}
+                            value={settingInputValue(form[k.key])}
                             onChange={(e) => setForm({ ...form, [k.key]: e.target.value })}
                           />
                         ) : k.type === "select" ? (
                           <select
                             id={`system-setting-${k.key}`}
-                            value={form[k.key] ?? k.default}
+                            value={settingInputValue(form[k.key], k.default)}
                             onChange={(e) => setForm({ ...form, [k.key]: e.target.value })}
                             className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                           >
@@ -387,7 +402,7 @@ function SettingsPage() {
                         ) : (
                           <Input
                             id={`system-setting-${k.key}`}
-                            value={form[k.key] ?? ""}
+                            value={settingInputValue(form[k.key])}
                             onChange={(e) => setForm({ ...form, [k.key]: e.target.value })}
                           />
                         )}

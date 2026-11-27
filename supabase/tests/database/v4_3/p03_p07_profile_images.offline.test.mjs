@@ -89,7 +89,9 @@ test("client archive HTTP fixture uploads an owned avatar before profile upsert 
   const clientSignIn = clientArchiveHttp.indexOf(
     "clientSession = await signInSyntheticUser(emails.client, clientUser.password)",
   );
-  const avatarUpload = clientArchiveHttp.indexOf(".storage.from(profileImageBucket).upload");
+  const avatarUpload = clientArchiveHttp.search(
+    /\bclientSession\.storage\s*\.from\(profileImageBucket\)\s*\.upload\(/u,
+  );
   const profileUpsert = clientArchiveHttp.search(/await upsertRow\(\s*admin,\s*"client_profiles"/u);
   assert.notEqual(clientSignIn, -1, "client session must be established");
   assert.notEqual(avatarUpload, -1, "fixture must upload the avatar through Storage");

@@ -301,7 +301,7 @@ function createChannel(): ChannelDouble {
       (
         _type: string,
         _filter: Record<string, string | undefined>,
-        _callback: (...args: any[]) => void,
+        _callback: ChannelRegistration[2],
       ) => channel,
     ),
     subscribe: vi.fn((callback: (status: string) => void) => {
