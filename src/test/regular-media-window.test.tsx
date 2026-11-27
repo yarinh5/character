@@ -76,6 +76,74 @@ describe("regular media 60-second policy UI", () => {
       _attachment_id: attachment.id,
     });
     expect(refreshAccess).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+  });
+
+  it.each([null, "not-a-date", "2026-11-04T23:59:59.000Z"])(
+    "does not display an active view-once image with expiry %s",
+    (session_expires_at) => {
+      render(
+        <MessageAttachment
+          attachment={attachment}
+          access={{ ...activeRegularWindow, session_expires_at }}
+          accessStatus="ready"
+          refreshAccess={vi.fn().mockResolvedValue(null)}
+        />,
+      );
+
+      expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("hides a legacy seven-second window when its server expiry passes", async () => {
+    render(
+      <MessageAttachment
+        attachment={attachment}
+        access={{ ...activeRegularWindow, session_expires_at: "2026-11-05T00:00:07.000Z" }}
+        accessStatus="ready"
+        refreshAccess={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "תמונה שנשלחה בצ'אט" })).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(7_000));
+    expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+  });
+
+  it("does not reveal an opened image before access refresh supplies its server expiry", async () => {
+    const refreshAccess = vi.fn().mockResolvedValue(null);
+    render(
+      <MessageAttachment
+        attachment={attachment}
+        access={availableRegularWindow}
+        accessStatus="ready"
+        refreshAccess={refreshAccess}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "פתח תמונה" }));
+      await Promise.resolve();
+    });
+    expect(refreshAccess).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+  });
+
+  it("keeps staff view-once access visible without a client expiry", () => {
+    render(
+      <MessageAttachment
+        attachment={attachment}
+        access={{
+          ...activeRegularWindow,
+          render_state: "view_once_staff",
+          session_expires_at: null,
+        }}
+        accessStatus="ready"
+        refreshAccess={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "תמונה שנשלחה בצ'אט" })).toBeInTheDocument();
   });
 
   it("releases a rejected view-once open for retry with the same idempotency key", async () => {

@@ -51,7 +51,7 @@ export function MessageAttachment({
 }: MessageAttachmentProps) {
   const [unlocking, setUnlocking] = useState(false);
   const [viewOnceOpening, setViewOnceOpening] = useState(false);
-  const [viewOnceViewing, setViewOnceViewing] = useState(false);
+  const [expiredViewOnceSessionKey, setExpiredViewOnceSessionKey] = useState<string | null>(null);
   const [paidOpenPurchasing, setPaidOpenPurchasing] = useState(false);
   const [paidOpenConfirmOpen, setPaidOpenConfirmOpen] = useState(false);
   const [expiredPaidSessionKey, setExpiredPaidSessionKey] = useState<string | null>(null);
@@ -65,11 +65,21 @@ export function MessageAttachment({
     access?.view_mode === "client_24h" && access.render_state === "client_24h_expired";
   const canOpenViewOnce =
     accessStatus === "ready" && isViewOnce && access?.render_state === "view_once_available";
+  const activeViewOnceSessionKey =
+    access?.render_state === "view_once_active" && access.session_expires_at
+      ? `${attachment.id}:${access.session_expires_at}`
+      : null;
+  const activeViewOnceSessionExpiry = access?.session_expires_at
+    ? Date.parse(access.session_expires_at)
+    : Number.NaN;
   const canRenderViewOnce =
     isViewOnce &&
     (access?.render_state === "view_once_staff" ||
-      access?.render_state === "view_once_active" ||
-      viewOnceViewing);
+      (access?.render_state === "view_once_active" &&
+        activeViewOnceSessionKey !== null &&
+        Number.isFinite(activeViewOnceSessionExpiry) &&
+        activeViewOnceSessionExpiry > Date.now() &&
+        expiredViewOnceSessionKey !== activeViewOnceSessionKey));
   const canOpenLegacyPaid =
     accessStatus === "ready" && isPaidOpen && access?.render_state === "paid_open_available";
   const canPurchaseGift =
@@ -106,28 +116,32 @@ export function MessageAttachment({
     paidOpenIdempotencyKeyRef.current = null;
     paidOpenSessionIdRef.current = null;
     setViewOnceOpening(false);
-    setViewOnceViewing(false);
     setPaidOpenPurchasing(false);
     setPaidOpenConfirmOpen(false);
   }, [attachment.id]);
 
   useEffect(() => {
-    if (!viewOnceViewing && access?.render_state !== "view_once_active") return;
-    const remainingMilliseconds = access?.session_expires_at
-      ? Math.max(0, new Date(access.session_expires_at).getTime() - Date.now())
-      : 7_000;
+    if (
+      !isViewOnce ||
+      access?.render_state !== "view_once_active" ||
+      !activeViewOnceSessionKey ||
+      !Number.isFinite(activeViewOnceSessionExpiry)
+    )
+      return;
+    const remainingMilliseconds = Math.max(0, activeViewOnceSessionExpiry - Date.now());
     const timeout = window.setTimeout(() => {
-      setViewOnceViewing(false);
+      setExpiredViewOnceSessionKey(activeViewOnceSessionKey);
       void supabase.rpc("complete_free_view_once_attachment", { _attachment_id: attachment.id });
       void refreshAccess();
     }, remainingMilliseconds);
     return () => window.clearTimeout(timeout);
   }, [
     access?.render_state,
-    access?.session_expires_at,
+    activeViewOnceSessionExpiry,
+    activeViewOnceSessionKey,
     attachment.id,
+    isViewOnce,
     refreshAccess,
-    viewOnceViewing,
   ]);
 
   useEffect(() => {
@@ -235,7 +249,6 @@ export function MessageAttachment({
       return;
     }
     viewOnceIdempotencyKeyRef.current = null;
-    setViewOnceViewing(true);
     await refreshAccess();
   };
 
@@ -422,7 +435,7 @@ export function MessageAttachment({
       />
       {isViewOnce && (
         <p className="mt-2 text-xs text-muted-foreground">
-          {viewOnceViewing || access?.render_state === "view_once_active"
+          {access?.render_state === "view_once_active"
             ? "התמונה זמינה למשך חלון הצפייה"
             : "תמונה לצפייה חד-פעמית"}
         </p>
