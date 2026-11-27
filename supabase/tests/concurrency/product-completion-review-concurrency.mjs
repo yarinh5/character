@@ -254,6 +254,9 @@ async function multiConversationScannerLockOrderRace(observer, admin, timeoutWor
   assert.equal(candidates?.length, 2, `scanner fixture candidates: ${JSON.stringify(candidates)}`);
   await admin.ok(`BEGIN;
     SELECT id FROM public.conversations WHERE id=${quote(ids.scanConversationSecond)} FOR UPDATE;
+    UPDATE public.conversations
+    SET inactivity_expires_at=now()+interval '3 minutes'
+    WHERE id=${quote(ids.scanConversationSecond)};
     SET LOCAL ROLE authenticated;
     SET LOCAL "request.jwt.claim.role"='authenticated';
     SET LOCAL "request.jwt.claim.sub"=${quote(ids.adminUser)};`);
@@ -273,13 +276,16 @@ async function multiConversationScannerLockOrderRace(observer, admin, timeoutWor
 
   const scanOutcome = await timeoutScan;
   assert.equal(scanOutcome.failed, "false", `${scanOutcome.sqlstate} ${scanOutcome.message}`);
-  assert.ok(Number(scanOutcome.lines.at(-1)) >= 2, "the scan releases both controlled candidates");
-  assert.equal(
+  assert.equal(Number(scanOutcome.lines.at(-1)), 1, "the scan releases only the expired candidate");
+  assert.deepEqual(
     await observer.json(
-      `SELECT to_json(count(*)) FROM public.conversation_handling_cycles WHERE id IN (${quote(ids.scanCycleFirst)},${quote(ids.scanCycleSecond)}) AND ended_at IS NOT NULL;`,
+      `SELECT json_build_object(
+        'expired_released', (SELECT ended_at IS NOT NULL FROM public.conversation_handling_cycles WHERE id=${quote(ids.scanCycleFirst)}),
+        'refreshed_active', (SELECT ended_at IS NULL FROM public.conversation_handling_cycles WHERE id=${quote(ids.scanCycleSecond)})
+      );`,
     ),
-    2,
-    "both controlled expired cycles are released exactly once",
+    { expired_released: true, refreshed_active: true },
+    "the refreshed cycle remains active while the expired cycle is released once",
   );
 }
 
