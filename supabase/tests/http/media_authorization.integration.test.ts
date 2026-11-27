@@ -35,6 +35,7 @@ const objectName = "v4_3_media_fixture.webp";
 const objectPath = `${folder}/${objectName}`;
 const giftPurchaseKey = "00000000-0000-4000-8000-000000061101";
 const giftOpenKey = "00000000-0000-4000-8000-000000061102";
+const legacyPaidPrice = 2;
 const giftObjectPath = `collections/00000000-0000-4000-8000-000000060503/stickers/00000000-0000-4000-8000-000000060504/render.webp`;
 const giftWebp = Buffer.from(
   "UklGRjYAAABXRUJQVlA4ICoAAABwAQCdASoBAAEAAUAmJaACdAFAAAD+7U3CMNGv/20P//bQ//9tD/pQAAA=",
@@ -61,6 +62,8 @@ const ids = {
   ownerSendAsset: "00000000-0000-4000-8000-000000060705",
   otherSendAsset: "00000000-0000-4000-8000-000000060706",
   raceAsset: "00000000-0000-4000-8000-000000060707",
+  legacyViewOnceAsset: "00000000-0000-4000-8000-000000060708",
+  legacyPaidAsset: "00000000-0000-4000-8000-000000060709",
   clientMessage: "00000000-0000-4000-8000-000000060750",
   workItem: "00000000-0000-4000-8000-000000060751",
   otherClientMessage: "00000000-0000-4000-8000-000000060752",
@@ -70,14 +73,20 @@ const ids = {
   viewOnceReservation: "00000000-0000-4000-8000-000000060801",
   paidReservation: "00000000-0000-4000-8000-000000060802",
   lockedReservation: "00000000-0000-4000-8000-000000060803",
+  legacyViewOnceReservation: "00000000-0000-4000-8000-000000060804",
+  legacyPaidReservation: "00000000-0000-4000-8000-000000060805",
   permanentMessage: "00000000-0000-4000-8000-000000060901",
   viewOnceMessage: "00000000-0000-4000-8000-000000060902",
   paidMessage: "00000000-0000-4000-8000-000000060903",
   lockedMessage: "00000000-0000-4000-8000-000000060904",
+  legacyViewOnceMessage: "00000000-0000-4000-8000-000000060905",
+  legacyPaidMessage: "00000000-0000-4000-8000-000000060906",
   permanentAttachment: "00000000-0000-4000-8000-000000061001",
   viewOnceAttachment: "00000000-0000-4000-8000-000000061002",
   paidAttachment: "00000000-0000-4000-8000-000000061003",
   lockedAttachment: "00000000-0000-4000-8000-000000061004",
+  legacyViewOnceAttachment: "00000000-0000-4000-8000-000000061005",
+  legacyPaidAttachment: "00000000-0000-4000-8000-000000061006",
 };
 
 const emails = {
@@ -529,6 +538,12 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       { id: ids.ownerSendAsset, source_path: `${folder}/v4_3_media_owner_send_source.webp` },
       { id: ids.otherSendAsset, source_path: `${folder}/v4_3_media_other_send_source.webp` },
       { id: ids.raceAsset, source_path: `${folder}/v4_3_media_race_source.webp` },
+      { id: ids.legacyViewOnceAsset, source_path: `${folder}/v4_3_media_legacy_view_once.webp` },
+      {
+        id: ids.legacyPaidAsset,
+        source_path: `${folder}/v4_3_media_legacy_paid.webp`,
+        paid_open_price_credits: legacyPaidPrice,
+      },
     ];
     for (const asset of assetRows) {
       await insertRow(service, "character_media_assets", {
@@ -644,6 +659,33 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       "permanent",
       "locked",
       5,
+    );
+    await seedAttachment(
+      ids.legacyViewOnceReservation,
+      ids.legacyViewOnceAsset,
+      ids.legacyViewOnceMessage,
+      ids.legacyViewOnceAttachment,
+      "view_once",
+    );
+    // The insert trigger applies the current policy. Model a pre-policy row without changing the flag.
+    const legacyViewOnce = await service
+      .from("message_attachments")
+      .update({ view_policy_version: "legacy" })
+      .eq("id", ids.legacyViewOnceAttachment)
+      .eq("message_id", ids.legacyViewOnceMessage)
+      .select("view_policy_version")
+      .single();
+    if (legacyViewOnce.error || legacyViewOnce.data?.view_policy_version !== "legacy") {
+      throw new Error("Could not seed the legacy View Once policy fixture.");
+    }
+    await seedAttachment(
+      ids.legacyPaidReservation,
+      ids.legacyPaidAsset,
+      ids.legacyPaidMessage,
+      ids.legacyPaidAttachment,
+      "paid_open",
+      "standard",
+      legacyPaidPrice,
     );
     const { error: restoreConversationError } = await service
       .from("conversations")
@@ -1969,6 +2011,90 @@ RETURNING id;
       }),
     );
   });
+
+  it("preserves the seven-second legacy View Once window", async () => {
+    const body = { kind: "message_attachment", attachment_id: ids.legacyViewOnceAttachment };
+    await expectUnavailable(await invokeMediaView(owner, body));
+
+    const opened = await owner.rpc("open_free_view_once_attachment", {
+      _attachment_id: ids.legacyViewOnceAttachment,
+      _idempotency_key: "00000000-0000-4000-8000-000000061105",
+    });
+    expect(opened.error).toBeNull();
+    expect(opened.data).toMatchObject({
+      attachment_id: ids.legacyViewOnceAttachment,
+      render_state: "view_once_opened",
+      view_policy_version: "legacy",
+    });
+    await expectSignedMedia(await invokeMediaView(owner, body), 7);
+
+    const completed = await owner.rpc("complete_free_view_once_attachment", {
+      _attachment_id: ids.legacyViewOnceAttachment,
+    });
+    expect(completed.error).toBeNull();
+    expect(completed.data).toMatchObject({
+      attachment_id: ids.legacyViewOnceAttachment,
+      completed: true,
+    });
+    await expectUnavailable(await invokeMediaView(owner, body));
+  }, 15_000);
+
+  it("preserves the seven-second pre-Gift paid-open window and single charge", async () => {
+    const body = { kind: "message_attachment", attachment_id: ids.legacyPaidAttachment };
+    await expectUnavailable(await invokeMediaView(owner, body));
+    const wallet = await service
+      .from("credit_wallets")
+      .select("balance")
+      .eq("user_id", userId(emails.owner))
+      .single();
+    expect(wallet.error).toBeNull();
+    expect(wallet.data?.balance).toBeGreaterThanOrEqual(legacyPaidPrice);
+
+    const request = {
+      _attachment_id: ids.legacyPaidAttachment,
+      _idempotency_key: "00000000-0000-4000-8000-000000061106",
+    };
+    const opened = await owner.rpc("open_paid_message_attachment", request);
+    expect(opened.error).toBeNull();
+    expect(opened.data).toMatchObject({
+      session_id: expect.any(String),
+      already_opened: false,
+      balance: wallet.data!.balance - legacyPaidPrice,
+    });
+    const sessionId = (opened.data as { session_id: string }).session_id;
+    await expectSignedMedia(await invokeMediaView(owner, body), 7);
+
+    const completed = await owner.rpc("complete_paid_message_attachment_session", {
+      _session_id: sessionId,
+    });
+    expect(completed.error).toBeNull();
+    expect(completed.data).toMatchObject({ session_id: sessionId, completed: true });
+    const replay = await owner.rpc("open_paid_message_attachment", request);
+    expect(replay.error).toBeNull();
+    expect(replay.data).toMatchObject({ session_id: sessionId, already_opened: true });
+    await expectUnavailable(await invokeMediaView(owner, body));
+
+    const transactions = await service
+      .from("credit_transactions")
+      .select("user_id,amount,type,message_id")
+      .eq("message_attachment_id", ids.legacyPaidAttachment)
+      .order("amount", { ascending: true });
+    expect(transactions.error).toBeNull();
+    expect(transactions.data).toEqual([
+      {
+        user_id: userId(emails.owner),
+        amount: -legacyPaidPrice,
+        type: "paid_image_open_spend",
+        message_id: ids.legacyPaidMessage,
+      },
+      {
+        user_id: userId(emails.assigned),
+        amount: legacyPaidPrice,
+        type: "paid_image_open_payout",
+        message_id: ids.legacyPaidMessage,
+      },
+    ]);
+  }, 15_000);
 });
 
 suite("WP06B profile image Storage cleanup", () => {
