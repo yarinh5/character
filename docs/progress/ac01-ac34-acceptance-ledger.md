@@ -1,5 +1,7 @@
 # AC01-AC34 acceptance ledger
 
+The [Product Owner Definition of Done](../definition-of-done.md) governs completion status alongside the specification and work plan. Engineering completion, product acceptance, public launch readiness, and contractual delivery are separate decisions.
+
 As of 2026-11-27. Source of truth: `Product Specification and Work Plan 2026-10-06.md`, section 10.2. AC16 has two separately testable parts, so the 34 numbered criteria occupy 35 rows. This is a completion list, not a new work plan.
 
 Product Owner completion decision (2026-11-27): DEVELOPMENT COMPLETE means all approved functionality is implemented in one integrated source; PRODUCT ACCEPTED means required end-to-end journeys, Realtime without manual refresh, permissions, credits, media and data integrity pass with no open P0/P1; PROJECT DELIVERED adds delivery gates, contract alignment and external approvals. The current goal targets PRODUCT ACCEPTED within existing permissions. Cosmetic perfection, 100% test coverage and extra verification infrastructure are not acceptance gates. Product acceptance is not yet established; external delivery decisions remain separate.
