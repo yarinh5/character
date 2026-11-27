@@ -125,7 +125,9 @@ export const acceptInvite = createServerFn({ method: "POST" })
     // Check existing user by email
     let userId: string | null = null;
     const { data: list } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-    const existing = list?.users?.find((u) => u.email?.toLowerCase() === invite.email.toLowerCase());
+    const existing = list?.users?.find(
+      (u) => u.email?.toLowerCase() === invite.email.toLowerCase(),
+    );
 
     if (existing) {
       userId = existing.id;

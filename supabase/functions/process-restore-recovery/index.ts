@@ -40,9 +40,7 @@ Deno.serve(async (request) => {
   const recoveryConfig = readRecoveryConnectionConfig({
     RESTORE_RECOVERY_AUTHORITY_HMAC_KEY: hmacKey,
     RESTORE_RECOVERY_EXPECTED_LOCK_ID: Deno.env.get("RESTORE_RECOVERY_EXPECTED_LOCK_ID"),
-    RESTORE_RECOVERY_EXPECTED_AUTHORITY_ID: Deno.env.get(
-      "RESTORE_RECOVERY_EXPECTED_AUTHORITY_ID",
-    ),
+    RESTORE_RECOVERY_EXPECTED_AUTHORITY_ID: Deno.env.get("RESTORE_RECOVERY_EXPECTED_AUTHORITY_ID"),
     RESTORE_RECOVERY_CONTRACT_VERSION: Deno.env.get("RESTORE_RECOVERY_CONTRACT_VERSION"),
     RESTORE_RECOVERY_IMPORT_ENABLED: Deno.env.get("RESTORE_RECOVERY_IMPORT_ENABLED"),
     RESTORE_RECOVERY_RELEASE_ENABLED: Deno.env.get("RESTORE_RECOVERY_RELEASE_ENABLED"),
@@ -62,14 +60,16 @@ Deno.serve(async (request) => {
 
   let body: {
     action?: string;
-    payload?: RestoreRecoveryImport | {
-      eventId: string;
-      eventVersion: number;
-      contractVersion: string;
-      externalLockId: string;
-      externalAuthorityId: string;
-      releaseEvidenceHash: string;
-    };
+    payload?:
+      | RestoreRecoveryImport
+      | {
+          eventId: string;
+          eventVersion: number;
+          contractVersion: string;
+          externalLockId: string;
+          externalAuthorityId: string;
+          releaseEvidenceHash: string;
+        };
   };
   try {
     body = JSON.parse(raw);
@@ -79,14 +79,13 @@ Deno.serve(async (request) => {
   if (!body.payload || !["import", "release"].includes(body.action ?? "")) {
     return json(400, { code: "unsupported_recovery_action" });
   }
-  const configurationFailure = validateRecoveryEnvelopeConfiguration(
-    body.payload,
-    recoveryConfig,
-  );
+  const configurationFailure = validateRecoveryEnvelopeConfiguration(body.payload, recoveryConfig);
   if (configurationFailure) {
     return json(409, { code: configurationFailure });
   }
-  const trusted = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+  const trusted = createClient(url, service, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const rpc = async (name: string, args: Record<string, unknown>) => {
     const { data, error } = await trusted.rpc(name, args);
     if (error) throw new Error(name.replace(/_for_server$/, "") + "_failed");
@@ -97,8 +96,12 @@ Deno.serve(async (request) => {
       return json(503, { code: "recovery_release_disabled" });
     }
     const release = body.payload as {
-      eventId: string; eventVersion: number; externalLockId: string; releaseEvidenceHash: string;
-      externalAuthorityId: string; contractVersion: string;
+      eventId: string;
+      eventVersion: number;
+      externalLockId: string;
+      releaseEvidenceHash: string;
+      externalAuthorityId: string;
+      contractVersion: string;
     };
     try {
       const status = await rpc("complete_restore_recovery_release_for_server", {
@@ -109,7 +112,9 @@ Deno.serve(async (request) => {
       });
       return json(200, { status });
     } catch (error) {
-      return json(409, { code: error instanceof Error ? error.message : "recovery_release_failed" });
+      return json(409, {
+        code: error instanceof Error ? error.message : "recovery_release_failed",
+      });
     }
   }
   if (!recoveryConfig.importEnabled) {
@@ -132,38 +137,54 @@ Deno.serve(async (request) => {
             _owner_admin_id: input.ownerAdminId,
             _external_lock_evidence_hash: input.externalLockEvidenceHash,
           });
-          return { eventVersion: Number((data as Array<{ event_version: number }>)[0].event_version) };
+          return {
+            eventVersion: Number((data as Array<{ event_version: number }>)[0].event_version),
+          };
         },
         importAuthorityManifest: async (input, eventVersion) => {
           await rpc("import_restore_recovery_manifest_for_server", {
-            _event_id: input.eventId, _event_version: eventVersion,
-            _manifest_id: input.manifestId, _authority_id: input.externalAuthorityId,
-            _sequence: input.sequence, _previous_manifest_hash: input.previousManifestHash,
-            _manifest_hash: input.manifestHash, _coverage_through: input.coverageThrough,
-            _generated_at: input.generatedAt, _deletion_coverage_complete: input.deletionCoverageComplete,
+            _event_id: input.eventId,
+            _event_version: eventVersion,
+            _manifest_id: input.manifestId,
+            _authority_id: input.externalAuthorityId,
+            _sequence: input.sequence,
+            _previous_manifest_hash: input.previousManifestHash,
+            _manifest_hash: input.manifestHash,
+            _coverage_through: input.coverageThrough,
+            _generated_at: input.generatedAt,
+            _deletion_coverage_complete: input.deletionCoverageComplete,
           });
         },
         recordReconciliation: async (eventId, eventVersion, entry) => {
           await rpc("record_restore_reconciliation_for_server", {
-            _event_id: eventId, _event_version: eventVersion,
-            _manifest_id: body.payload!.manifestId, _category: entry.category,
+            _event_id: eventId,
+            _event_version: eventVersion,
+            _manifest_id: body.payload!.manifestId,
+            _category: entry.category,
             _outcome: entry.outcome,
-            _matched_count: entry.matchedCount, _gap_count: entry.gapCount,
-            _unknown_count: entry.unknownCount, _evidence_hash: entry.evidenceHash,
+            _matched_count: entry.matchedCount,
+            _gap_count: entry.gapCount,
+            _unknown_count: entry.unknownCount,
+            _evidence_hash: entry.evidenceHash,
           });
         },
         stageDeletionReplay: async (eventId, eventVersion, entry) => {
           await rpc("stage_restore_deletion_replay_for_server", {
-            _event_id: eventId, _event_version: eventVersion,
+            _event_id: eventId,
+            _event_version: eventVersion,
             _manifest_id: body.payload!.manifestId,
-            _request_kind: entry.requestKind, _request_id: entry.requestId,
-            _policy_version: entry.policyVersion, _completed_at: entry.completedAt,
-            _evidence_hash: entry.evidenceHash, _hold: entry.hold,
+            _request_kind: entry.requestKind,
+            _request_id: entry.requestId,
+            _policy_version: entry.policyVersion,
+            _completed_at: entry.completedAt,
+            _evidence_hash: entry.evidenceHash,
+            _hold: entry.hold,
           });
         },
         finalizeImport: async (eventId, eventVersion) => {
           const data = await rpc("finalize_restore_recovery_import_for_server", {
-            _event_id: eventId, _event_version: eventVersion,
+            _event_id: eventId,
+            _event_version: eventVersion,
           });
           const row = (data as Array<{ status: "blocked"; event_version: number }>)[0];
           if (!row) throw new Error("recovery_import_result_missing");
@@ -171,7 +192,9 @@ Deno.serve(async (request) => {
         },
         failImport: async (eventId, eventVersion, failureCode) => {
           await rpc("fail_restore_recovery_import_for_server", {
-            _event_id: eventId, _event_version: eventVersion, _failure_code: failureCode,
+            _event_id: eventId,
+            _event_version: eventVersion,
+            _failure_code: failureCode,
           });
         },
       },
@@ -187,4 +210,3 @@ Deno.serve(async (request) => {
     return json(409, { code: error instanceof Error ? error.message : "recovery_import_failed" });
   }
 });
-

@@ -9,7 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { AccountSecurityCard, AccountSummaryCard } from "@/components/account/AccountSettingsShared";
+import {
+  AccountSecurityCard,
+  AccountSummaryCard,
+} from "@/components/account/AccountSettingsShared";
 import { NotificationSettingsCard } from "@/components/account/NotificationSettingsCard";
 
 export const Route = createFileRoute("/operator/settings")({
@@ -24,7 +27,12 @@ const STATUS_OPTIONS = [
 
 type AssignedRow = {
   character_id: string;
-  characters: { id: string; name: string; avatar_url: string | null; availability_status: string } | null;
+  characters: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    availability_status: string;
+  } | null;
   openCount: number;
 };
 
@@ -111,7 +119,12 @@ function OperatorSettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">{user?.email}</p>
       </header>
 
-      <AccountSummaryCard displayName={fullName} email={profileEmail} role={role} status={profileStatus} />
+      <AccountSummaryCard
+        displayName={fullName}
+        email={profileEmail}
+        role={role}
+        status={profileStatus}
+      />
 
       {operator ? (
         <Card>
@@ -130,8 +143,14 @@ function OperatorSettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <span id="operator-availability-label" className="text-sm font-medium leading-none">סטטוס זמינות</span>
-                <div className="flex gap-2" role="group" aria-labelledby="operator-availability-label">
+                <span id="operator-availability-label" className="text-sm font-medium leading-none">
+                  סטטוס זמינות
+                </span>
+                <div
+                  className="flex gap-2"
+                  role="group"
+                  aria-labelledby="operator-availability-label"
+                >
                   {STATUS_OPTIONS.map((s) => (
                     <button
                       key={s.value}
@@ -175,10 +194,17 @@ function OperatorSettingsPage() {
             ) : (
               <div className="space-y-2">
                 {assigned.map((a) => (
-                  <div key={a.character_id} className="flex items-center gap-3 p-2 rounded-lg border border-border">
+                  <div
+                    key={a.character_id}
+                    className="flex items-center gap-3 p-2 rounded-lg border border-border"
+                  >
                     <div className="h-10 w-10 rounded-full bg-muted overflow-hidden shrink-0">
                       {a.characters?.avatar_url ? (
-                        <img src={a.characters.avatar_url} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={a.characters.avatar_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center text-sm font-semibold">
                           {a.characters?.name?.[0] ?? "?"}
@@ -186,7 +212,9 @@ function OperatorSettingsPage() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{a.characters?.name ?? "—"}</div>
+                      <div className="font-medium text-sm truncate">
+                        {a.characters?.name ?? "—"}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {a.characters?.availability_status === "available" ? "זמינה" : "לא זמינה"} ·{" "}
                         {a.openCount} שיחות פתוחות

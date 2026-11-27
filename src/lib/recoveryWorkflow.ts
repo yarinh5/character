@@ -1,4 +1,10 @@
-export type RecoveryRequirementState = "verified" | "pending" | "missing" | "gap" | "unknown" | "failed";
+export type RecoveryRequirementState =
+  | "verified"
+  | "pending"
+  | "missing"
+  | "gap"
+  | "unknown"
+  | "failed";
 
 export type RecoveryGateState = {
   eventId: string;
@@ -38,10 +44,7 @@ export function evaluateRecoveryGate(state: RecoveryGateState | null): RecoveryG
   if (state.personalDataReview !== "verified") {
     return { blocked: true, code: "recovery_personal_data_unverified" };
   }
-  if (
-    state.approvalEventId !== state.eventId ||
-    state.approvalVersion !== state.version
-  ) {
+  if (state.approvalEventId !== state.eventId || state.approvalVersion !== state.version) {
     return { blocked: true, code: "recovery_approval_stale" };
   }
   if (state.status !== "reopened") {

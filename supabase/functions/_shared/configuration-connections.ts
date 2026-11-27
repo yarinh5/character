@@ -16,7 +16,7 @@ export function resolveAllowedAuthRedirect(
   if (!configured || allowedOrigins.size === 0) return null;
   try {
     const target = new URL(configured);
-    if (!['http:', 'https:'].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
+    if (!["http:", "https:"].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
       return null;
     }
     return target.toString();
@@ -67,8 +67,7 @@ export function buildServerConfigurationStatus(
     },
     {
       key: "account_deletion_email_redirects",
-      state:
-        deletionConfirm && deletionCancel ? "configured_not_verified" : "not_configured",
+      state: deletionConfirm && deletionCancel ? "configured_not_verified" : "not_configured",
       actionsEnabled: !!deletionConfirm && !!deletionCancel,
       requiredBy: "account_deletion_verification_and_cancellation",
     },

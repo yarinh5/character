@@ -444,7 +444,11 @@ function classifyContainerEvent(event, projectId) {
   return {
     kind: "ambiguous",
     containerId: candidateId,
-    reason: !eventProject ? "project_label_missing" : !name ? "container_name_missing" : "identity_conflict",
+    reason: !eventProject
+      ? "project_label_missing"
+      : !name
+        ? "container_name_missing"
+        : "identity_conflict",
   };
 }
 

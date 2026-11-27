@@ -102,7 +102,7 @@ export function resolveRegistrationConfiguration(
   if (!configured || allowedOrigins.size === 0) return null;
   try {
     const target = new URL(configured);
-    if (!['http:', 'https:'].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
+    if (!["http:", "https:"].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
       return null;
     }
     return { emailVerificationRedirectUrl: target.toString() };
@@ -123,52 +123,56 @@ function getPublicAuthClient() {
 export const registerClient = createServerFn({ method: "POST" })
   .inputValidator((input) => registrationSchema.parse(input))
   .handler(async ({ data }) =>
-    registerClientWithDependencies(data, {
-      async issueAdmission(input) {
-        const { data: result, error } = await supabaseAdmin.rpc(
-          "create_registration_admission_for_server",
-          {
-            _email: input.email,
-            _age_confirmed: input.ageConfirmed,
-            _terms_accepted: input.termsAccepted,
-          },
-        );
-        if (error || !result || typeof result !== "object" || Array.isArray(result)) {
-          throw new RegistrationFailure("registration_unavailable");
-        }
-        const record = result as Record<string, unknown>;
-        if (record.allowed !== true) {
-          const reason = record.reason;
-          if (reason === "registration_paused" || reason === "registration_rate_limited") {
-            return { allowed: false, reason };
+    registerClientWithDependencies(
+      data,
+      {
+        async issueAdmission(input) {
+          const { data: result, error } = await supabaseAdmin.rpc(
+            "create_registration_admission_for_server",
+            {
+              _email: input.email,
+              _age_confirmed: input.ageConfirmed,
+              _terms_accepted: input.termsAccepted,
+            },
+          );
+          if (error || !result || typeof result !== "object" || Array.isArray(result)) {
+            throw new RegistrationFailure("registration_unavailable");
           }
-          return { allowed: false, reason: "registration_unavailable" };
-        }
-        if (typeof record.admission_token !== "string" || typeof record.expires_at !== "string") {
-          throw new RegistrationFailure("registration_unavailable");
-        }
-        return {
-          allowed: true,
-          admissionToken: record.admission_token,
-          expiresAt: record.expires_at,
-        };
-      },
-      async signUp(input) {
-        const { data: result, error } = await getPublicAuthClient().auth.signUp({
-          email: input.email,
-          password: input.password,
-          options: {
-            emailRedirectTo: input.redirectUrl,
-            data: input.metadata,
-          },
-        });
-        if (error) {
-          if (error.message.toLowerCase().includes("already registered")) {
-            throw new RegistrationFailure("already_registered");
+          const record = result as Record<string, unknown>;
+          if (record.allowed !== true) {
+            const reason = record.reason;
+            if (reason === "registration_paused" || reason === "registration_rate_limited") {
+              return { allowed: false, reason };
+            }
+            return { allowed: false, reason: "registration_unavailable" };
           }
-          throw new RegistrationFailure("auth_failed");
-        }
-        return { userId: result.user?.id ?? null };
+          if (typeof record.admission_token !== "string" || typeof record.expires_at !== "string") {
+            throw new RegistrationFailure("registration_unavailable");
+          }
+          return {
+            allowed: true,
+            admissionToken: record.admission_token,
+            expiresAt: record.expires_at,
+          };
+        },
+        async signUp(input) {
+          const { data: result, error } = await getPublicAuthClient().auth.signUp({
+            email: input.email,
+            password: input.password,
+            options: {
+              emailRedirectTo: input.redirectUrl,
+              data: input.metadata,
+            },
+          });
+          if (error) {
+            if (error.message.toLowerCase().includes("already registered")) {
+              throw new RegistrationFailure("already_registered");
+            }
+            throw new RegistrationFailure("auth_failed");
+          }
+          return { userId: result.user?.id ?? null };
+        },
       },
-    }, resolveRegistrationConfiguration(process.env)),
+      resolveRegistrationConfiguration(process.env),
+    ),
   );

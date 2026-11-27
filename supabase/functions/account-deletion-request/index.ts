@@ -31,9 +31,7 @@ async function handleRequest(request: Request, json: AccountDeletionJson) {
   const redirect = resolveAllowedAuthRedirect(
     {
       AUTH_REDIRECT_ALLOWED_ORIGINS: Deno.env.get("AUTH_REDIRECT_ALLOWED_ORIGINS"),
-      ACCOUNT_DELETION_CONFIRM_REDIRECT_URL: Deno.env.get(
-        "ACCOUNT_DELETION_CONFIRM_REDIRECT_URL",
-      ),
+      ACCOUNT_DELETION_CONFIRM_REDIRECT_URL: Deno.env.get("ACCOUNT_DELETION_CONFIRM_REDIRECT_URL"),
     },
     "ACCOUNT_DELETION_CONFIRM_REDIRECT_URL",
   );

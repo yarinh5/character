@@ -1032,7 +1032,12 @@ function CreditSettingsTab() {
               key={setting.key}
               className={setting.type === "bool" ? "flex items-center justify-between" : ""}
             >
-              <Label htmlFor={`credit-setting-${setting.key}`} className={setting.type === "bool" ? "" : "block mb-1"}>{setting.label}</Label>
+              <Label
+                htmlFor={`credit-setting-${setting.key}`}
+                className={setting.type === "bool" ? "" : "block mb-1"}
+              >
+                {setting.label}
+              </Label>
               {setting.type === "bool" ? (
                 <Switch
                   id={`credit-setting-${setting.key}`}

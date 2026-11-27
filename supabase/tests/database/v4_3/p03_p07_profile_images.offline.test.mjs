@@ -19,8 +19,7 @@ const clientArchiveHttp = readFileSync(
 
 const archiveClientId = "00000000-0000-4000-8000-000000040102";
 const archiveImagePath = `${archiveClientId}/v4-3-d1-profile.webp`;
-const archiveImageUrl =
-  `https://project.invalid/storage/v1/object/public/user-avatars/${archiveImagePath}`;
+const archiveImageUrl = `https://project.invalid/storage/v1/object/public/user-avatars/${archiveImagePath}`;
 
 test("P03 counts a canonical Gift completion without counting started/open replays", () => {
   assert.match(levels, /OLD\.status\s+NOT\s+IN\s*\('purchased',\s*'opened'\)/u);
@@ -73,7 +72,10 @@ test("client archive SQL fixture creates its owned canonical avatar before profi
   assert.match(clientArchiveSql, /'user-avatars'/u);
   assert.match(clientArchiveSql, new RegExp(archiveImagePath.replaceAll(".", "\\."), "u"));
   assert.match(clientArchiveSql, new RegExp(archiveClientId, "u"));
-  assert.match(clientArchiveSql, /jsonb_build_object\('mimetype',\s*'image\/webp',\s*'size',\s*1024\)/u);
+  assert.match(
+    clientArchiveSql,
+    /jsonb_build_object\('mimetype',\s*'image\/webp',\s*'size',\s*1024\)/u,
+  );
   assert.equal(
     clientArchiveSql.split(archiveImageUrl).length - 1,
     2,
@@ -87,22 +89,15 @@ test("client archive HTTP fixture uploads an owned avatar before profile upsert 
   const clientSignIn = clientArchiveHttp.indexOf(
     "clientSession = await signInSyntheticUser(emails.client, clientUser.password)",
   );
-  const avatarUpload = clientArchiveHttp.indexOf(
-    ".storage.from(profileImageBucket).upload",
-  );
-  const profileUpsert = clientArchiveHttp.search(
-    /await upsertRow\(\s*admin,\s*"client_profiles"/u,
-  );
+  const avatarUpload = clientArchiveHttp.indexOf(".storage.from(profileImageBucket).upload");
+  const profileUpsert = clientArchiveHttp.search(/await upsertRow\(\s*admin,\s*"client_profiles"/u);
   assert.notEqual(clientSignIn, -1, "client session must be established");
   assert.notEqual(avatarUpload, -1, "fixture must upload the avatar through Storage");
   assert.notEqual(profileUpsert, -1, "fixture must upsert the profile");
   assert.ok(clientSignIn < avatarUpload, "the owner must sign in before uploading");
   assert.ok(avatarUpload < profileUpsert, "the Storage object must exist before profile upsert");
 
-  assert.match(
-    clientArchiveHttp,
-    /`\$\{clientUser\.user\.id\}\/v4-3-d1-profile\.webp`/u,
-  );
+  assert.match(clientArchiveHttp, /`\$\{clientUser\.user\.id\}\/v4-3-d1-profile\.webp`/u);
   assert.match(clientArchiveHttp, /contentType:\s*"image\/webp"/u);
   assert.match(clientArchiveHttp, /upsert:\s*false/u);
   assert.match(clientArchiveHttp, /getPublicUrl\(objectPath\)/u);

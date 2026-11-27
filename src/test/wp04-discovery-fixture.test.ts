@@ -58,6 +58,8 @@ describe("WP04 discovery fixture provisioning contract", () => {
     expect(sql).toContain("The client has exactly the default client role");
     expect(sql).toContain("The assigned operator has exactly client and operator roles");
     expect(sql).toContain("The other operator has exactly client and operator roles");
-    expect(sql).toContain("Discovery resolves a character without an ambiguous return-column reference");
+    expect(sql).toContain(
+      "Discovery resolves a character without an ambiguous return-column reference",
+    );
   });
 });

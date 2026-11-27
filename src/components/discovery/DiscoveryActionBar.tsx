@@ -48,7 +48,10 @@ export function DiscoveryActionBar({
   onViewProfile,
 }: DiscoveryActionBarProps) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3" onPointerDown={(event) => event.stopPropagation()}>
+    <div
+      className="flex flex-wrap items-center justify-center gap-3"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <IconAction
         label="דלג"
         variant="outline"
@@ -86,11 +89,21 @@ export function DiscoveryActionBar({
           <HeartOff className="h-5 w-5" />
         </IconAction>
       )}
-      <Button variant="outline" disabled={disabled} onClick={onViewProfile} className="h-12 shrink-0 whitespace-nowrap px-4">
+      <Button
+        variant="outline"
+        disabled={disabled}
+        onClick={onViewProfile}
+        className="h-12 shrink-0 whitespace-nowrap px-4"
+      >
         <UserRound className="h-4 w-4" />
         לפרופיל
       </Button>
-      <Button variant="secondary" disabled={disabled || startingChat} onClick={onStartChat} className="h-12 px-4">
+      <Button
+        variant="secondary"
+        disabled={disabled || startingChat}
+        onClick={onStartChat}
+        className="h-12 px-4"
+      >
         <MessageCirclePlus className="h-4 w-4" />
         {startingChat ? "פותח שיחה..." : conversationId ? "המשך שיחה" : "התחל שיחה"}
       </Button>

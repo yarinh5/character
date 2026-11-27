@@ -89,11 +89,7 @@ describe("restore recovery import orchestration", () => {
     await expect(runRestoreRecoveryImport(io, input, "signed-envelope")).rejects.toThrow(
       "recovery_deletion_stage_failed",
     );
-    expect(io.failImport).toHaveBeenCalledWith(
-      input.eventId,
-      1,
-      "recovery_deletion_stage_failed",
-    );
+    expect(io.failImport).toHaveBeenCalledWith(input.eventId, 1, "recovery_deletion_stage_failed");
     expect(io.finalizeImport).not.toHaveBeenCalled();
   });
 });

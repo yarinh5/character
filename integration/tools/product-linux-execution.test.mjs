@@ -17,7 +17,10 @@ import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { PRODUCT_HTTP_FILES, runProductHttp } from "../../supabase/tests/http/paid-sticker-window.mjs";
+import {
+  PRODUCT_HTTP_FILES,
+  runProductHttp,
+} from "../../supabase/tests/http/paid-sticker-window.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const artifact = join(here, "product-linux-execution.sh");
@@ -80,7 +83,11 @@ function currentIdentity() {
   return { uid: uid.stdout.trim(), gid: gid.stdout.trim() };
 }
 
-function makeFixture({ deltaCount = 48, expectedDeltaCount = 48, preexistingDenoLock = false } = {}) {
+function makeFixture({
+  deltaCount = 48,
+  expectedDeltaCount = 48,
+  preexistingDenoLock = false,
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), "product-execution-artifact-"));
   const source = join(root, "source with spaces");
   const repository = join(source, "repository");
@@ -110,14 +117,31 @@ function makeFixture({ deltaCount = 48, expectedDeltaCount = 48, preexistingDeno
   mkdirSync(downloads, { recursive: true });
   write(
     join(dockerConfig, "config.json"),
-    JSON.stringify({ currentContext: "desktop-linux", contexts: { "desktop-linux": "npipe://./pipe/dockerDesktopLinuxEngine" } }) + "\n",
+    JSON.stringify({
+      currentContext: "desktop-linux",
+      contexts: { "desktop-linux": "npipe://./pipe/dockerDesktopLinuxEngine" },
+    }) + "\n",
   );
 
   write(join(repository, "integration", "EXECUTION-PACKAGE.md"), "fixture execution package\n");
-  write(join(repository, "integration", "tools", "product-service-log-collector.mjs"), "// collector\n");
-  write(join(repository, "integration", "tools", "product-service-log-collector.test.mjs"), "// collector test\n");
+  write(
+    join(repository, "integration", "tools", "product-service-log-collector.mjs"),
+    "// collector\n",
+  );
+  write(
+    join(repository, "integration", "tools", "product-service-log-collector.test.mjs"),
+    "// collector test\n",
+  );
   cpSync(artifact, join(repository, "integration", "tools", "product-linux-execution.sh"));
-  write(join(repository, "integration", "candidate-migrations", "product_completion_read_access_gate.sql"), "select 1;\n");
+  write(
+    join(
+      repository,
+      "integration",
+      "candidate-migrations",
+      "product_completion_read_access_gate.sql",
+    ),
+    "select 1;\n",
+  );
   write(join(repository, "supabase", ".temp", "cli-latest"), "2.95.4\n");
   write(join(repository, "supabase", "config.toml"), "project_id = 'fixture'\n");
   write(join(repository, "package-lock.json"), "{}\n");
@@ -137,13 +161,16 @@ function makeFixture({ deltaCount = 48, expectedDeltaCount = 48, preexistingDeno
   repoFiles.sort();
   write(
     join(manifests, "integration-target-full.sha256"),
-    repoFiles.map((path) => `${sha256(join(repository, ...path.split("/")))}  ${path}`).join("\n") + "\n",
+    repoFiles.map((path) => `${sha256(join(repository, ...path.split("/")))}  ${path}`).join("\n") +
+      "\n",
   );
   write(join(manifests, "product-source-files.json"), "[]\n");
   write(join(manifests, "integration-target-full-files.json"), "[]\n");
   write(
     join(manifests, "integration-target-delta.json"),
-    JSON.stringify({ files: Array.from({ length: deltaCount }, (_, index) => ({ path: `p${index}` })) }),
+    JSON.stringify({
+      files: Array.from({ length: deltaCount }, (_, index) => ({ path: `p${index}` })),
+    }),
   );
   write(join(manifests, "snapshot-metadata.json"), "{}\n");
 
@@ -366,7 +393,7 @@ esac
   );
   write(
     join(fakeBin, "sleep"),
-    "#!/usr/bin/env bash\nprintf 'sleep:%s\\n' \"$*\" >>\"$ACTION_LOG\"\nexit 0\n",
+    '#!/usr/bin/env bash\nprintf \'sleep:%s\\n\' "$*" >>"$ACTION_LOG"\nexit 0\n',
     0o755,
   );
   write(
@@ -476,8 +503,12 @@ exec /usr/bin/rm "$@"
     delta: sha256(join(manifests, "integration-target-delta.json")),
     checksum: sha256(join(manifests, "integration-target-full.sha256")),
     metadata: sha256(join(manifests, "snapshot-metadata.json")),
-    collector: sha256(join(repository, "integration", "tools", "product-service-log-collector.mjs")),
-    collectorTest: sha256(join(repository, "integration", "tools", "product-service-log-collector.test.mjs")),
+    collector: sha256(
+      join(repository, "integration", "tools", "product-service-log-collector.mjs"),
+    ),
+    collectorTest: sha256(
+      join(repository, "integration", "tools", "product-service-log-collector.test.mjs"),
+    ),
     archive: sha256(archive),
     checksums: sha256(checksums),
   };
@@ -496,40 +527,72 @@ exec /usr/bin/rm "$@"
   };
   const bashPath = bashRun(["-c", "printf '%s' \"$PATH\""]).stdout;
   const common = [
-    "--run-id", runId,
-    "--source-root", posix.source,
-    "--verification-base", posix.verification,
-    "--evidence-base", posix.evidence,
-    "--approved-uid", uid,
-    "--approved-gid", gid,
-    "--install-root", posix.installRoot,
-    "--expected-source-files", String(repoFiles.length),
-    "--expected-delta-files", String(expectedDeltaCount),
-    "--execution-package-sha", hashes.execution,
-    "--product-source-manifest-sha", hashes.productSource,
-    "--full-manifest-sha", hashes.full,
-    "--delta-manifest-sha", hashes.delta,
-    "--checksum-manifest-sha", hashes.checksum,
-    "--metadata-sha", hashes.metadata,
-    "--collector-sha", hashes.collector,
-    "--collector-test-sha", hashes.collectorTest,
-    "--cli-archive-url", "https://fixture.invalid/supabase_linux_amd64.tar.gz",
-    "--cli-checksums-url", "https://fixture.invalid/supabase_2.95.4_checksums.txt",
-    "--cli-archive-sha", hashes.archive,
-    "--cli-checksums-sha", hashes.checksums,
-    "--curl-command", `${posix.fakeBin}/curl`,
-    "--install-command", `${posix.fakeBin}/install`,
-    "--rm-command", `${posix.fakeBin}/rm`,
+    "--run-id",
+    runId,
+    "--source-root",
+    posix.source,
+    "--verification-base",
+    posix.verification,
+    "--evidence-base",
+    posix.evidence,
+    "--approved-uid",
+    uid,
+    "--approved-gid",
+    gid,
+    "--install-root",
+    posix.installRoot,
+    "--expected-source-files",
+    String(repoFiles.length),
+    "--expected-delta-files",
+    String(expectedDeltaCount),
+    "--execution-package-sha",
+    hashes.execution,
+    "--product-source-manifest-sha",
+    hashes.productSource,
+    "--full-manifest-sha",
+    hashes.full,
+    "--delta-manifest-sha",
+    hashes.delta,
+    "--checksum-manifest-sha",
+    hashes.checksum,
+    "--metadata-sha",
+    hashes.metadata,
+    "--collector-sha",
+    hashes.collector,
+    "--collector-test-sha",
+    hashes.collectorTest,
+    "--cli-archive-url",
+    "https://fixture.invalid/supabase_linux_amd64.tar.gz",
+    "--cli-checksums-url",
+    "https://fixture.invalid/supabase_2.95.4_checksums.txt",
+    "--cli-archive-sha",
+    hashes.archive,
+    "--cli-checksums-sha",
+    hashes.checksums,
+    "--curl-command",
+    `${posix.fakeBin}/curl`,
+    "--install-command",
+    `${posix.fakeBin}/install`,
+    "--rm-command",
+    `${posix.fakeBin}/rm`,
   ];
   const environmentArgs = [
-    "--docker-context", environmentContract.context,
-    "--docker-endpoint", environmentContract.endpoint,
-    "--expected-engine-id", environmentContract.expectedEngineId,
-    "--forbidden-engine-id", environmentContract.forbiddenEngineId,
-    "--project-id", environmentContract.projectId,
-    "--port-range-start", environmentContract.portRangeStart,
-    "--port-range-end", environmentContract.portRangeEnd,
-    "--sleep-command", `${posix.fakeBin}/sleep`,
+    "--docker-context",
+    environmentContract.context,
+    "--docker-endpoint",
+    environmentContract.endpoint,
+    "--expected-engine-id",
+    environmentContract.expectedEngineId,
+    "--forbidden-engine-id",
+    environmentContract.forbiddenEngineId,
+    "--project-id",
+    environmentContract.projectId,
+    "--port-range-start",
+    environmentContract.portRangeStart,
+    "--port-range-end",
+    environmentContract.portRangeEnd,
+    "--sleep-command",
+    `${posix.fakeBin}/sleep`,
   ];
   common.push(...environmentArgs);
   const env = { ...process.env };
@@ -576,7 +639,9 @@ function execute(fixture, phase, scenario, environmentOverrides = {}, extraArgum
 }
 
 function actions(fixture) {
-  return existsSync(fixture.actionLog) ? readFileSync(fixture.actionLog, "utf8").trim().split(/\r?\n/) : [];
+  return existsSync(fixture.actionLog)
+    ? readFileSync(fixture.actionLog, "utf8").trim().split(/\r?\n/)
+    : [];
 }
 
 function prepareEnvironmentGateFixture(fixture) {
@@ -601,7 +666,16 @@ test("the fixed environment phase accepts missing Docker overrides", () => {
       DOCKER_TLS_VERIFY: undefined,
       DOCKER_CERT_PATH: undefined,
     });
-    assert.equal(result.status, 0, JSON.stringify({ stderr: result.stderr, signal: result.signal, error: result.error?.message, actions: actions(fixture) }));
+    assert.equal(
+      result.status,
+      0,
+      JSON.stringify({
+        stderr: result.stderr,
+        signal: result.signal,
+        error: result.error?.message,
+        actions: actions(fixture),
+      }),
+    );
     assert.match(result.stdout, /environment-user PASS/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -636,8 +710,14 @@ test("the fixed environment phase rejects a conflicting external Docker context"
       DOCKER_CONTEXT: secret,
     });
     assert.equal(result.status, 42);
-    assert.match(result.stderr, /docker\.override: DOCKER_CONTEXT conflicts with approved context \(exit 42\)/);
-    assert.equal(actions(fixture).some((entry) => entry.startsWith("docker:")), false);
+    assert.match(
+      result.stderr,
+      /docker\.override: DOCKER_CONTEXT conflicts with approved context \(exit 42\)/,
+    );
+    assert.equal(
+      actions(fixture).some((entry) => entry.startsWith("docker:")),
+      false,
+    );
     assert.equal(result.stdout.includes(secret), false);
     assert.equal(result.stderr.includes(secret), false);
   } finally {
@@ -659,10 +739,16 @@ for (const variable of ["DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"])
       });
       assert.equal(result.status, 42);
       assert.match(result.stderr, /docker\.override: .* is non-empty \(exit 42\)/);
-      assert.equal(actions(fixture).some((entry) => entry.startsWith("docker:")), false);
+      assert.equal(
+        actions(fixture).some((entry) => entry.startsWith("docker:")),
+        false,
+      );
       assert.equal(result.stdout.includes(secret), false);
       assert.equal(result.stderr.includes(secret), false);
-      const primary = readFileSync(join(fixture.evidence, fixture.runId, "primary-failure.tsv"), "utf8");
+      const primary = readFileSync(
+        join(fixture.evidence, fixture.runId, "primary-failure.tsv"),
+        "utf8",
+      );
       assert.match(primary, /^docker\.override\t42\t/);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
@@ -691,7 +777,10 @@ test("the fixed environment phase performs the complete context engine stability
     assert.equal(observed.filter((entry) => entry.startsWith("docker:network ls ")).length, 1);
     assert.equal(observed.filter((entry) => entry === "ss:-ltn").length, 1);
     const runEvidence = join(fixture.evidence, fixture.runId);
-    assert.equal(readFileSync(join(runEvidence, "engine-stability.txt"), "utf8").trim().split(/\r?\n/).length, 3);
+    assert.equal(
+      readFileSync(join(runEvidence, "engine-stability.txt"), "utf8").trim().split(/\r?\n/).length,
+      3,
+    );
     for (const name of [
       "docker-endpoint.json",
       "docker-versions.txt",
@@ -699,21 +788,62 @@ test("the fixed environment phase performs the complete context engine stability
       "volumes-before.txt",
       "networks-before.txt",
       "listeners-before.txt",
-    ]) assert.equal(existsSync(join(runEvidence, name)), true, name);
+    ])
+      assert.equal(existsSync(join(runEvidence, name)), true, name);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
 for (const failure of [
-  { scenario: "environment-context-fail", status: 31, gate: "environment.context", forbiddenAction: "docker:info " },
-  { scenario: "environment-endpoint-mismatch", status: 1, gate: "environment.endpoint", forbiddenAction: "docker:info " },
-  { scenario: "environment-engine-command-fail", status: 32, gate: "environment.engine", forbiddenAction: "docker:version " },
-  { scenario: "environment-engine-mismatch", status: 1, gate: "environment.engine-id", forbiddenAction: "docker:version " },
-  { scenario: "environment-forbidden-engine", status: 1, gate: "environment.engine-id", forbiddenAction: "docker:version " },
-  { scenario: "environment-inventory-fail", status: 33, gate: "environment.inventory-containers", forbiddenAction: "docker:volume ls " },
-  { scenario: "environment-container-residue", status: 1, gate: "environment.residue", forbiddenAction: "canary:" },
-  { scenario: "environment-listener-residue", status: 1, gate: "environment.residue", forbiddenAction: "canary:" },
+  {
+    scenario: "environment-context-fail",
+    status: 31,
+    gate: "environment.context",
+    forbiddenAction: "docker:info ",
+  },
+  {
+    scenario: "environment-endpoint-mismatch",
+    status: 1,
+    gate: "environment.endpoint",
+    forbiddenAction: "docker:info ",
+  },
+  {
+    scenario: "environment-engine-command-fail",
+    status: 32,
+    gate: "environment.engine",
+    forbiddenAction: "docker:version ",
+  },
+  {
+    scenario: "environment-engine-mismatch",
+    status: 1,
+    gate: "environment.engine-id",
+    forbiddenAction: "docker:version ",
+  },
+  {
+    scenario: "environment-forbidden-engine",
+    status: 1,
+    gate: "environment.engine-id",
+    forbiddenAction: "docker:version ",
+  },
+  {
+    scenario: "environment-inventory-fail",
+    status: 33,
+    gate: "environment.inventory-containers",
+    forbiddenAction: "docker:volume ls ",
+  },
+  {
+    scenario: "environment-container-residue",
+    status: 1,
+    gate: "environment.residue",
+    forbiddenAction: "canary:",
+  },
+  {
+    scenario: "environment-listener-residue",
+    status: 1,
+    gate: "environment.residue",
+    forbiddenAction: "canary:",
+  },
 ]) {
   test(`the fixed environment phase stops ${failure.scenario} before dependent work`, () => {
     const fixture = makeFixture();
@@ -726,9 +856,18 @@ for (const failure of [
       });
       assert.equal(result.status, failure.status, result.stderr);
       assert.doesNotMatch(result.stdout, /environment-user PASS/);
-      const primary = readFileSync(join(fixture.evidence, fixture.runId, "primary-failure.tsv"), "utf8");
-      assert.match(primary, new RegExp(`^${failure.gate.replaceAll(".", "\\.")}\\t${failure.status}\\t`));
-      assert.equal(actions(fixture).some((entry) => entry.startsWith(failure.forbiddenAction)), false);
+      const primary = readFileSync(
+        join(fixture.evidence, fixture.runId, "primary-failure.tsv"),
+        "utf8",
+      );
+      assert.match(
+        primary,
+        new RegExp(`^${failure.gate.replaceAll(".", "\\.")}\\t${failure.status}\\t`),
+      );
+      assert.equal(
+        actions(fixture).some((entry) => entry.startsWith(failure.forbiddenAction)),
+        false,
+      );
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -747,7 +886,10 @@ test("successful finalization preserves an environment gate primary failure", ()
     assert.equal(gate.status, 32, gate.stderr);
     const finalize = execute(fixture, "finalize-user", "success");
     assert.equal(finalize.status, 32, finalize.stderr);
-    assert.equal(readFileSync(join(fixture.evidence, fixture.runId, "finalize.result.txt"), "utf8"), "primary=32 cleanup=0\n");
+    assert.equal(
+      readFileSync(join(fixture.evidence, fixture.runId, "finalize.result.txt"), "utf8"),
+      "primary=32 cleanup=0\n",
+    );
     assert.equal(existsSync(join(fixture.verification, fixture.runId)), false);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -801,7 +943,9 @@ function productVitestInventory() {
     .find((line) => line.startsWith("npm exec -- vitest run "));
   assert.ok(command, "Product Vitest command must be present in the marked block");
   const selectedRoots = command.slice("npm exec -- vitest run ".length).trim().split(/\s+/);
-  const testFiles = repositoryFiles(repository, (path) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path));
+  const testFiles = repositoryFiles(repository, (path) =>
+    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path),
+  );
   const selected = testFiles.filter((path) =>
     selectedRoots.some((root) => path === root || path.startsWith(`${root}/`)),
   );
@@ -823,14 +967,25 @@ function documentedCollectorOwnershipScript(marker) {
   return match[1];
 }
 
-function runCollectorOwnershipScript(marker, { pid = "4242", ppid = "3131", runId = "run-owned", argv }) {
+function runCollectorOwnershipScript(
+  marker,
+  { pid = "4242", ppid = "3131", runId = "run-owned", argv },
+) {
   const root = mkdtempSync(join(tmpdir(), "product collector ownership "));
   try {
     write(join(root, pid, "status"), `Name:\tnode\nPPid:\t${ppid}\n`);
     write(join(root, pid, "cmdline"), Buffer.from(argv.join("\0") + "\0"));
     return spawnSync(
       process.execPath,
-      ["--input-type=module", "-e", documentedCollectorOwnershipScript(marker), pid, ppid, runId, root],
+      [
+        "--input-type=module",
+        "-e",
+        documentedCollectorOwnershipScript(marker),
+        pid,
+        ppid,
+        runId,
+        root,
+      ],
       { encoding: "utf8" },
     );
   } finally {
@@ -875,14 +1030,14 @@ function runCollectorShellBlock(
       [
         "#!/usr/bin/env bash",
         "printf 'node\\n' >>\"$ACTION_LOG\"",
-        "if test \"$FAKE_PARENT_MODE\" = valid; then owner_ppid=\"$FAKE_EXPECTED_PPID\"; else owner_ppid=999999; fi",
-        "printf 'Name:\\tnode\\nPPid:\\t%s\\n' \"$owner_ppid\" >\"$FAKE_PROC_ROOT/4242/status\"",
-        "args=(\"$@\")",
-        "args[$((${#args[@]} - 1))]=\"$(cygpath -w \"$FAKE_PROC_ROOT\")\"",
-        "\"$REAL_NODE\" \"${args[@]}\"",
+        'if test "$FAKE_PARENT_MODE" = valid; then owner_ppid="$FAKE_EXPECTED_PPID"; else owner_ppid=999999; fi',
+        'printf \'Name:\\tnode\\nPPid:\\t%s\\n\' "$owner_ppid" >"$FAKE_PROC_ROOT/4242/status"',
+        'args=("$@")',
+        'args[$((${#args[@]} - 1))]="$(cygpath -w "$FAKE_PROC_ROOT")"',
+        '"$REAL_NODE" "${args[@]}"',
         "node_rc=$?",
-        "printf '%s\\n' \"$node_rc\" >\"$NODE_RESULT_LOG\"",
-        "exit \"$node_rc\"",
+        'printf \'%s\\n\' "$node_rc" >"$NODE_RESULT_LOG"',
+        'exit "$node_rc"',
         "",
       ].join("\n"),
       0o755,
@@ -926,11 +1081,15 @@ printf 'allowed=%s\\n' "\${PRODUCT_SERVICE_LANE_ALLOWED:-unset}"
     });
     return {
       result,
-      actions: existsSync(actionLog) ? readFileSync(actionLog, "utf8").trim().split(/\r?\n/).filter(Boolean) : [],
+      actions: existsSync(actionLog)
+        ? readFileSync(actionLog, "utf8").trim().split(/\r?\n/).filter(Boolean)
+        : [],
       primary: readFileSync(primaryFailure, "utf8"),
       secondary: readFileSync(secondaryFailures, "utf8"),
       ledger: readFileSync(gateLedger, "utf8"),
-      nodeResult: existsSync(nodeResultLog) ? readFileSync(nodeResultLog, "utf8").trim() : "not-run",
+      nodeResult: existsSync(nodeResultLog)
+        ? readFileSync(nodeResultLog, "utf8").trim()
+        : "not-run",
     };
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -944,7 +1103,7 @@ function runDocumentedDenoVersionGate({ stdout, exitCode }) {
   try {
     write(
       fakeDeno,
-      "#!/usr/bin/env bash\nprintf '%s' \"$FAKE_DENO_STDOUT\"\nexit \"$FAKE_DENO_EXIT\"\n",
+      '#!/usr/bin/env bash\nprintf \'%s\' "$FAKE_DENO_STDOUT"\nexit "$FAKE_DENO_EXIT"\n',
       0o755,
     );
     const inheritedPath = bashRun(["-c", "printf '%s' \"$PATH\""]).stdout;
@@ -968,7 +1127,8 @@ test("the fixed artifact parses as a whole", () => {
 
 test("the documented Deno gate accepts the observed build-suffixed 2.1.4 output", () => {
   const result = runDocumentedDenoVersionGate({
-    stdout: "deno 2.1.4 (stable, release, x86_64-unknown-linux-gnu)\nv8 fixture\ntypescript fixture\n",
+    stdout:
+      "deno 2.1.4 (stable, release, x86_64-unknown-linux-gnu)\nv8 fixture\ntypescript fixture\n",
     exitCode: 0,
   });
   assert.equal(result.status, 0, result.stderr);
@@ -996,7 +1156,10 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   assert.equal(command, "npm exec -- vitest run src");
   assert.ok(selected.includes("src/lib/slaMonitoring.test.ts"));
   assert.ok(selected.includes("src/components/ui/dialog.test.tsx"));
-  assert.deepEqual(selected, testFiles.filter((path) => path.startsWith("src/")));
+  assert.deepEqual(
+    selected,
+    testFiles.filter((path) => path.startsWith("src/")),
+  );
   assert.ok(selected.includes("src/test/client-withdraw-like.test.tsx"));
   assert.ok(selected.includes("src/test/client-liked-entries.test.tsx"));
   assert.ok(selected.includes("src/test/admin-dashboard-aggregate.test.ts"));
@@ -1076,12 +1239,16 @@ test("the Product Vitest gate selects the complete Product inventory and exclude
   const wp11Gate = executionText
     .split(/\r?\n/)
     .find((line) =>
-      line.startsWith("node --test supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs"),
+      line.startsWith(
+        "node --test supabase/tests/database/v4_3/wp11_server_analytics.offline.test.mjs",
+      ),
     );
   assert.ok(wp11Gate, "missing the exact WP11 Offline command");
   assert.deepEqual(
     wp11Gate.trim().split(/\s+/).slice(2).sort(),
-    nodeTest.filter((path) => /^supabase\/tests\/database\/v4_3\/wp11_.*\.offline\.test\.mjs$/.test(path)),
+    nodeTest.filter((path) =>
+      /^supabase\/tests\/database\/v4_3\/wp11_.*\.offline\.test\.mjs$/.test(path),
+    ),
     "the existing WP11 command must include all five WP11 Node test files",
   );
 });
@@ -1113,7 +1280,10 @@ test("Product HTTP rejects incomplete or substituted file inventories before any
   );
 });
 
-for (const marker of ["product-collector-owner-before-readiness", "product-collector-owner-before-stop"]) {
+for (const marker of [
+  "product-collector-owner-before-readiness",
+  "product-collector-owner-before-stop",
+]) {
   test(`${marker} accepts only the direct collector child owned by the managing shell`, () => {
     const result = runCollectorOwnershipScript(marker, {
       argv: [
@@ -1210,7 +1380,8 @@ test("collector finalization is parsed before service mutation and invoked by a 
   const secondaryFailures = join(evidence, "secondary-failures.tsv");
   try {
     assert.ok(
-      document.indexOf("# product-collector-stop-function:start") < document.indexOf("docker events --since"),
+      document.indexOf("# product-collector-stop-function:start") <
+        document.indexOf("docker events --since"),
       "collector finalization must be parsed before the first service-lane mutation",
     );
     assert.equal(invocation.trim(), "product_stop_collector_and_verify_summary");
@@ -1221,21 +1392,27 @@ test("collector finalization is parsed before service mutation and invoked by a 
       JSON.stringify({ complete: true, gaps: [], failures: [], missingServices: [] }) + "\n",
     );
     write(secondaryFailures, "");
-    const result = bashRun(["-c", `
+    const result = bashRun(
+      [
+        "-c",
+        `
 set +e
 ${definition}
 printf 'service-mutation-simulated\\n'
 ${invocation}
 printf 'collector-summary-rc=%s\\n' "$collector_summary_rc"
-`], {
-      env: {
-        ...process.env,
-        PRODUCT_COLLECTOR_PID: "4242",
-        RUN_EVIDENCE: toPosix(evidence),
-        RUN_ID: "run-owned",
-        SECONDARY_FAILURES: toPosix(secondaryFailures),
+`,
+      ],
+      {
+        env: {
+          ...process.env,
+          PRODUCT_COLLECTOR_PID: "4242",
+          RUN_EVIDENCE: toPosix(evidence),
+          RUN_ID: "run-owned",
+          SECONDARY_FAILURES: toPosix(secondaryFailures),
+        },
       },
-    });
+    );
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /service-mutation-simulated/);
     assert.match(result.stdout, /collector-summary-rc=0/);
@@ -1262,7 +1439,14 @@ test("success uses the artifact itself with paths containing spaces", () => {
     const prepare = execute(fixture, "prepare-user", "success");
     assert.equal(prepare.status, 0, prepare.stderr);
     assert.deepEqual(actions(fixture), ["curl:archive", "curl:checksums"]);
-    const extracted = join(fixture.evidence, fixture.runId, "provisioning", "supabase-2.95.4", "extract", "supabase");
+    const extracted = join(
+      fixture.evidence,
+      fixture.runId,
+      "provisioning",
+      "supabase-2.95.4",
+      "extract",
+      "supabase",
+    );
     assert.ok(existsSync(extracted));
     const finalize = execute(fixture, "finalize-user", "success");
     assert.equal(finalize.status, 0, finalize.stderr);
@@ -1350,8 +1534,14 @@ test("continue-user rejects a conflicting Docker context before the first Supaba
     });
 
     assert.equal(continued.status, 42);
-    assert.match(continued.stderr, /docker\.override: DOCKER_CONTEXT conflicts with approved context \(exit 42\)/);
-    assert.equal(actions(fixture).some((entry) => entry.startsWith("supabase:")), false);
+    assert.match(
+      continued.stderr,
+      /docker\.override: DOCKER_CONTEXT conflicts with approved context \(exit 42\)/,
+    );
+    assert.equal(
+      actions(fixture).some((entry) => entry.startsWith("supabase:")),
+      false,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1374,7 +1564,10 @@ for (const variable of ["DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"])
 
       assert.equal(continued.status, 42);
       assert.match(continued.stderr, /docker\.override: .* is non-empty \(exit 42\)/);
-      assert.equal(actions(fixture).some((entry) => entry.startsWith("supabase:")), false);
+      assert.equal(
+        actions(fixture).some((entry) => entry.startsWith("supabase:")),
+        false,
+      );
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -1430,10 +1623,15 @@ test("continue-user accepts the documented cli-latest mutation and verifies the 
       "the real continue-user path must publish the runtime snapshot result",
     );
     assert.ok(
-      existsSync(join(fixture.evidence, fixture.runId, "snapshot-runtime.cli-latest-backup.sha256")),
+      existsSync(
+        join(fixture.evidence, fixture.runId, "snapshot-runtime.cli-latest-backup.sha256"),
+      ),
       "the real continue-user path must publish the verified pre-mutation backup hash",
     );
-    assert.equal(readFileSync(join(fixture.runRepository, "supabase", ".temp", "cli-latest"), "utf8"), "runtime-cli-state\n");
+    assert.equal(
+      readFileSync(join(fixture.runRepository, "supabase", ".temp", "cli-latest"), "utf8"),
+      "runtime-cli-state\n",
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1530,7 +1728,10 @@ test("finalization restores cli-latest before requiring the exact full snapshot"
 
     assert.equal(finalized.status, 0, finalized.stderr);
     assert.ok(!existsSync(join(fixture.verification, fixture.runId)));
-    assert.match(readFileSync(join(fixture.evidence, fixture.runId, "snapshot-final.verify.stdout"), "utf8"), /OK/);
+    assert.match(
+      readFileSync(join(fixture.evidence, fixture.runId, "snapshot-final.verify.stdout"), "utf8"),
+      /OK/,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1545,12 +1746,22 @@ test("Finalize preserves a known outer failure before removing the run target", 
     assert.equal(readFileSync(ledger, "utf8"), "");
 
     const finalized = execute(fixture, "finalize-user", "success", {}, [
-      "--outer-primary", "04-repeat-source-fence:99",
+      "--outer-primary",
+      "04-repeat-source-fence:99",
     ]);
     assert.equal(finalized.status, 99, finalized.stderr);
-    assert.equal(readFileSync(ledger, "utf8"), "outer.04-repeat-source-fence\t99\touter-runner failure\n");
-    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=99 cleanup=0\n");
-    assert.match(readFileSync(join(evidence, "evidence-files.final.sha256"), "utf8"), /primary-failure\.tsv/);
+    assert.equal(
+      readFileSync(ledger, "utf8"),
+      "outer.04-repeat-source-fence\t99\touter-runner failure\n",
+    );
+    assert.equal(
+      readFileSync(join(evidence, "finalize.result.txt"), "utf8"),
+      "primary=99 cleanup=0\n",
+    );
+    assert.match(
+      readFileSync(join(evidence, "evidence-files.final.sha256"), "utf8"),
+      /primary-failure\.tsv/,
+    );
     assert.equal(existsSync(join(fixture.verification, fixture.runId)), false);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1567,8 +1778,15 @@ test("Finalize stops on malformed or conflicting outer failure without cleaning 
     write(ledger, first);
     const before = actions(fixture);
 
-    for (const outer of ["01-environment-gate:256", "01-environment-gate:0", "01-environment-gate:99"]) {
-      const finalized = execute(fixture, "finalize-user", "success", {}, ["--outer-primary", outer]);
+    for (const outer of [
+      "01-environment-gate:256",
+      "01-environment-gate:0",
+      "01-environment-gate:99",
+    ]) {
+      const finalized = execute(fixture, "finalize-user", "success", {}, [
+        "--outer-primary",
+        outer,
+      ]);
       assert.equal(finalized.status, 64, finalized.stderr);
       assert.match(finalized.stderr, /outer primary/);
       assert.equal(readFileSync(ledger, "utf8"), first);
@@ -1578,11 +1796,15 @@ test("Finalize stops on malformed or conflicting outer failure without cleaning 
     }
 
     const finalized = execute(fixture, "finalize-user", "success", {}, [
-      "--outer-primary", "01-environment-gate:42",
+      "--outer-primary",
+      "01-environment-gate:42",
     ]);
     assert.equal(finalized.status, 42, finalized.stderr);
     assert.equal(readFileSync(ledger, "utf8"), first);
-    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=42 cleanup=0\n");
+    assert.equal(
+      readFileSync(join(evidence, "finalize.result.txt"), "utf8"),
+      "primary=42 cleanup=0\n",
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1624,13 +1846,19 @@ test("an outer failure cannot authorize Finalize's pre-backup exception", () => 
     write(ledger, "");
     write(backupState, "required\t" + "0".repeat(64) + "\n");
     const outer = ["--outer-primary", "snapshot.count:75"];
-    assert.equal(execute(fixture, "finalize-user", "outer-primary-sync-fail", {}, outer).status, 64);
+    assert.equal(
+      execute(fixture, "finalize-user", "outer-primary-sync-fail", {}, outer).status,
+      64,
+    );
     write(backupState, originalState);
     assert.match(readFileSync(ledger, "utf8"), /^outer\.snapshot\.count\t75\t/);
 
     const finalized = execute(fixture, "finalize-user", "success", {}, outer);
     assert.equal(finalized.status, 75, finalized.stderr);
-    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=75 cleanup=104\n");
+    assert.equal(
+      readFileSync(join(evidence, "finalize.result.txt"), "utf8"),
+      "primary=75 cleanup=104\n",
+    );
     assert.equal(existsSync(join(fixture.verification, fixture.runId)), true);
     assert.ok(!actions(fixture).some((action) => action.startsWith("rm:")));
   } finally {
@@ -1651,7 +1879,10 @@ test("finalization marks cli-latest restore not applicable after snapshot.count 
 
     assert.equal(finalized.status, 75, finalized.stderr);
     const evidence = join(fixture.evidence, fixture.runId);
-    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=75 cleanup=0\n");
+    assert.equal(
+      readFileSync(join(evidence, "finalize.result.txt"), "utf8"),
+      "primary=75 cleanup=0\n",
+    );
     assert.equal(
       readFileSync(join(evidence, "cli-latest-restore.result.txt"), "utf8"),
       "not-applicable\tprepare-failed-before-cli-backup\tsnapshot.count\n",
@@ -1684,7 +1915,10 @@ test("finalization fails closed when a required cli-latest backup is missing", (
 
 for (const [label, mutateState] of [
   ["missing", (path) => rmSync(path)],
-  ["ambiguous", (path) => write(path, "required\t" + "0".repeat(64) + "\nrequired\t" + "0".repeat(64) + "\n")],
+  [
+    "ambiguous",
+    (path) => write(path, "required\t" + "0".repeat(64) + "\nrequired\t" + "0".repeat(64) + "\n"),
+  ],
 ]) {
   test(`finalization rejects ${label} cli-latest backup state evidence`, () => {
     const fixture = makeFixture();
@@ -1763,7 +1997,10 @@ test("finalization rejects backup artifacts that contradict a not-required state
       readFileSync(join(fixture.evidence, fixture.runId, "secondary-failures.tsv"), "utf8"),
       /cleanup\.cli-backup-state/,
     );
-    assert.match(readFileSync(join(fixture.evidence, fixture.runId, "finalize.result.txt"), "utf8"), /cleanup=[1-9]/);
+    assert.match(
+      readFileSync(join(fixture.evidence, fixture.runId, "finalize.result.txt"), "utf8"),
+      /cleanup=[1-9]/,
+    );
     assert.ok(existsSync(join(fixture.verification, fixture.runId)));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1805,9 +2042,18 @@ test("a real cli-latest restore failure stays secondary to the primary failure",
 
     assert.equal(finalized.status, 22);
     const evidence = join(fixture.evidence, fixture.runId);
-    assert.match(readFileSync(join(evidence, "primary-failure.tsv"), "utf8"), /cli\.download\.archive\t22/);
-    assert.match(readFileSync(join(evidence, "secondary-failures.tsv"), "utf8"), /cleanup\.restore-cli\t17/);
-    assert.equal(readFileSync(join(evidence, "finalize.result.txt"), "utf8"), "primary=22 cleanup=17\n");
+    assert.match(
+      readFileSync(join(evidence, "primary-failure.tsv"), "utf8"),
+      /cli\.download\.archive\t22/,
+    );
+    assert.match(
+      readFileSync(join(evidence, "secondary-failures.tsv"), "utf8"),
+      /cleanup\.restore-cli\t17/,
+    );
+    assert.equal(
+      readFileSync(join(evidence, "finalize.result.txt"), "utf8"),
+      "primary=22 cleanup=17\n",
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1830,8 +2076,14 @@ test("finalization preserves and attributes a newly created deno.lock before rem
       readFileSync(join(evidence, "run-output", "deno.lock"), "utf8"),
       "generated lock bytes\n",
     );
-    assert.match(readFileSync(join(evidence, "deno-lock.run-created.sha256"), "utf8"), /^[0-9a-f]{64} [ *]deno\.lock\n$/);
-    assert.match(readFileSync(join(evidence, "deno-lock.evidence.sha256"), "utf8"), /^[0-9a-f]{64} [ *].*run-output\/deno\.lock\n$/);
+    assert.match(
+      readFileSync(join(evidence, "deno-lock.run-created.sha256"), "utf8"),
+      /^[0-9a-f]{64} [ *]deno\.lock\n$/,
+    );
+    assert.match(
+      readFileSync(join(evidence, "deno-lock.evidence.sha256"), "utf8"),
+      /^[0-9a-f]{64} [ *].*run-output\/deno\.lock\n$/,
+    );
     assert.ok(!existsSync(join(fixture.verification, fixture.runId)));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1853,7 +2105,10 @@ test("finalization does not delete or overwrite a deno.lock that existed before 
     const finalized = execute(fixture, "finalize-user", "cleanup-fail");
 
     assert.equal(finalized.status, 9, finalized.stderr);
-    assert.equal(readFileSync(join(fixture.runRepository, "deno.lock"), "utf8"), "pre-existing lock\n");
+    assert.equal(
+      readFileSync(join(fixture.runRepository, "deno.lock"), "utf8"),
+      "pre-existing lock\n",
+    );
     assert.ok(!actions(fixture).some((action) => action.includes("deno.lock")));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1875,7 +2130,10 @@ test("finalization rejects changed bytes for a pre-existing deno.lock", () => {
       readFileSync(join(fixture.evidence, fixture.runId, "secondary-failures.tsv"), "utf8"),
       /cleanup\.deno-lock-bytes/,
     );
-    assert.equal(readFileSync(join(fixture.runRepository, "deno.lock"), "utf8"), "changed lock bytes\n");
+    assert.equal(
+      readFileSync(join(fixture.runRepository, "deno.lock"), "utf8"),
+      "changed lock bytes\n",
+    );
     assert.ok(existsSync(join(fixture.verification, fixture.runId)));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1964,12 +2222,18 @@ test("verified CLI reuse records a required backup without relying on prepare.co
     assert.equal(prepare.status, 0, prepare.stderr);
     const evidence = join(fixture.evidence, fixture.runId);
     assert.ok(!existsSync(join(evidence, "provisioning", "supabase-2.95.4", "prepare.complete")));
-    assert.match(readFileSync(join(evidence, "cli-latest-backup.state.tsv"), "utf8"), /^required\t[0-9a-f]{64}\n$/);
+    assert.match(
+      readFileSync(join(evidence, "cli-latest-backup.state.tsv"), "utf8"),
+      /^required\t[0-9a-f]{64}\n$/,
+    );
 
     const finalized = execute(fixture, "finalize-user", "success");
 
     assert.equal(finalized.status, 0, finalized.stderr);
-    assert.equal(readFileSync(join(evidence, "cli-latest-restore.result.txt"), "utf8"), "restored-and-verified\n");
+    assert.equal(
+      readFileSync(join(evidence, "cli-latest-restore.result.txt"), "utf8"),
+      "restored-and-verified\n",
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -2191,9 +2455,19 @@ for (const scenario of ["curl22", "archive-missing", "checksum-bad"]) {
       } else {
         assert.deepEqual(observed, ["curl:archive", "curl:checksums"]);
       }
-      const extracted = join(fixture.evidence, fixture.runId, "provisioning", "supabase-2.95.4", "extract", "supabase");
+      const extracted = join(
+        fixture.evidence,
+        fixture.runId,
+        "provisioning",
+        "supabase-2.95.4",
+        "extract",
+        "supabase",
+      );
       assert.ok(!existsSync(extracted));
-      const primary = readFileSync(join(fixture.evidence, fixture.runId, "primary-failure.tsv"), "utf8");
+      const primary = readFileSync(
+        join(fixture.evidence, fixture.runId, "primary-failure.tsv"),
+        "utf8",
+      );
       assert.ok(primary.trim().length > 0);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
@@ -2220,8 +2494,14 @@ test("cleanup failure remains secondary and does not replace the primary exit", 
     assert.equal(prepare.status, 22);
     const finalize = execute(fixture, "finalize-user", "cleanup-fail");
     assert.equal(finalize.status, 22);
-    const primary = readFileSync(join(fixture.evidence, fixture.runId, "primary-failure.tsv"), "utf8");
-    const secondary = readFileSync(join(fixture.evidence, fixture.runId, "secondary-failures.tsv"), "utf8");
+    const primary = readFileSync(
+      join(fixture.evidence, fixture.runId, "primary-failure.tsv"),
+      "utf8",
+    );
+    const secondary = readFileSync(
+      join(fixture.evidence, fixture.runId, "secondary-failures.tsv"),
+      "utf8",
+    );
     assert.match(primary, /cli\.download\.archive\t22/);
     assert.match(secondary, /cleanup\.remove\t9/);
     assert.ok(existsSync(join(fixture.verification, fixture.runId)));
@@ -2237,7 +2517,10 @@ test("successful cleanup preserves the primary nonzero exit", () => {
     assert.equal(prepare.status, 22);
     const finalize = execute(fixture, "finalize-user", "success");
     assert.equal(finalize.status, 22);
-    const primary = readFileSync(join(fixture.evidence, fixture.runId, "primary-failure.tsv"), "utf8");
+    const primary = readFileSync(
+      join(fixture.evidence, fixture.runId, "primary-failure.tsv"),
+      "utf8",
+    );
     assert.match(primary, /cli\.download\.archive\t22/);
     assert.ok(!existsSync(join(fixture.verification, fixture.runId)));
   } finally {
@@ -2288,7 +2571,10 @@ docker info
       assert.equal(record.split("|")[1], environmentContract.context, record);
     }
     assert.match(records[2], new RegExp(`--context ${environmentContract.context}`));
-    assert.match(records[2], new RegExp(`--endpoint ${environmentContract.endpoint.replaceAll("/", "\\/")}`));
+    assert.match(
+      records[2],
+      new RegExp(`--endpoint ${environmentContract.endpoint.replaceAll("/", "\\/")}`),
+    );
     assert.ok(!records.some((record) => /(^|\|)docker\|[^|]*\|context use(?:\s|$)/.test(record)));
 
     const hostileValues = ["other-context", "$HOME", "quote'\"", "back\\slash value"];
@@ -2314,11 +2600,17 @@ docker info
       { env: baseEnv },
     );
     assert.equal(cleanupAccepted.status, 0, cleanupAccepted.stderr);
-    assert.match(readFileSync(actionLog, "utf8"), new RegExp(`docker\\|${environmentContract.context}\\|info`));
+    assert.match(
+      readFileSync(actionLog, "utf8"),
+      new RegExp(`docker\\|${environmentContract.context}\\|info`),
+    );
 
     writeFileSync(actionLog, "");
     const cleanupRejected = bashRun(
-      ["-c", `${bindBlock}\nDOCKER_CONTEXT=other-context\n${cleanupBlock}\ntest "$cleanup_context_rc" -eq 0 && docker info`],
+      [
+        "-c",
+        `${bindBlock}\nDOCKER_CONTEXT=other-context\n${cleanupBlock}\ntest "$cleanup_context_rc" -eq 0 && docker info`,
+      ],
       { env: baseEnv },
     );
     assert.notEqual(cleanupRejected.status, 0);

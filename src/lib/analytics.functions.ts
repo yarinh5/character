@@ -205,8 +205,7 @@ function parseDateRange(input: z.infer<typeof DateRangeSchema>) {
   if (!hasStart) {
     const now = new Date();
     endDay = Math.floor(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) /
-        MILLISECONDS_PER_DAY,
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / MILLISECONDS_PER_DAY,
     );
     startDay = endDay - 29;
   } else {

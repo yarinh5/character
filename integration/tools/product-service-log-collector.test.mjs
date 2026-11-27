@@ -616,7 +616,9 @@ test("event classification ignores project helpers but keeps missing required se
   const harness = await makeHarness({ boundary });
   await harness.collector.start();
   const helperLifecycle = ["create", "start", "die", "destroy"]
-    .map((action) => JSON.stringify(containerEvent("helper-id", "serene_mendel", PROJECT_ID, action)))
+    .map((action) =>
+      JSON.stringify(containerEvent("helper-id", "serene_mendel", PROJECT_ID, action)),
+    )
     .join("\n");
   boundary.eventChildren[0].stdout.write(
     `${helperLifecycle}\n${JSON.stringify(
@@ -627,13 +629,15 @@ test("event classification ignores project helpers but keeps missing required se
   const summary = await harness.collector.stop("test");
   assert.equal(
     summary.gaps.some(
-      (gap) => gap.code === "container_disappeared_before_attach" && gap.containerId === "helper-id",
+      (gap) =>
+        gap.code === "container_disappeared_before_attach" && gap.containerId === "helper-id",
     ),
     false,
   );
   assert.equal(
     summary.gaps.some(
-      (gap) => gap.code === "container_disappeared_before_attach" && gap.containerId === "storage-id",
+      (gap) =>
+        gap.code === "container_disappeared_before_attach" && gap.containerId === "storage-id",
     ),
     true,
   );
@@ -677,7 +681,10 @@ test("project helper lifecycle is retained with explicit logs-not-collected stat
   assert.ok(helper.lifecycle.every(({ observedAt }) => typeof observedAt === "string"));
   assert.deepEqual(boundary.inspectCalls, []);
   assert.deepEqual(boundary.logCalls, []);
-  assert.equal(summary.segments.some((segment) => segment.containerId === "helper-id"), false);
+  assert.equal(
+    summary.segments.some((segment) => segment.containerId === "helper-id"),
+    false,
+  );
   assert.equal(
     summary.gaps.some((gap) => gap.containerId === "helper-id"),
     false,
@@ -705,7 +712,10 @@ test("helper and required service sharing an image remain separate by exact iden
   assert.deepEqual(boundary.inspectCalls, ["storage-id"]);
   assert.deepEqual(boundary.logCalls, ["storage-id"]);
   assert.deepEqual(summary.observedServices, ["storage"]);
-  assert.equal(summary.segments.some((segment) => segment.containerId === "helper-id"), false);
+  assert.equal(
+    summary.segments.some((segment) => segment.containerId === "helper-id"),
+    false,
+  );
   assert.equal(summary.complete, false);
 });
 
@@ -770,7 +780,8 @@ test("ambiguous event identity remains a fail-closed evidence gap", async () => 
   const summary = await harness.collector.stop("test");
   assert.ok(
     summary.gaps.some(
-      (gap) => gap.code === "event_container_identity_ambiguous" && gap.containerId === "unknown-id",
+      (gap) =>
+        gap.code === "event_container_identity_ambiguous" && gap.containerId === "unknown-id",
     ),
   );
   assert.deepEqual(boundary.inspectCalls, []);

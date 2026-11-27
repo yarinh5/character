@@ -241,7 +241,12 @@ function ChatPage() {
       setConv(c as unknown as Conv);
       const latestMessages = sortMessagesAsc((m ?? []) as Msg[]);
       setMessages((prev) =>
-        me ? [] : mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), latestMessages),
+        me
+          ? []
+          : mergeMessagesById(
+              prev.filter((message) => message.conversation_id === conversationId),
+              latestMessages,
+            ),
       );
       setHasOlderMessages(latestMessages.length === MESSAGE_PAGE_SIZE);
       setCreditBalance(wallet?.balance ?? null);
@@ -278,7 +283,10 @@ function ChatPage() {
         .limit(MESSAGE_PAGE_SIZE);
       if (disposed || error) return;
       setMessages((prev) =>
-        mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), (data ?? []) as Msg[]),
+        mergeMessagesById(
+          prev.filter((message) => message.conversation_id === conversationId),
+          (data ?? []) as Msg[],
+        ),
       );
     };
     const channel = supabase

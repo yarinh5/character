@@ -34,12 +34,18 @@ for (const column of [
 }
 assert.match(migration, /configured_not_verified/);
 assert.match(migration, /pending_configuration/);
-assert.match(migration, /REVOKE EXECUTE ON FUNCTION public\.admin_record_support_incident_delivery/);
+assert.match(
+  migration,
+  /REVOKE EXECUTE ON FUNCTION public\.admin_record_support_incident_delivery/,
+);
 assert.match(migration, /auth\.jwt\(\)\s*->>\s*'role'.*service_role/s);
 assert.match(migration, /lifecycle_status[\s\S]*draft[\s\S]*approved[\s\S]*active/);
 assert.match(migration, /document\.lifecycle_status\s*=\s*'active'/);
 assert.match(migration, /document\.approved_at\s+IS\s+NOT\s+NULL/);
-assert.match(migration, /escalation_adapter_state\s*=\s*CASE[\s\S]*IS DISTINCT FROM[\s\S]*configured_not_verified/);
+assert.match(
+  migration,
+  /escalation_adapter_state\s*=\s*CASE[\s\S]*IS DISTINCT FROM[\s\S]*configured_not_verified/,
+);
 assert.match(migration, /escalation_adapter_verified_at\s*=\s*CASE[\s\S]*THEN NULL/);
 assert.match(migration, /escalation_adapter_evidence_hash\s*=\s*CASE[\s\S]*THEN NULL/);
 

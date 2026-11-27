@@ -362,7 +362,11 @@ function AdminStickersPage() {
           </div>
           <div>
             <Label htmlFor="sticker-name">Sticker</Label>
-            <Input id="sticker-name" value={stickerName} onChange={(event) => setStickerName(event.target.value)} />
+            <Input
+              id="sticker-name"
+              value={stickerName}
+              onChange={(event) => setStickerName(event.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="sticker-scope">Scope</Label>

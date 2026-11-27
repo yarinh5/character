@@ -78,14 +78,12 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
     const syntheticWebp = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x04, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
     ]);
-    const upload = await clientSession.storage.from(profileImageBucket).upload(
-      objectPath,
-      syntheticWebp,
-      {
+    const upload = await clientSession.storage
+      .from(profileImageBucket)
+      .upload(objectPath, syntheticWebp, {
         contentType: "image/webp",
         upsert: false,
-      },
-    );
+      });
     if (upload.error) throw upload.error;
     profileImagePath = objectPath;
     const { data: publicImage } = clientSession.storage
@@ -214,9 +212,7 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
         label: "profile image Storage object",
         run: async () => {
           if (!profileImagePath) return;
-          const { error } = await admin.storage
-            .from(profileImageBucket)
-            .remove([profileImagePath]);
+          const { error } = await admin.storage.from(profileImageBucket).remove([profileImagePath]);
           if (error) throw error;
         },
       },

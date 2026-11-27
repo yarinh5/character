@@ -67,9 +67,13 @@ describe("registerClientWithDependencies", () => {
     const signUp = vi.fn();
 
     await expect(
-      registerClientWithDependencies(request, { issueAdmission, signUp }, {
-        emailVerificationRedirectUrl: "https://product.example/verify-email",
-      }),
+      registerClientWithDependencies(
+        request,
+        { issueAdmission, signUp },
+        {
+          emailVerificationRedirectUrl: "https://product.example/verify-email",
+        },
+      ),
     ).rejects.toMatchObject({ code: "registration_paused" });
     expect(signUp).not.toHaveBeenCalled();
   });
@@ -83,9 +87,13 @@ describe("registerClientWithDependencies", () => {
     const signUp = vi.fn();
 
     await expect(
-      registerClientWithDependencies(request, { issueAdmission, signUp }, {
-        emailVerificationRedirectUrl: "https://product.example/verify-email",
-      }),
+      registerClientWithDependencies(
+        request,
+        { issueAdmission, signUp },
+        {
+          emailVerificationRedirectUrl: "https://product.example/verify-email",
+        },
+      ),
     ).rejects.toMatchObject({ code: "registration_rate_limited" });
     expect(signUp).not.toHaveBeenCalled();
   });
@@ -99,9 +107,13 @@ describe("registerClientWithDependencies", () => {
     const signUp = vi.fn().mockRejectedValue(new RegistrationFailure("auth_failed"));
 
     await expect(
-      registerClientWithDependencies(request, { issueAdmission, signUp }, {
-        emailVerificationRedirectUrl: "https://product.example/verify-email",
-      }),
+      registerClientWithDependencies(
+        request,
+        { issueAdmission, signUp },
+        {
+          emailVerificationRedirectUrl: "https://product.example/verify-email",
+        },
+      ),
     ).rejects.toMatchObject({ code: "auth_failed" });
   });
 

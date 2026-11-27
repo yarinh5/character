@@ -1476,7 +1476,11 @@ function CreateOperatorDialog({
         <div className="space-y-3">
           <div>
             <Label htmlFor="operator-create-full-name">שם מלא</Label>
-            <Input id="operator-create-full-name" value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Input
+              id="operator-create-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="operator-create-email">אימייל</Label>
@@ -1503,7 +1507,9 @@ function CreateOperatorDialog({
             <Switch id="operator-create-active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
           <div role="group" aria-labelledby="operator-create-characters-label">
-            <p id="operator-create-characters-label" className="text-sm font-medium leading-none">שיוך לדמויות</p>
+            <p id="operator-create-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1596,14 +1602,20 @@ function PromoteClientDialog({
           </div>
           <div>
             <Label htmlFor="operator-convert-full-name">שם עובד</Label>
-            <Input id="operator-convert-full-name" value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Input
+              id="operator-convert-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="operator-convert-active">חשבון עובד פעיל</Label>
             <Switch id="operator-convert-active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
           <div role="group" aria-labelledby="operator-convert-characters-label">
-            <p id="operator-convert-characters-label" className="text-sm font-medium leading-none">שיוך לדמויות</p>
+            <p id="operator-convert-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1682,7 +1694,11 @@ function CreateInviteDialog({
         <div className="space-y-3">
           <div>
             <Label htmlFor="operator-assign-full-name">שם מלא</Label>
-            <Input id="operator-assign-full-name" value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Input
+              id="operator-assign-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="operator-assign-email">אימייל</Label>
@@ -1695,7 +1711,9 @@ function CreateInviteDialog({
             />
           </div>
           <div role="group" aria-labelledby="operator-assign-characters-label">
-            <p id="operator-assign-characters-label" className="text-sm font-medium leading-none">שיוך לדמויות</p>
+            <p id="operator-assign-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1811,11 +1829,21 @@ function EditOperatorDialog({
         <div className="space-y-3">
           <div>
             <Label htmlFor="operator-edit-full-name">שם מלא</Label>
-            <Input id="operator-edit-full-name" value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Input
+              id="operator-edit-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="operator-edit-email">אימייל</Label>
-            <Input id="operator-edit-email" value={operator.email ?? ""} readOnly dir="ltr" className="bg-muted" />
+            <Input
+              id="operator-edit-email"
+              value={operator.email ?? ""}
+              readOnly
+              dir="ltr"
+              className="bg-muted"
+            />
           </div>
           <div>
             <Label htmlFor="operator-edit-availability">סטטוס זמינות</Label>

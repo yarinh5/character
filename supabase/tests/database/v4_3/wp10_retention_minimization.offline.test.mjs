@@ -8,10 +8,7 @@ const migrationUrl = new URL(
 );
 const sql = readFileSync(migrationUrl, "utf8");
 const basePolicySql = readFileSync(
-  new URL(
-    "../../../migrations/20261111140000_wp10_deletion_retention_policy.sql",
-    import.meta.url,
-  ),
+  new URL("../../../migrations/20261111140000_wp10_deletion_retention_policy.sql", import.meta.url),
   "utf8",
 );
 const worker = readFileSync(
@@ -69,7 +66,10 @@ test("the minimizer is fenced and stale workers cannot persist or complete work"
 test("ledger values and financial classifications are preserved", () => {
   const body = functionBody("execute_account_retention_minimization_for_server");
   assert.doesNotMatch(body, /UPDATE\s+public\.credit_wallets/i);
-  assert.doesNotMatch(body, /SET\s+(amount|balance_after|balance|lifetime_earned|lifetime_spent)\s*=/i);
+  assert.doesNotMatch(
+    body,
+    /SET\s+(amount|balance_after|balance|lifetime_earned|lifetime_spent)\s*=/i,
+  );
   assert.doesNotMatch(body, /DELETE\s+FROM\s+public\.(credit_transactions|credit_wallets)/i);
   assert.match(body, /credit_tx\.type <> 'package_purchase'/);
   assert.match(sql, /blocks_step = NULL[\s\S]*record_type = 'financial_records'/);

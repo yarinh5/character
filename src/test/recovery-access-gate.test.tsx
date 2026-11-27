@@ -11,7 +11,9 @@ function renderGate() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <RecoveryAccessGate><p>פעילות עסקית</p></RecoveryAccessGate>
+      <RecoveryAccessGate>
+        <p>פעילות עסקית</p>
+      </RecoveryAccessGate>
     </QueryClientProvider>,
   );
 }

@@ -19,10 +19,7 @@ vi.mock("@tanstack/react-start", () => ({
         return this;
       },
       handler(
-        handler: (input: {
-          data: unknown;
-          context: { userId: string };
-        }) => Promise<unknown>,
+        handler: (input: { data: unknown; context: { userId: string } }) => Promise<unknown>,
       ) {
         return (input: { data?: unknown; context: { userId: string } }) =>
           handler({

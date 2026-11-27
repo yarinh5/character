@@ -103,7 +103,8 @@ vi.mock("@/integrations/supabase/client", () => {
       const query = {
         eq: () => query,
         order: () => query,
-        limit: () => realtime.pendingMessages ?? Promise.resolve({ data: realtime.messages, error: null }),
+        limit: () =>
+          realtime.pendingMessages ?? Promise.resolve({ data: realtime.messages, error: null }),
       };
       return { select: () => query };
     }
@@ -192,17 +193,19 @@ describe("client chat accessibility regressions", () => {
   it("reconciles a message missed before postgres changes became ready", async () => {
     renderChat();
     await screen.findByRole("textbox", { name: "הודעה" });
-    realtime.messages = [{
-      id: "message-catch-up",
-      conversation_id: "conversation-a",
-      sender_type: "operator",
-      sender_id: "operator-a",
-      content: "Catch-up message",
-      created_at: "2026-11-27T10:00:00.000Z",
-      is_read: false,
-      message_attachments: [],
-      message_stickers: null,
-    }];
+    realtime.messages = [
+      {
+        id: "message-catch-up",
+        conversation_id: "conversation-a",
+        sender_type: "operator",
+        sender_id: "operator-a",
+        content: "Catch-up message",
+        created_at: "2026-11-27T10:00:00.000Z",
+        is_read: false,
+        message_attachments: [],
+        message_stickers: null,
+      },
+    ];
 
     expect(screen.queryByText("Catch-up message")).not.toBeInTheDocument();
     act(() => {

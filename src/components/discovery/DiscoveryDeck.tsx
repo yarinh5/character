@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { DiscoveryCard } from "@/components/discovery/DiscoveryCard";
 import type { Database } from "@/integrations/supabase/types";
 
-type DiscoveryCharacter = Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
+type DiscoveryCharacter =
+  Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
 
 type DiscoveryDeckProps = {
   character: DiscoveryCharacter;

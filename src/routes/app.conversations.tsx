@@ -56,7 +56,8 @@ function ClientList({ clientId }: { clientId: string }) {
         .abortSignal(signal);
       if (error) throw error;
       signal.throwIfAborted();
-      if (data.some(row => row.client_id !== clientId)) throw new Error("invalid_client_conversation");
+      if (data.some((row) => row.client_id !== clientId))
+        throw new Error("invalid_client_conversation");
       const unread = await fetchUnreadCounts(data.map((row) => row.id));
       return data.map((row) => ({
         ...row,
@@ -82,12 +83,22 @@ function ClientList({ clientId }: { clientId: string }) {
       .channel(`conversations-client:${clientId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversations", filter: `client_id=eq.${clientId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "conversations",
+          filter: `client_id=eq.${clientId}`,
+        },
         refreshChats,
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversation_read_states", filter: `user_id=eq.${clientId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_read_states",
+          filter: `user_id=eq.${clientId}`,
+        },
         refreshChats,
       )
       .subscribe();
@@ -98,12 +109,15 @@ function ClientList({ clientId }: { clientId: string }) {
   }, [qc, clientId]);
 
   const rows = chats.isSuccess ? chats.data : [];
-  const represented = new Set(rows.map(row => row.character_id));
-  const profiles = chats.isSuccess && likes.isSuccess ? likes.data.filter(profile => {
-    if (represented.has(profile.id)) return false;
-    represented.add(profile.id);
-    return true;
-  }) : [];
+  const represented = new Set(rows.map((row) => row.character_id));
+  const profiles =
+    chats.isSuccess && likes.isSuccess
+      ? likes.data.filter((profile) => {
+          if (represented.has(profile.id)) return false;
+          represented.add(profile.id);
+          return true;
+        })
+      : [];
 
   return (
     <>
@@ -139,11 +153,7 @@ function ClientList({ clientId }: { clientId: string }) {
         {rows.length > 0 && (
           <div className="space-y-2">
             {rows.map((c) => (
-              <Link
-                key={c.id}
-                to="/app/chat/$conversationId"
-                params={{ conversationId: c.id }}
-              >
+              <Link key={c.id} to="/app/chat/$conversationId" params={{ conversationId: c.id }}>
                 <Card className="p-4 flex items-center gap-3 hover:bg-accent transition-colors">
                   <div className="h-12 w-12 rounded-full bg-muted overflow-hidden shrink-0">
                     {c.characters?.avatar_url ? (
@@ -183,10 +193,16 @@ function ClientList({ clientId }: { clientId: string }) {
         )}
         {profiles.length > 0 && (
           <section aria-labelledby="liked-profiles" className="mt-6">
-            <h2 id="liked-profiles" className="mb-2 font-semibold">דמויות שאהבתי</h2>
-            {profiles.map(profile => (
-              <Link key={profile.id} to="/app/characters/$characterId" params={{ characterId: profile.id }}
-                className="flex items-center gap-3 border-b py-3 hover:bg-accent focus-visible:bg-accent">
+            <h2 id="liked-profiles" className="mb-2 font-semibold">
+              דמויות שאהבתי
+            </h2>
+            {profiles.map((profile) => (
+              <Link
+                key={profile.id}
+                to="/app/characters/$characterId"
+                params={{ characterId: profile.id }}
+                className="flex items-center gap-3 border-b py-3 hover:bg-accent focus-visible:bg-accent"
+              >
                 <Heart aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
                 <span className="min-w-0 flex-1 truncate">{profile.name}</span>
                 <span className="text-sm text-muted-foreground">צפייה בפרופיל</span>

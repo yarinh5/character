@@ -18,11 +18,16 @@ function beforeSend(content) {
 
 test("active-token setup uses one business clock and checks expiry before sending", () => {
   const setup = beforeSend("owner strict response");
-  const anchor = setup.match(/WITH owner_activity AS \(SELECT clock_timestamp\(\) AS activity_at\) INSERT INTO public\.conversations \([^;]+ FROM owner_activity;/)?.[0];
+  const anchor = setup.match(
+    /WITH owner_activity AS \(SELECT clock_timestamp\(\) AS activity_at\) INSERT INTO public\.conversations \([^;]+ FROM owner_activity;/,
+  )?.[0];
   assert.ok(anchor?.includes(owner), "owner conversation has a server-clock anchor");
   assert.match(anchor, /last_business_message_at, inactivity_expires_at/);
   assert.match(anchor, /'open', activity_at, activity_at \+ interval '180 seconds'/);
-  assert.match(setup, /inactivity_expires_at = last_business_message_at \+ interval '180 seconds' AND inactivity_expires_at > clock_timestamp\(\)/);
+  assert.match(
+    setup,
+    /inactivity_expires_at = last_business_message_at \+ interval '180 seconds' AND inactivity_expires_at > clock_timestamp\(\)/,
+  );
 });
 
 test("first claim is prepared by a client message and checks the projected queue row", () => {
@@ -33,15 +38,22 @@ test("first claim is prepared by a client message and checks the projected queue
   for (const insert of setup.match(/INSERT INTO public\.conversation_work_items\b[^;]+;/g) ?? []) {
     assert.ok(!insert.includes(claim), "the NEW row belongs to the client-message trigger");
   }
-  assert.match(setup, /SELECT is\(\( SELECT count\(\*\).*JOIN public\.conversation_work_items work_item ON work_item\.conversation_id = conversation\.id/);
+  assert.match(
+    setup,
+    /SELECT is\(\( SELECT count\(\*\).*JOIN public\.conversation_work_items work_item ON work_item\.conversation_id = conversation\.id/,
+  );
   for (const predicate of [
-    "conversation.needs_handling IS TRUE", "conversation.pending_since = message.created_at",
+    "conversation.needs_handling IS TRUE",
+    "conversation.pending_since = message.created_at",
     "conversation.inactivity_expires_at = message.created_at + interval '180 seconds'",
-    "conversation.inactivity_expires_at > clock_timestamp()", "work_item.last_client_message_id = message.id",
-    "work_item.status = 'new'", "work_item.responsible_operator_id IS NULL",
+    "conversation.inactivity_expires_at > clock_timestamp()",
+    "work_item.last_client_message_id = message.id",
+    "work_item.status = 'new'",
+    "work_item.responsible_operator_id IS NULL",
     "NOT EXISTS ( SELECT 1 FROM public.conversation_handling_cycles cycle",
     "), 1::bigint, 'Client request",
-  ]) assert.ok(setup.includes(predicate), predicate);
+  ])
+    assert.ok(setup.includes(predicate), predicate);
 });
 
 test("separate active tokens reject missing and expired windows, and open non-pending work rejects claim", () => {
@@ -60,8 +72,11 @@ test("separate active tokens reject missing and expired windows, and open non-pe
     assert.ok(sql.slice(0, start).includes(id(conversation)), conversation);
     assert.ok(probes.includes(`SELECT throws_ok( $$${call}$$, 'P0001', '${reason}'`), reason);
   }
-  assert.match(sql.slice(0,start), /clock_timestamp\(\) - interval '181 seconds' AS activity_at/);
-  assert.match(probes, /RESET ROLE; SELECT is\(pg_temp\.wp01_4_send_counts\(\), current_setting\('wp01_4.before_invalid_states'\)::jsonb/);
+  assert.match(sql.slice(0, start), /clock_timestamp\(\) - interval '181 seconds' AS activity_at/);
+  assert.match(
+    probes,
+    /RESET ROLE; SELECT is\(pg_temp\.wp01_4_send_counts\(\), current_setting\('wp01_4.before_invalid_states'\)::jsonb/,
+  );
 });
 
 test("the TAP plan matches the fixture and the transaction rolls back", () => {

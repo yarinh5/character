@@ -17,11 +17,19 @@ export function RecoveryAccessGate({ children }: { children: ReactNode }) {
     staleTime: 15_000,
   });
 
-  if (state.isLoading) return <p className="p-6 text-center" role="status">בודק את מצב המערכת…</p>;
+  if (state.isLoading)
+    return (
+      <p className="p-6 text-center" role="status">
+        בודק את מצב המערכת…
+      </p>
+    );
   if (state.isError || state.data?.blocked !== false) {
     return (
       <main className="mx-auto flex min-h-[60vh] max-w-lg items-center p-6" dir="rtl">
-        <section className="w-full rounded-xl border bg-card p-6 text-center shadow-sm" role="alert">
+        <section
+          className="w-full rounded-xl border bg-card p-6 text-center shadow-sm"
+          role="alert"
+        >
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-600" aria-hidden="true" />
           <h1 className="text-xl font-semibold">המערכת במצב תחזוקה</h1>
           <p className="mt-2 text-sm text-muted-foreground">

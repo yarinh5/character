@@ -19,9 +19,7 @@ function NotFoundComponent() {
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">העמוד לא נמצא</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          הדף שחיפשת לא קיים או הועבר.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">הדף שחיפשת לא קיים או הועבר.</p>
         <div className="mt-6">
           <Link
             to="/"
@@ -42,9 +40,7 @@ function ErrorComponent({ error, reset }: { error: unknown; reset: () => void })
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          העמוד לא נטען
-        </h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">העמוד לא נטען</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           משהו השתבש. נסה לרענן או לחזור לדף הבית.
         </p>
@@ -76,15 +72,35 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Character Chat OS — שיחות עם דמויות שמרגישות אמיתיות" },
-      { name: "description", content: "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן." },
+      {
+        name: "description",
+        content:
+          "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן.",
+      },
       { property: "og:title", content: "Character Chat OS — שיחות עם דמויות שמרגישות אמיתיות" },
-      { property: "og:description", content: "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן." },
+      {
+        property: "og:description",
+        content:
+          "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "Character Chat OS — שיחות עם דמויות שמרגישות אמיתיות" },
-      { name: "twitter:description", content: "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4fa78d6a-5c8a-4c11-aa85-9c8baba89909/id-preview-759202f0--6247bbf6-39b7-4190-9a5d-d0e0e5250512.lovable.app-1778837528219.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4fa78d6a-5c8a-4c11-aa85-9c8baba89909/id-preview-759202f0--6247bbf6-39b7-4190-9a5d-d0e0e5250512.lovable.app-1778837528219.png" },
+      {
+        name: "twitter:description",
+        content:
+          "פלטפורמת צ'אט אישית לשיחות עם דמויות. בחרו דמות, פתחו שיחה והמשיכו את החוויה בכל זמן.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4fa78d6a-5c8a-4c11-aa85-9c8baba89909/id-preview-759202f0--6247bbf6-39b7-4190-9a5d-d0e0e5250512.lovable.app-1778837528219.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4fa78d6a-5c8a-4c11-aa85-9c8baba89909/id-preview-759202f0--6247bbf6-39b7-4190-9a5d-d0e0e5250512.lovable.app-1778837528219.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

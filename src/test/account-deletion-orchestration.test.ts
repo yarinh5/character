@@ -274,16 +274,12 @@ describe("deletion worker orchestration", () => {
       step: "retention_minimization",
     });
     expect(io.executeRetentionMinimization).toHaveBeenCalledWith("request-a", "claim-a");
-    expect(io.blockRetention).toHaveBeenCalledWith(
-      "request-a",
-      "claim-a",
-      {
-        operation: "retention_minimization_evaluated",
-        completion_ready: false,
-        minimized: ["admin_audit", "blocks"],
-        protected: ["financial_records"],
-      },
-    );
+    expect(io.blockRetention).toHaveBeenCalledWith("request-a", "claim-a", {
+      operation: "retention_minimization_evaluated",
+      completion_ready: false,
+      minimized: ["admin_audit", "blocks"],
+      protected: ["financial_records"],
+    });
     expect(io.complete).not.toHaveBeenCalled();
   });
 
@@ -333,15 +329,13 @@ describe("deletion worker orchestration", () => {
 
 function workflowIo(stepName: string): DeletionWorkflowIo {
   return {
-    claim: vi
-      .fn()
-      .mockResolvedValue({
-        request_id: "request-a",
-        step_name: stepName,
-        attempt_count: 1,
-        claim_token: "claim-a",
-        lease_expires_at: "later",
-      }),
+    claim: vi.fn().mockResolvedValue({
+      request_id: "request-a",
+      step_name: stepName,
+      attempt_count: 1,
+      claim_token: "claim-a",
+      lease_expires_at: "later",
+    }),
     executeDatabase: vi.fn(),
     listStorage: vi.fn().mockResolvedValue([]),
     removeStorage: vi.fn(),

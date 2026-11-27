@@ -108,7 +108,7 @@
   the disposable tenant connection budget was set to 400 through the authenticated Realtime
   management API; the 100 joins/second limit stayed in place. Both unpaced and paced attempts
   then stopped at 240/330. Kong logged `512 worker_connections are not enough while connecting
-  to upstream`; a reload of the task-owned gateway added only `worker_connections 1024` to its
+to upstream`; a reload of the task-owned gateway added only `worker_connections 1024` to its
   custom template. The other rendered Kong configuration and routes were unchanged.
   - The final run held all 300 client and 30 operator authenticated sockets through Kong for
     35.014 seconds. 331/331 password logins, 30/30 heartbeats, 300/300 real client text RPCs

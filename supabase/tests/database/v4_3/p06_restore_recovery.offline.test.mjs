@@ -9,7 +9,10 @@ const worker = readFileSync(
   new URL("../../../functions/process-restore-recovery/index.ts", import.meta.url),
   "utf8",
 );
-const clientRoute = readFileSync(new URL("../../../../src/routes/app.tsx", import.meta.url), "utf8");
+const clientRoute = readFileSync(
+  new URL("../../../../src/routes/app.tsx", import.meta.url),
+  "utf8",
+);
 const operatorRoute = readFileSync(
   new URL("../../../../src/routes/operator.tsx", import.meta.url),
   "utf8",

@@ -482,7 +482,12 @@ export function OperatorChatPage() {
       if (isStale()) return;
       setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
       setMessages((prev) =>
-        me ? [] : mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), loadedMessages),
+        me
+          ? []
+          : mergeMessagesById(
+              prev.filter((message) => message.conversation_id === conversationId),
+              loadedMessages,
+            ),
       );
       setHasOlderMessages(loadedMessages.length === MESSAGE_PAGE_SIZE);
       setNotes((n ?? []) as unknown as Note[]);
@@ -542,7 +547,10 @@ export function OperatorChatPage() {
         .limit(MESSAGE_PAGE_SIZE);
       if (isStale() || error) return;
       setMessages((prev) =>
-        mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), (data ?? []) as Msg[]),
+        mergeMessagesById(
+          prev.filter((message) => message.conversation_id === conversationId),
+          (data ?? []) as Msg[],
+        ),
       );
     };
     const ch = supabase
@@ -683,7 +691,12 @@ export function OperatorChatPage() {
         },
       )
       .on("system", {}, (payload: { extension?: string; status?: string }) => {
-        if (joined && !isStale() && payload.extension === "postgres_changes" && payload.status === "ok") {
+        if (
+          joined &&
+          !isStale() &&
+          payload.extension === "postgres_changes" &&
+          payload.status === "ok"
+        ) {
           void reconcileMessages();
         }
       })

@@ -23,7 +23,11 @@ type PickerProbeProps = {
   open: boolean;
   readOnly?: boolean;
   operatorSendGeneration: number;
-  onSent: (result: { cycle_id: string }, conversationId: string, ticket: OperatorSendTicket) => boolean;
+  onSent: (
+    result: { cycle_id: string },
+    conversationId: string,
+    ticket: OperatorSendTicket,
+  ) => boolean;
 };
 const recordPicker = vi.hoisted(() => vi.fn<(kind: string, props: PickerProbeProps) => void>());
 const stableMocks = vi.hoisted(() => ({
@@ -74,26 +78,28 @@ vi.mock("@/hooks/useStickerSend", async (importOriginal) => {
   return {
     ...original,
     useOperatorSendOwnership: (...args: Parameters<typeof original.useOperatorSendOwnership>) =>
-      testState.realOwnership ? original.useOperatorSendOwnership(...args) : ({
-      sendScope: {
-        conversationId,
-        generation: 4,
-        beginRequest: stableMocks.beginRequest.mockImplementation(() => ({
-          conversationId,
-          generation: 4,
-          requestId: 1,
-          expectedCycleId: testState.cycleId,
-        })),
-        completeRequest: stableMocks.completeRequest,
-        isCurrent: stableMocks.isCurrent,
-        invalidate: stableMocks.invalidate,
-      },
-      responsibility: testState.responsibility,
-      responsibilityCycleId: testState.cycleId,
-      refreshResponsibility: stableMocks.refreshResponsibility,
-      applySuccessfulSendCycle: stableMocks.applySuccessfulSendCycle,
-      releaseOwnership: stableMocks.releaseOwnership,
-    }),
+      testState.realOwnership
+        ? original.useOperatorSendOwnership(...args)
+        : {
+            sendScope: {
+              conversationId,
+              generation: 4,
+              beginRequest: stableMocks.beginRequest.mockImplementation(() => ({
+                conversationId,
+                generation: 4,
+                requestId: 1,
+                expectedCycleId: testState.cycleId,
+              })),
+              completeRequest: stableMocks.completeRequest,
+              isCurrent: stableMocks.isCurrent,
+              invalidate: stableMocks.invalidate,
+            },
+            responsibility: testState.responsibility,
+            responsibilityCycleId: testState.cycleId,
+            refreshResponsibility: stableMocks.refreshResponsibility,
+            applySuccessfulSendCycle: stableMocks.applySuccessfulSendCycle,
+            releaseOwnership: stableMocks.releaseOwnership,
+          },
   };
 });
 
@@ -210,17 +216,19 @@ function resultFor(table: string): QueryResult {
   }
   if (table === "conversation_locks") {
     return {
-      data: testState.foreignLock ? {
-        conversation_id: testState.conversationId,
-        locked_by_operator_id: "00000000-0000-4000-8000-000000000012",
-        locked_by_user_id: "00000000-0000-4000-8000-000000000022",
-        locked_at: new Date().toISOString(),
-        last_activity_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-        released_at: null,
-        release_reason: null,
-        operators: { full_name: "עמית" },
-      } : null,
+      data: testState.foreignLock
+        ? {
+            conversation_id: testState.conversationId,
+            locked_by_operator_id: "00000000-0000-4000-8000-000000000012",
+            locked_by_user_id: "00000000-0000-4000-8000-000000000022",
+            locked_at: new Date().toISOString(),
+            last_activity_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+            released_at: null,
+            release_reason: null,
+            operators: { full_name: "עמית" },
+          }
+        : null,
       error: null,
     };
   }
@@ -289,7 +297,13 @@ const channels: ChannelDouble[] = [];
 function createChannel(): ChannelDouble {
   const channel: ChannelDouble = {
     status: (_status: string) => {},
-    on: vi.fn((_type: string, _filter: Record<string, string | undefined>, _callback: (...args: any[]) => void) => channel),
+    on: vi.fn(
+      (
+        _type: string,
+        _filter: Record<string, string | undefined>,
+        _callback: (...args: any[]) => void,
+      ) => channel,
+    ),
     subscribe: vi.fn((callback: (status: string) => void) => {
       channel.status = callback;
       return channel;
@@ -346,7 +360,10 @@ beforeEach(() => {
       return Promise.resolve({ data: { is_blocked: false }, error: null });
     }
     if (name === "get_operator_conversation_responsibility") {
-      return Promise.resolve({ data: [{ state: testState.responsibility, cycle_id: testState.cycleId }], error: null });
+      return Promise.resolve({
+        data: [{ state: testState.responsibility, cycle_id: testState.cycleId }],
+        error: null,
+      });
     }
     if (name === "send_operator_message") {
       return Promise.resolve({ data: { cycle_id: cycleId }, error: null });
@@ -368,20 +385,29 @@ async function renderChat() {
 describe("operator chat read-only responsibility", () => {
   it("reconciles a missed message only after postgres changes is ready", async () => {
     await renderChat();
-    messageRows = [{
-      id: "message-catch-up",
-      conversation_id: conversationId,
-      sender_type: "client",
-      sender_id: "00000000-0000-4000-8000-000000000031",
-      content: "Operator catch-up message",
-      created_at: "2026-11-27T10:00:00.000Z",
-      is_read: false,
-      message_attachments: [],
-      message_stickers: null,
-    }];
-    const channel = [...channels].reverse().find((item) => item.on.mock.calls.some(
-      ([type, filter]) => type === "postgres_changes" && filter.table === "messages" && filter.filter === `conversation_id=eq.${conversationId}`,
-    ));
+    messageRows = [
+      {
+        id: "message-catch-up",
+        conversation_id: conversationId,
+        sender_type: "client",
+        sender_id: "00000000-0000-4000-8000-000000000031",
+        content: "Operator catch-up message",
+        created_at: "2026-11-27T10:00:00.000Z",
+        is_read: false,
+        message_attachments: [],
+        message_stickers: null,
+      },
+    ];
+    const channel = [...channels]
+      .reverse()
+      .find((item) =>
+        item.on.mock.calls.some(
+          ([type, filter]) =>
+            type === "postgres_changes" &&
+            filter.table === "messages" &&
+            filter.filter === `conversation_id=eq.${conversationId}`,
+        ),
+      );
     expect(channel).toBeDefined();
     const system = channel!.on.mock.calls.find(([type]) => type === "system")?.[2] as
       | ((payload: { extension: string; status: string }) => void)
@@ -397,9 +423,16 @@ describe("operator chat read-only responsibility", () => {
 
   it("does not reconcile from a retired channel after read access is revoked", async () => {
     const view = await renderChat();
-    const channel = [...channels].reverse().find((item) => item.on.mock.calls.some(
-      ([type, filter]) => type === "postgres_changes" && filter.table === "messages" && filter.filter === `conversation_id=eq.${conversationId}`,
-    ));
+    const channel = [...channels]
+      .reverse()
+      .find((item) =>
+        item.on.mock.calls.some(
+          ([type, filter]) =>
+            type === "postgres_changes" &&
+            filter.table === "messages" &&
+            filter.filter === `conversation_id=eq.${conversationId}`,
+        ),
+      );
     const system = channel?.on.mock.calls.find(([type]) => type === "system")?.[2] as
       | ((payload: { extension: string; status: string }) => void)
       | undefined;
@@ -408,16 +441,22 @@ describe("operator chat read-only responsibility", () => {
 
     testState.readAccessState = "denied";
     testState.readAccessGeneration += 1;
-    view.rerender(<TooltipProvider><OperatorChatPage /></TooltipProvider>);
-    messageRows = [{
-      id: "revoked-message",
-      conversation_id: conversationId,
-      sender_type: "client",
-      sender_id: "00000000-0000-4000-8000-000000000031",
-      content: "Revoked message",
-      created_at: "2026-11-27T10:01:00.000Z",
-      is_read: false,
-    }];
+    view.rerender(
+      <TooltipProvider>
+        <OperatorChatPage />
+      </TooltipProvider>,
+    );
+    messageRows = [
+      {
+        id: "revoked-message",
+        conversation_id: conversationId,
+        sender_type: "client",
+        sender_id: "00000000-0000-4000-8000-000000000031",
+        content: "Revoked message",
+        created_at: "2026-11-27T10:01:00.000Z",
+        is_read: false,
+      },
+    ];
     act(() => {
       channel?.status("SUBSCRIBED");
       system?.({ extension: "postgres_changes", status: "ok" });
@@ -492,17 +531,22 @@ describe("operator chat read-only responsibility", () => {
     expect(screen.getByPlaceholderText("השיחה בטיפול עובד אחר")).toBeInTheDocument();
   });
 
-  it.each(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"])("still suspends access on active channel %s", async (status) => {
-    await renderChat();
-    stableMocks.suspendReadAccess.mockClear();
-    act(() => channels.at(-1)!.status(status));
-    expect(stableMocks.suspendReadAccess).toHaveBeenCalledOnce();
-  });
+  it.each(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"])(
+    "still suspends access on active channel %s",
+    async (status) => {
+      await renderChat();
+      stableMocks.suspendReadAccess.mockClear();
+      act(() => channels.at(-1)!.status(status));
+      expect(stableMocks.suspendReadAccess).toHaveBeenCalledOnce();
+    },
+  );
 
   it("refreshes responsibility from the published conversation assignment event", async () => {
     await renderChat();
     const registrations = channels.at(-1)!.on.mock.calls as ChannelRegistration[];
-    expect(registrations.some(([, filter]) => filter.table === "conversation_handling_cycles")).toBe(false);
+    expect(
+      registrations.some(([, filter]) => filter.table === "conversation_handling_cycles"),
+    ).toBe(false);
     const registration = registrations.find(([, filter]) => filter.table === "conversations");
     expect(registration?.[1].filter).toBe(`id=eq.${conversationId}`);
     stableMocks.refreshResponsibility.mockClear();
@@ -664,7 +708,10 @@ describe("operator chat read-only responsibility", () => {
 // Exercise the page with its actual ownership/scope hook; only the external API is mocked.
 const textComposer = () => screen.getByPlaceholderText(/כתוב כ|השיחה נעולה כרגע לעובד אחר/);
 const textCalls = () => rpcMock.mock.calls.filter(([name]) => name === "send_operator_message");
-async function renderLegacyText(responsibility: "available" | "mine" = "available", foreignLock = true) {
+async function renderLegacyText(
+  responsibility: "available" | "mine" = "available",
+  foreignLock = true,
+) {
   testState.realOwnership = true;
   testState.concurrencyMode = "lock";
   testState.responsibility = responsibility;
@@ -675,65 +722,105 @@ async function renderLegacyText(responsibility: "available" | "mine" = "availabl
   return view;
 }
 function lateTextResult() {
-  return { data: { cycle_id: cycleId, message: {
-    id: "00000000-0000-4000-8000-000000000201", conversation_id: conversationId,
-    sender_type: "operator", sender_id: stableMocks.user.id, operator_id: operatorId,
-    content: "השלמה ישנה", created_at: "2026-11-23T10:00:00Z",
-  } }, error: null };
+  return {
+    data: {
+      cycle_id: cycleId,
+      message: {
+        id: "00000000-0000-4000-8000-000000000201",
+        conversation_id: conversationId,
+        sender_type: "operator",
+        sender_id: stableMocks.user.id,
+        operator_id: operatorId,
+        content: "השלמה ישנה",
+        created_at: "2026-11-23T10:00:00Z",
+      },
+    },
+    error: null,
+  };
 }
 
 describe("text sends follow cycle authority rather than legacy locks", () => {
-  it.each(["available", "mine"] as const)("sends once for %s despite a foreign legacy lock with the exact server token contract", async (responsibility) => {
-    await renderLegacyText(responsibility);
-    const composer = textComposer();
-    expect(composer).toBeEnabled();
-    // The media entry controls keep their prior legacy-lock behavior.
-    expect(screen.getByRole("button", { name: "בחירת מדיה לשליחה" })).toBeDisabled();
-    fireEvent.change(composer, { target: { value: "בקשת טקסט" } });
-    fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
-    await waitFor(() => expect(textCalls()).toEqual([["send_operator_message", {
-      _conversation_id: conversationId, _content: "בקשת טקסט",
-      _expected_cycle_id: responsibility === "mine" ? cycleId : null,
-    }]]));
-    expect(rpcMock).not.toHaveBeenCalledWith("acquire_conversation_lock", expect.any(Object));
-    await waitFor(() => expect(composer).toHaveValue(""));
-  });
+  it.each(["available", "mine"] as const)(
+    "sends once for %s despite a foreign legacy lock with the exact server token contract",
+    async (responsibility) => {
+      await renderLegacyText(responsibility);
+      const composer = textComposer();
+      expect(composer).toBeEnabled();
+      // The media entry controls keep their prior legacy-lock behavior.
+      expect(screen.getByRole("button", { name: "בחירת מדיה לשליחה" })).toBeDisabled();
+      fireEvent.change(composer, { target: { value: "בקשת טקסט" } });
+      fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+      await waitFor(() =>
+        expect(textCalls()).toEqual([
+          [
+            "send_operator_message",
+            {
+              _conversation_id: conversationId,
+              _content: "בקשת טקסט",
+              _expected_cycle_id: responsibility === "mine" ? cycleId : null,
+            },
+          ],
+        ]),
+      );
+      expect(rpcMock).not.toHaveBeenCalledWith("acquire_conversation_lock", expect.any(Object));
+      await waitFor(() => expect(composer).toHaveValue(""));
+    },
+  );
 
   it("does not require a successful advisory lock acquisition when no legacy lock exists", async () => {
     await renderLegacyText("available", false);
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "acquire_conversation_lock"
-      ? Promise.resolve({ data: { acquired: false }, error: null }) : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "acquire_conversation_lock"
+        ? Promise.resolve({ data: { acquired: false }, error: null })
+        : prior(name, ...args),
+    );
     fireEvent.change(textComposer(), { target: { value: "ללא נעילה" } });
-    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("acquire_conversation_lock", expect.any(Object)));
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("acquire_conversation_lock", expect.any(Object)),
+    );
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
     await waitFor(() => expect(textCalls()).toHaveLength(1));
   });
 
-  it.each(["warning", "lock"] as const)("describes the %s legacy marker as coordination rather than active handling", async (mode) => {
-    const view = await renderLegacyText();
-    testState.concurrencyMode = mode;
-    // Reload the page's settings through its existing mount path.
-    view.unmount();
-    await renderChat();
-    await screen.findByText(/נעילה לתיאום/);
-    expect(screen.queryByText(/עמית פעיל בשיחה|השיחה נעולה אצל/)).not.toBeInTheDocument();
-  });
+  it.each(["warning", "lock"] as const)(
+    "describes the %s legacy marker as coordination rather than active handling",
+    async (mode) => {
+      const view = await renderLegacyText();
+      testState.concurrencyMode = mode;
+      // Reload the page's settings through its existing mount path.
+      view.unmount();
+      await renderChat();
+      await screen.findByText(/נעילה לתיאום/);
+      expect(screen.queryByText(/עמית פעיל בשיחה|השיחה נעולה אצל/)).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps manual lock acquisition as coordination without claiming handling", async () => {
     await renderLegacyText("available", false);
     expect(screen.queryByRole("button", { name: "קח שיחה" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "סמן לתיאום" }));
-    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("acquire_conversation_lock", { _conversation_id: conversationId }));
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("acquire_conversation_lock", {
+        _conversation_id: conversationId,
+      }),
+    );
     expect(textCalls()).toHaveLength(0);
     expect(screen.getByText("השיחה פנויה")).toBeInTheDocument();
   });
 
-  it.each(["conversation_claim_state_expired", "operator_capacity_reached", "conversation_not_responsible_operator"])("preserves the draft after %s and never retries or publishes success", async (reason) => {
+  it.each([
+    "conversation_claim_state_expired",
+    "operator_capacity_reached",
+    "conversation_not_responsible_operator",
+  ])("preserves the draft after %s and never retries or publishes success", async (reason) => {
     await renderLegacyText();
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "send_operator_message"
-      ? Promise.resolve({ data: null, error: { message: reason } }) : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "send_operator_message"
+        ? Promise.resolve({ data: null, error: { message: reason } })
+        : prior(name, ...args),
+    );
     const composer = textComposer();
     fireEvent.change(composer, { target: { value: "טיוטה נדחית" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
@@ -748,7 +835,9 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     await renderLegacyText();
     const pending = deferred<ReturnType<typeof lateTextResult>>();
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "send_operator_message" ? pending.promise : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "send_operator_message" ? pending.promise : prior(name, ...args),
+    );
     const composer = textComposer();
     fireEvent.change(composer, { target: { value: "בקשה אחת" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
@@ -762,11 +851,17 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     const view = await renderLegacyText();
     const pending = deferred<ReturnType<typeof lateTextResult>>();
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "send_operator_message" ? pending.promise : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "send_operator_message" ? pending.promise : prior(name, ...args),
+    );
     fireEvent.change(textComposer(), { target: { value: "טיוטת א" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
     testState.conversationId = "00000000-0000-4000-8000-000000000002";
-    view.rerender(<TooltipProvider><OperatorChatPage /></TooltipProvider>);
+    view.rerender(
+      <TooltipProvider>
+        <OperatorChatPage />
+      </TooltipProvider>,
+    );
     const composer = await screen.findByPlaceholderText(/כתוב כ/);
     fireEvent.change(composer, { target: { value: "טיוטת ב" } });
     await act(async () => pending.resolve(lateTextResult()));
@@ -780,11 +875,15 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     await renderLegacyText();
     const pending = deferred<ReturnType<typeof lateTextResult>>();
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "send_operator_message" ? pending.promise : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "send_operator_message" ? pending.promise : prior(name, ...args),
+    );
     fireEvent.change(textComposer(), { target: { value: "בקשה ישנה" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
     testState.responsibility = "other";
-    const registration = (channels.at(-1)!.on.mock.calls as ChannelRegistration[]).find(([, filter]) => filter.table === "conversations")!;
+    const registration = (channels.at(-1)!.on.mock.calls as ChannelRegistration[]).find(
+      ([, filter]) => filter.table === "conversations",
+    )!;
     act(() => registration[2]({}));
     await screen.findByPlaceholderText("השיחה בטיפול עובד אחר");
     await act(async () => pending.resolve(lateTextResult()));
@@ -797,12 +896,18 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     const view = await renderLegacyText();
     const pending = deferred<ReturnType<typeof lateTextResult>>();
     const prior = rpcMock.getMockImplementation()!;
-    rpcMock.mockImplementation((name: string, ...args: unknown[]) => name === "send_operator_message" ? pending.promise : prior(name, ...args));
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "send_operator_message" ? pending.promise : prior(name, ...args),
+    );
     fireEvent.change(textComposer(), { target: { value: "טיוטה מוגנת" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
     testState.readAccessState = "denied";
     testState.readAccessGeneration++;
-    view.rerender(<TooltipProvider><OperatorChatPage /></TooltipProvider>);
+    view.rerender(
+      <TooltipProvider>
+        <OperatorChatPage />
+      </TooltipProvider>,
+    );
     expect(screen.getByText("הגישה לשיחה בוטלה")).toBeInTheDocument();
     await act(async () => pending.resolve(lateTextResult()));
     expect(screen.queryByRole("button", { name: "שליחת הודעה" })).not.toBeInTheDocument();
@@ -816,7 +921,11 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     testState.responsibility = "closed";
     testState.conversationStatus = "closed";
     testState.foreignLock = true;
-    render(<TooltipProvider><OperatorChatPage /></TooltipProvider>);
+    render(
+      <TooltipProvider>
+        <OperatorChatPage />
+      </TooltipProvider>,
+    );
     await screen.findAllByRole("button", { name: "פתח מחדש" });
     expect(screen.queryByRole("button", { name: "שליחת הודעה" })).not.toBeInTheDocument();
     expect(textCalls()).toHaveLength(0);

@@ -761,9 +761,9 @@ describe("admin operator workspace", () => {
       expect(within(card).getByRole("button", { name })).toBeInTheDocument();
     }
 
-    const actions = within(card)
-      .getByRole("button", { name: `ניהול נקודות עבור ${operatorA.full_name}` })
-      .parentElement;
+    const actions = within(card).getByRole("button", {
+      name: `ניהול נקודות עבור ${operatorA.full_name}`,
+    }).parentElement;
     expect(actions).toHaveClass("min-w-0", "max-w-full");
     expect(actions).not.toHaveClass("shrink-0", "whitespace-nowrap");
   });

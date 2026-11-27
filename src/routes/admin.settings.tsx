@@ -305,7 +305,12 @@ function SettingsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="admin-account-email">אימייל</Label>
-                      <Input id="admin-account-email" value={profileForm.email} readOnly className="bg-muted/50" />
+                      <Input
+                        id="admin-account-email"
+                        value={profileForm.email}
+                        readOnly
+                        className="bg-muted/50"
+                      />
                     </div>
                     <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
                       שינוי role והרשאות לא מתבצע מהגדרות החשבון האישיות.

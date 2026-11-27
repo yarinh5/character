@@ -11,7 +11,7 @@ export function resolvePublicPasswordResetRedirect(
   if (!configured || allowedOrigins.size === 0) return null;
   try {
     const target = new URL(configured);
-    if (!['http:', 'https:'].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
+    if (!["http:", "https:"].includes(target.protocol) || !allowedOrigins.has(target.origin)) {
       return null;
     }
     return target.toString();

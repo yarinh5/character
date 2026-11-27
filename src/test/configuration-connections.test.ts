@@ -14,8 +14,7 @@ describe("product configuration connections", () => {
       resolveAllowedAuthRedirect(
         {
           AUTH_REDIRECT_ALLOWED_ORIGINS: "https://product.example,https://account.example",
-          ACCOUNT_DELETION_CONFIRM_REDIRECT_URL:
-            "https://account.example/verify-account-deletion",
+          ACCOUNT_DELETION_CONFIRM_REDIRECT_URL: "https://account.example/verify-account-deletion",
         },
         "ACCOUNT_DELETION_CONFIRM_REDIRECT_URL",
       ),
@@ -79,13 +78,21 @@ describe("product configuration connections", () => {
 
     expect(
       validateRecoveryEnvelopeConfiguration(
-        { externalLockId: "lock-91", externalAuthorityId: "authority-91", contractVersion: "p06-recovery-v1" },
+        {
+          externalLockId: "lock-91",
+          externalAuthorityId: "authority-91",
+          contractVersion: "p06-recovery-v1",
+        },
         config,
       ),
     ).toBeNull();
     expect(
       validateRecoveryEnvelopeConfiguration(
-        { externalLockId: "lock-91", externalAuthorityId: "other", contractVersion: "p06-recovery-v1" },
+        {
+          externalLockId: "lock-91",
+          externalAuthorityId: "other",
+          contractVersion: "p06-recovery-v1",
+        },
         config,
       ),
     ).toBe("recovery_external_authority_mismatch");
@@ -120,9 +127,18 @@ describe("product configuration connections", () => {
 
     expect(status).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ key: "registration_email_redirect", state: "configured_not_verified" }),
-        expect.objectContaining({ key: "account_deletion_email_redirects", state: "configured_not_verified" }),
-        expect.objectContaining({ key: "restore_recovery_authority", state: "configured_not_verified" }),
+        expect.objectContaining({
+          key: "registration_email_redirect",
+          state: "configured_not_verified",
+        }),
+        expect.objectContaining({
+          key: "account_deletion_email_redirects",
+          state: "configured_not_verified",
+        }),
+        expect.objectContaining({
+          key: "restore_recovery_authority",
+          state: "configured_not_verified",
+        }),
         expect.objectContaining({ key: "bot_protection_provider", state: "not_configured" }),
         expect.objectContaining({ key: "trusted_proxy_boundary", state: "not_configured" }),
       ]),

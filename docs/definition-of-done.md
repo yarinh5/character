@@ -1,4 +1,5 @@
 # החלטת Product Owner — Definition of Done
+
 ## פרויקט Character
 
 ### 1. ההגדרה המחייבת
@@ -87,6 +88,7 @@ Realtime הוא רכיב ליבה מחייב.
 NOT RUN, SKIPPED או IMPLEMENTED OFFLINE אינם PASS.
 
 האימות יכלול לפי הצורך:
+
 - Unit/Integration Tests.
 - DB/HTTP/Edge/Storage.
 - בדיקות הרשאות ומרוצים.
@@ -183,6 +185,7 @@ RTO של 4 שעות ו־RPO של 15 דקות הם יעדים תפעוליים ש
 אמץ הגדרה זו כ־Definition of Done של הפרויקט.
 
 מפה מולה את המצב הנוכחי והצג רק:
+
 - מה הושלם והוכח.
 - מה חסר במוצר עצמו.
 - מה חסר באינטגרציה ובבדיקות הקבלה.

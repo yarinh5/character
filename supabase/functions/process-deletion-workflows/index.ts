@@ -102,14 +102,11 @@ Deno.serve(async (request) => {
           return data as Record<string, unknown>;
         },
         async blockRetention(requestId, claimToken, evidence) {
-          const { error } = await trusted.rpc(
-            "block_account_retention_minimization_for_server",
-            {
-              _request_id: requestId,
-              _claim_token: claimToken,
-              _evidence: evidence,
-            },
-          );
+          const { error } = await trusted.rpc("block_account_retention_minimization_for_server", {
+            _request_id: requestId,
+            _claim_token: claimToken,
+            _evidence: evidence,
+          });
           if (error) throw new Error("retention_block_persistence_failed");
         },
         async getAccountSubject(requestId, stepName, claimToken) {

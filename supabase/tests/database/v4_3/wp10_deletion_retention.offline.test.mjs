@@ -27,10 +27,7 @@ const workerOrchestration = readFileSync(
 
 function functionBody(name, schema = "public") {
   const escapedName = `${schema}.${name}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const declaration = new RegExp(
-    `CREATE(?: OR REPLACE)? FUNCTION\\s+${escapedName}\\s*\\(`,
-    "g",
-  );
+  const declaration = new RegExp(`CREATE(?: OR REPLACE)? FUNCTION\\s+${escapedName}\\s*\\(`, "g");
   let start = -1;
   for (const match of sql.matchAll(declaration)) start = match.index;
   assert.notEqual(start, -1, `${name} must exist in the migration`);
@@ -123,16 +120,14 @@ test("cancellation ACLs reference only the canonical server function", () => {
   assert.ok(aclStart >= 0, "the WP10 function ACL block must exist");
 
   const targets = new Set(
-    [...baseSql.slice(aclStart).matchAll(
-      /public\.(cancel_account_deletion(?:_for_server)?)\(([^)]*)\)/g,
-    )].map((match) =>
-      `${match[1]}(${match[2].replace(/\s+/g, "").toLowerCase()})`
-    ),
+    [
+      ...baseSql
+        .slice(aclStart)
+        .matchAll(/public\.(cancel_account_deletion(?:_for_server)?)\(([^)]*)\)/g),
+    ].map((match) => `${match[1]}(${match[2].replace(/\s+/g, "").toLowerCase()})`),
   );
 
-  assert.deepEqual([...targets], [
-    "cancel_account_deletion_for_server(uuid,uuid,text)",
-  ]);
+  assert.deepEqual([...targets], ["cancel_account_deletion_for_server(uuid,uuid,text)"]);
 });
 
 test("WP10 uses the canonical Gift purchase/message relation and never the removed message_gifts table", () => {
