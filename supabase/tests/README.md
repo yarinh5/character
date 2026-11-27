@@ -94,6 +94,25 @@ conversation lock and verifies that both historical and live messages retain
 complete metadata and state. The exclusive session rolls back without changing
 `legacy_shadow`; the test does not perform cutover.
 
+## AC33 legacy timed media upgrade
+
+Use a fresh, local-only `ac33-legacy-*` project with the non-QA project and
+Engine pins. Start from the exact migration inventory through
+`20261105130000`. Keep a randomly generated 48-character lowercase hex
+`AC33_SYNTHETIC_PASSWORD` in the rehearsal process environment, not in a file.
+
+1. Run `node supabase/tests/upgrades/wp12-legacy-timed-media.mjs seed`.
+2. Restore the remaining migration files to the isolated copy, apply them with
+   `supabase migration up --local`, and verify the exact ordered inventory.
+3. Run `node supabase/tests/upgrades/wp12-legacy-timed-media.mjs verify` on the
+   same project with the same synthetic password.
+
+The verification tests authenticated HTTP signing and Storage, including the
+legacy seven-second cap, denial before opening and after completion, exactly
+one debit/payout after paid-open replay, and rejection of new paid rows
+without a Gift. The historical rows must predate the active Gift trigger;
+do not seed them by bypassing it in the ordinary HTTP suite.
+
 ## WP01 113-to-116 upgrade rehearsal
 
 Run `npm run test:upgrade:wp01` only against the isolated local stack. It
