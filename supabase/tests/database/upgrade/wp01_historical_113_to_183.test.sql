@@ -9,10 +9,10 @@ SET LOCAL search_path = extensions, public, pg_catalog;
 
 SELECT plan(27);
 
-SELECT is((SELECT count(*) FROM supabase_migrations.schema_migrations), 183::bigint,
-  'The complete 183-migration chain is installed');
+SELECT is((SELECT count(*) FROM supabase_migrations.schema_migrations), 184::bigint,
+  'The complete 184-migration chain is installed');
 SELECT is((SELECT max(version) FROM supabase_migrations.schema_migrations),
-  '20261126204500', 'The installed chain ends at the approved migration');
+  '20261127010000', 'The installed chain ends at the approved migration');
 SELECT ok(
   to_regclass('private.handling_reconciliation_issues') IS NOT NULL
     AND to_regprocedure('private.backfill_handling_shadow_batch(integer)') IS NOT NULL
