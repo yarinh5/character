@@ -9,110 +9,60 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VerifyAccountDeletionRouteImport } from './routes/verify-account-deletion'
-import { Route as TermsRouteImport } from './routes/terms'
-import { Route as ServiceRouteImport } from './routes/service'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as RegisterRouteImport } from './routes/register'
-import { Route as PrivacyRouteImport } from './routes/privacy'
-import { Route as OperatorRouteImport } from './routes/operator'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as CancelAccountDeletionRouteImport } from './routes/cancel-account-deletion'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as OperatorIndexRouteImport } from './routes/operator.index'
-import { Route as AppIndexRouteImport } from './routes/app.index'
-import { Route as AdminIndexRouteImport } from './routes/admin.index'
-import { Route as OperatorSettingsRouteImport } from './routes/operator.settings'
-import { Route as OperatorOnlineRouteImport } from './routes/operator.online'
-import { Route as OperatorNewRouteImport } from './routes/operator.new'
-import { Route as OperatorLeadsRouteImport } from './routes/operator.leads'
-import { Route as OperatorConversationsRouteImport } from './routes/operator.conversations'
-import { Route as OperatorAnalyticsRouteImport } from './routes/operator.analytics'
-import { Route as AppSupportRouteImport } from './routes/app.support'
-import { Route as AppProfileRouteImport } from './routes/app.profile'
-import { Route as AppPackagesRouteImport } from './routes/app.packages'
-import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
-import { Route as AppFavoritesRouteImport } from './routes/app.favorites'
-import { Route as AppConversationsRouteImport } from './routes/app.conversations'
-import { Route as AppCharactersRouteImport } from './routes/app.characters'
-import { Route as AdminUsersRouteImport } from './routes/admin.users'
-import { Route as AdminSupportRouteImport } from './routes/admin.support'
-import { Route as AdminStickersRouteImport } from './routes/admin.stickers'
-import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
-import { Route as AdminReportsRouteImport } from './routes/admin.reports'
-import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
-import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
-import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
-import { Route as AdminExceptionsRouteImport } from './routes/admin.exceptions'
-import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
-import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
-import { Route as AdminClientsRouteImport } from './routes/admin.clients'
-import { Route as AdminCharactersRouteImport } from './routes/admin.characters'
-import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
-import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as CancelAccountDeletionRouteImport } from './routes/cancel-account-deletion'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as OperatorRouteImport } from './routes/operator'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as RegisterRouteImport } from './routes/register'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as ServiceRouteImport } from './routes/service'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as VerifyAccountDeletionRouteImport } from './routes/verify-account-deletion'
 import { Route as AcceptInviteTokenRouteImport } from './routes/accept-invite.$token'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
+import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
+import { Route as AdminCharactersRouteImport } from './routes/admin.characters'
+import { Route as AdminClientsRouteImport } from './routes/admin.clients'
+import { Route as AdminConversationsRouteImport } from './routes/admin.conversations'
+import { Route as AdminCreditsRouteImport } from './routes/admin.credits'
+import { Route as AdminExceptionsRouteImport } from './routes/admin.exceptions'
+import { Route as AdminInvitesRouteImport } from './routes/admin.invites'
+import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
+import { Route as AdminOperatorsRouteImport } from './routes/admin.operators'
+import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
+import { Route as AdminStickersRouteImport } from './routes/admin.stickers'
+import { Route as AdminSupportRouteImport } from './routes/admin.support'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppCharactersRouteImport } from './routes/app.characters'
+import { Route as AppConversationsRouteImport } from './routes/app.conversations'
+import { Route as AppFavoritesRouteImport } from './routes/app.favorites'
+import { Route as AppOnboardingRouteImport } from './routes/app.onboarding'
+import { Route as AppPackagesRouteImport } from './routes/app.packages'
+import { Route as AppProfileRouteImport } from './routes/app.profile'
+import { Route as AppSupportRouteImport } from './routes/app.support'
+import { Route as OperatorIndexRouteImport } from './routes/operator.index'
+import { Route as OperatorAnalyticsRouteImport } from './routes/operator.analytics'
+import { Route as OperatorConversationsRouteImport } from './routes/operator.conversations'
+import { Route as OperatorLeadsRouteImport } from './routes/operator.leads'
+import { Route as OperatorNewRouteImport } from './routes/operator.new'
+import { Route as OperatorOnlineRouteImport } from './routes/operator.online'
+import { Route as OperatorSettingsRouteImport } from './routes/operator.settings'
 import { Route as AdminConversationsIndexRouteImport } from './routes/admin.conversations.index'
-import { Route as OperatorChatConversationIdRouteImport } from './routes/operator.chat.$conversationId'
-import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$conversationId'
-import { Route as AppCharactersCharacterIdRouteImport } from './routes/app.characters.$characterId'
 import { Route as AdminConversationsConversationIdRouteImport } from './routes/admin.conversations.$conversationId'
+import { Route as AppCharactersCharacterIdRouteImport } from './routes/app.characters.$characterId'
+import { Route as AppChatConversationIdRouteImport } from './routes/app.chat.$conversationId'
+import { Route as OperatorChatConversationIdRouteImport } from './routes/operator.chat.$conversationId'
 
-const VerifyAccountDeletionRoute = VerifyAccountDeletionRouteImport.update({
-  id: '/verify-account-deletion',
-  path: '/verify-account-deletion',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TermsRoute = TermsRouteImport.update({
-  id: '/terms',
-  path: '/terms',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ServiceRoute = ServiceRouteImport.update({
-  id: '/service',
-  path: '/service',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RegisterRoute = RegisterRouteImport.update({
-  id: '/register',
-  path: '/register',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PrivacyRoute = PrivacyRouteImport.update({
-  id: '/privacy',
-  path: '/privacy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OperatorRoute = OperatorRouteImport.update({
-  id: '/operator',
-  path: '/operator',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CancelAccountDeletionRoute = CancelAccountDeletionRouteImport.update({
-  id: '/cancel-account-deletion',
-  path: '/cancel-account-deletion',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -120,159 +70,69 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OperatorIndexRoute = OperatorIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => OperatorRoute,
+const CancelAccountDeletionRoute = CancelAccountDeletionRouteImport.update({
+  id: '/cancel-account-deletion',
+  path: '/cancel-account-deletion',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AppIndexRoute = AppIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppRoute,
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperatorRoute = OperatorRouteImport.update({
+  id: '/operator',
+  path: '/operator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ServiceRoute = ServiceRouteImport.update({
+  id: '/service',
+  path: '/service',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyAccountDeletionRoute = VerifyAccountDeletionRouteImport.update({
+  id: '/verify-account-deletion',
+  path: '/verify-account-deletion',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AcceptInviteTokenRoute = AcceptInviteTokenRouteImport.update({
+  id: '/accept-invite/$token',
+  path: '/accept-invite/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AdminRoute,
-} as any)
-const OperatorSettingsRoute = OperatorSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const OperatorOnlineRoute = OperatorOnlineRouteImport.update({
-  id: '/online',
-  path: '/online',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const OperatorNewRoute = OperatorNewRouteImport.update({
-  id: '/new',
-  path: '/new',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const OperatorLeadsRoute = OperatorLeadsRouteImport.update({
-  id: '/leads',
-  path: '/leads',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const OperatorConversationsRoute = OperatorConversationsRouteImport.update({
-  id: '/conversations',
-  path: '/conversations',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const OperatorAnalyticsRoute = OperatorAnalyticsRouteImport.update({
-  id: '/analytics',
-  path: '/analytics',
-  getParentRoute: () => OperatorRoute,
-} as any)
-const AppSupportRoute = AppSupportRouteImport.update({
-  id: '/support',
-  path: '/support',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppProfileRoute = AppProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPackagesRoute = AppPackagesRouteImport.update({
-  id: '/packages',
-  path: '/packages',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppOnboardingRoute = AppOnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFavoritesRoute = AppFavoritesRouteImport.update({
-  id: '/favorites',
-  path: '/favorites',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppConversationsRoute = AppConversationsRouteImport.update({
-  id: '/conversations',
-  path: '/conversations',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppCharactersRoute = AppCharactersRouteImport.update({
-  id: '/characters',
-  path: '/characters',
-  getParentRoute: () => AppRoute,
-} as any)
-const AdminUsersRoute = AdminUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminSupportRoute = AdminSupportRouteImport.update({
-  id: '/support',
-  path: '/support',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminStickersRoute = AdminStickersRouteImport.update({
-  id: '/stickers',
-  path: '/stickers',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminSettingsRoute = AdminSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminReportsRoute = AdminReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminOperatorsRoute = AdminOperatorsRouteImport.update({
-  id: '/operators',
-  path: '/operators',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminLeadsRoute = AdminLeadsRouteImport.update({
-  id: '/leads',
-  path: '/leads',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminInvitesRoute = AdminInvitesRouteImport.update({
-  id: '/invites',
-  path: '/invites',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminExceptionsRoute = AdminExceptionsRouteImport.update({
-  id: '/exceptions',
-  path: '/exceptions',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminCreditsRoute = AdminCreditsRouteImport.update({
-  id: '/credits',
-  path: '/credits',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminConversationsRoute = AdminConversationsRouteImport.update({
-  id: '/conversations',
-  path: '/conversations',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminClientsRoute = AdminClientsRouteImport.update({
-  id: '/clients',
-  path: '/clients',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminCharactersRoute = AdminCharactersRouteImport.update({
-  id: '/characters',
-  path: '/characters',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
-  id: '/audit-logs',
-  path: '/audit-logs',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
@@ -280,38 +140,178 @@ const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => AdminRoute,
 } as any)
-const AcceptInviteTokenRoute = AcceptInviteTokenRouteImport.update({
-  id: '/accept-invite/$token',
-  path: '/accept-invite/$token',
-  getParentRoute: () => rootRouteImport,
+const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
+  id: '/audit-logs',
+  path: '/audit-logs',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminCharactersRoute = AdminCharactersRouteImport.update({
+  id: '/characters',
+  path: '/characters',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminClientsRoute = AdminClientsRouteImport.update({
+  id: '/clients',
+  path: '/clients',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminConversationsRoute = AdminConversationsRouteImport.update({
+  id: '/conversations',
+  path: '/conversations',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminCreditsRoute = AdminCreditsRouteImport.update({
+  id: '/credits',
+  path: '/credits',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminExceptionsRoute = AdminExceptionsRouteImport.update({
+  id: '/exceptions',
+  path: '/exceptions',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminInvitesRoute = AdminInvitesRouteImport.update({
+  id: '/invites',
+  path: '/invites',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLeadsRoute = AdminLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminOperatorsRoute = AdminOperatorsRouteImport.update({
+  id: '/operators',
+  path: '/operators',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReportsRoute = AdminReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminStickersRoute = AdminStickersRouteImport.update({
+  id: '/stickers',
+  path: '/stickers',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSupportRoute = AdminSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCharactersRoute = AppCharactersRouteImport.update({
+  id: '/characters',
+  path: '/characters',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppConversationsRoute = AppConversationsRouteImport.update({
+  id: '/conversations',
+  path: '/conversations',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFavoritesRoute = AppFavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOnboardingRoute = AppOnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPackagesRoute = AppPackagesRouteImport.update({
+  id: '/packages',
+  path: '/packages',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSupportRoute = AppSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AppRoute,
+} as any)
+const OperatorIndexRoute = OperatorIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorAnalyticsRoute = OperatorAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorConversationsRoute = OperatorConversationsRouteImport.update({
+  id: '/conversations',
+  path: '/conversations',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorLeadsRoute = OperatorLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorNewRoute = OperatorNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorOnlineRoute = OperatorOnlineRouteImport.update({
+  id: '/online',
+  path: '/online',
+  getParentRoute: () => OperatorRoute,
+} as any)
+const OperatorSettingsRoute = OperatorSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => OperatorRoute,
 } as any)
 const AdminConversationsIndexRoute = AdminConversationsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AdminConversationsRoute,
 } as any)
-const OperatorChatConversationIdRoute =
-  OperatorChatConversationIdRouteImport.update({
-    id: '/chat/$conversationId',
-    path: '/chat/$conversationId',
-    getParentRoute: () => OperatorRoute,
+const AdminConversationsConversationIdRoute =
+  AdminConversationsConversationIdRouteImport.update({
+    id: '/$conversationId',
+    path: '/$conversationId',
+    getParentRoute: () => AdminConversationsRoute,
   } as any)
-const AppChatConversationIdRoute = AppChatConversationIdRouteImport.update({
-  id: '/chat/$conversationId',
-  path: '/chat/$conversationId',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppCharactersCharacterIdRoute =
   AppCharactersCharacterIdRouteImport.update({
     id: '/$characterId',
     path: '/$characterId',
     getParentRoute: () => AppCharactersRoute,
   } as any)
-const AdminConversationsConversationIdRoute =
-  AdminConversationsConversationIdRouteImport.update({
-    id: '/$conversationId',
-    path: '/$conversationId',
-    getParentRoute: () => AdminConversationsRoute,
+const AppChatConversationIdRoute = AppChatConversationIdRouteImport.update({
+  id: '/chat/$conversationId',
+  path: '/chat/$conversationId',
+  getParentRoute: () => AppRoute,
+} as any)
+const OperatorChatConversationIdRoute =
+  OperatorChatConversationIdRouteImport.update({
+    id: '/chat/$conversationId',
+    path: '/chat/$conversationId',
+    getParentRoute: () => OperatorRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -641,81 +641,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/verify-account-deletion': {
-      id: '/verify-account-deletion'
-      path: '/verify-account-deletion'
-      fullPath: '/verify-account-deletion'
-      preLoaderRoute: typeof VerifyAccountDeletionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/terms': {
-      id: '/terms'
-      path: '/terms'
-      fullPath: '/terms'
-      preLoaderRoute: typeof TermsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/service': {
-      id: '/service'
-      path: '/service'
-      fullPath: '/service'
-      preLoaderRoute: typeof ServiceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/register': {
-      id: '/register'
-      path: '/register'
-      fullPath: '/register'
-      preLoaderRoute: typeof RegisterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/privacy': {
-      id: '/privacy'
-      path: '/privacy'
-      fullPath: '/privacy'
-      preLoaderRoute: typeof PrivacyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/operator': {
-      id: '/operator'
-      path: '/operator'
-      fullPath: '/operator'
-      preLoaderRoute: typeof OperatorRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cancel-account-deletion': {
-      id: '/cancel-account-deletion'
-      path: '/cancel-account-deletion'
-      fullPath: '/cancel-account-deletion'
-      preLoaderRoute: typeof CancelAccountDeletionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -725,221 +655,95 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/operator/': {
-      id: '/operator/'
-      path: '/'
-      fullPath: '/operator/'
-      preLoaderRoute: typeof OperatorIndexRouteImport
-      parentRoute: typeof OperatorRoute
+    '/cancel-account-deletion': {
+      id: '/cancel-account-deletion'
+      path: '/cancel-account-deletion'
+      fullPath: '/cancel-account-deletion'
+      preLoaderRoute: typeof CancelAccountDeletionRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/app/': {
-      id: '/app/'
-      path: '/'
-      fullPath: '/app/'
-      preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof AppRoute
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operator': {
+      id: '/operator'
+      path: '/operator'
+      fullPath: '/operator'
+      preLoaderRoute: typeof OperatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/service': {
+      id: '/service'
+      path: '/service'
+      fullPath: '/service'
+      preLoaderRoute: typeof ServiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-account-deletion': {
+      id: '/verify-account-deletion'
+      path: '/verify-account-deletion'
+      fullPath: '/verify-account-deletion'
+      preLoaderRoute: typeof VerifyAccountDeletionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accept-invite/$token': {
+      id: '/accept-invite/$token'
+      path: '/accept-invite/$token'
+      fullPath: '/accept-invite/$token'
+      preLoaderRoute: typeof AcceptInviteTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/admin/': {
       id: '/admin/'
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/operator/settings': {
-      id: '/operator/settings'
-      path: '/settings'
-      fullPath: '/operator/settings'
-      preLoaderRoute: typeof OperatorSettingsRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/operator/online': {
-      id: '/operator/online'
-      path: '/online'
-      fullPath: '/operator/online'
-      preLoaderRoute: typeof OperatorOnlineRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/operator/new': {
-      id: '/operator/new'
-      path: '/new'
-      fullPath: '/operator/new'
-      preLoaderRoute: typeof OperatorNewRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/operator/leads': {
-      id: '/operator/leads'
-      path: '/leads'
-      fullPath: '/operator/leads'
-      preLoaderRoute: typeof OperatorLeadsRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/operator/conversations': {
-      id: '/operator/conversations'
-      path: '/conversations'
-      fullPath: '/operator/conversations'
-      preLoaderRoute: typeof OperatorConversationsRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/operator/analytics': {
-      id: '/operator/analytics'
-      path: '/analytics'
-      fullPath: '/operator/analytics'
-      preLoaderRoute: typeof OperatorAnalyticsRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/app/support': {
-      id: '/app/support'
-      path: '/support'
-      fullPath: '/app/support'
-      preLoaderRoute: typeof AppSupportRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/profile': {
-      id: '/app/profile'
-      path: '/profile'
-      fullPath: '/app/profile'
-      preLoaderRoute: typeof AppProfileRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/packages': {
-      id: '/app/packages'
-      path: '/packages'
-      fullPath: '/app/packages'
-      preLoaderRoute: typeof AppPackagesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/onboarding': {
-      id: '/app/onboarding'
-      path: '/onboarding'
-      fullPath: '/app/onboarding'
-      preLoaderRoute: typeof AppOnboardingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/favorites': {
-      id: '/app/favorites'
-      path: '/favorites'
-      fullPath: '/app/favorites'
-      preLoaderRoute: typeof AppFavoritesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/conversations': {
-      id: '/app/conversations'
-      path: '/conversations'
-      fullPath: '/app/conversations'
-      preLoaderRoute: typeof AppConversationsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/characters': {
-      id: '/app/characters'
-      path: '/characters'
-      fullPath: '/app/characters'
-      preLoaderRoute: typeof AppCharactersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/admin/users': {
-      id: '/admin/users'
-      path: '/users'
-      fullPath: '/admin/users'
-      preLoaderRoute: typeof AdminUsersRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/support': {
-      id: '/admin/support'
-      path: '/support'
-      fullPath: '/admin/support'
-      preLoaderRoute: typeof AdminSupportRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/stickers': {
-      id: '/admin/stickers'
-      path: '/stickers'
-      fullPath: '/admin/stickers'
-      preLoaderRoute: typeof AdminStickersRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/settings': {
-      id: '/admin/settings'
-      path: '/settings'
-      fullPath: '/admin/settings'
-      preLoaderRoute: typeof AdminSettingsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/reports': {
-      id: '/admin/reports'
-      path: '/reports'
-      fullPath: '/admin/reports'
-      preLoaderRoute: typeof AdminReportsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/operators': {
-      id: '/admin/operators'
-      path: '/operators'
-      fullPath: '/admin/operators'
-      preLoaderRoute: typeof AdminOperatorsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/leads': {
-      id: '/admin/leads'
-      path: '/leads'
-      fullPath: '/admin/leads'
-      preLoaderRoute: typeof AdminLeadsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/invites': {
-      id: '/admin/invites'
-      path: '/invites'
-      fullPath: '/admin/invites'
-      preLoaderRoute: typeof AdminInvitesRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/exceptions': {
-      id: '/admin/exceptions'
-      path: '/exceptions'
-      fullPath: '/admin/exceptions'
-      preLoaderRoute: typeof AdminExceptionsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/credits': {
-      id: '/admin/credits'
-      path: '/credits'
-      fullPath: '/admin/credits'
-      preLoaderRoute: typeof AdminCreditsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/conversations': {
-      id: '/admin/conversations'
-      path: '/conversations'
-      fullPath: '/admin/conversations'
-      preLoaderRoute: typeof AdminConversationsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/clients': {
-      id: '/admin/clients'
-      path: '/clients'
-      fullPath: '/admin/clients'
-      preLoaderRoute: typeof AdminClientsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/characters': {
-      id: '/admin/characters'
-      path: '/characters'
-      fullPath: '/admin/characters'
-      preLoaderRoute: typeof AdminCharactersRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/audit-logs': {
-      id: '/admin/audit-logs'
-      path: '/audit-logs'
-      fullPath: '/admin/audit-logs'
-      preLoaderRoute: typeof AdminAuditLogsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/analytics': {
@@ -949,12 +753,208 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAnalyticsRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/accept-invite/$token': {
-      id: '/accept-invite/$token'
-      path: '/accept-invite/$token'
-      fullPath: '/accept-invite/$token'
-      preLoaderRoute: typeof AcceptInviteTokenRouteImport
-      parentRoute: typeof rootRouteImport
+    '/admin/audit-logs': {
+      id: '/admin/audit-logs'
+      path: '/audit-logs'
+      fullPath: '/admin/audit-logs'
+      preLoaderRoute: typeof AdminAuditLogsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/characters': {
+      id: '/admin/characters'
+      path: '/characters'
+      fullPath: '/admin/characters'
+      preLoaderRoute: typeof AdminCharactersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/clients': {
+      id: '/admin/clients'
+      path: '/clients'
+      fullPath: '/admin/clients'
+      preLoaderRoute: typeof AdminClientsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/conversations': {
+      id: '/admin/conversations'
+      path: '/conversations'
+      fullPath: '/admin/conversations'
+      preLoaderRoute: typeof AdminConversationsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/credits': {
+      id: '/admin/credits'
+      path: '/credits'
+      fullPath: '/admin/credits'
+      preLoaderRoute: typeof AdminCreditsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/exceptions': {
+      id: '/admin/exceptions'
+      path: '/exceptions'
+      fullPath: '/admin/exceptions'
+      preLoaderRoute: typeof AdminExceptionsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/invites': {
+      id: '/admin/invites'
+      path: '/invites'
+      fullPath: '/admin/invites'
+      preLoaderRoute: typeof AdminInvitesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/leads': {
+      id: '/admin/leads'
+      path: '/leads'
+      fullPath: '/admin/leads'
+      preLoaderRoute: typeof AdminLeadsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/operators': {
+      id: '/admin/operators'
+      path: '/operators'
+      fullPath: '/admin/operators'
+      preLoaderRoute: typeof AdminOperatorsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reports': {
+      id: '/admin/reports'
+      path: '/reports'
+      fullPath: '/admin/reports'
+      preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/stickers': {
+      id: '/admin/stickers'
+      path: '/stickers'
+      fullPath: '/admin/stickers'
+      preLoaderRoute: typeof AdminStickersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/support': {
+      id: '/admin/support'
+      path: '/support'
+      fullPath: '/admin/support'
+      preLoaderRoute: typeof AdminSupportRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/app/': {
+      id: '/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/characters': {
+      id: '/app/characters'
+      path: '/characters'
+      fullPath: '/app/characters'
+      preLoaderRoute: typeof AppCharactersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/conversations': {
+      id: '/app/conversations'
+      path: '/conversations'
+      fullPath: '/app/conversations'
+      preLoaderRoute: typeof AppConversationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/favorites': {
+      id: '/app/favorites'
+      path: '/favorites'
+      fullPath: '/app/favorites'
+      preLoaderRoute: typeof AppFavoritesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/onboarding': {
+      id: '/app/onboarding'
+      path: '/onboarding'
+      fullPath: '/app/onboarding'
+      preLoaderRoute: typeof AppOnboardingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/packages': {
+      id: '/app/packages'
+      path: '/packages'
+      fullPath: '/app/packages'
+      preLoaderRoute: typeof AppPackagesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/profile': {
+      id: '/app/profile'
+      path: '/profile'
+      fullPath: '/app/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/support': {
+      id: '/app/support'
+      path: '/support'
+      fullPath: '/app/support'
+      preLoaderRoute: typeof AppSupportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/operator/': {
+      id: '/operator/'
+      path: '/'
+      fullPath: '/operator/'
+      preLoaderRoute: typeof OperatorIndexRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/analytics': {
+      id: '/operator/analytics'
+      path: '/analytics'
+      fullPath: '/operator/analytics'
+      preLoaderRoute: typeof OperatorAnalyticsRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/conversations': {
+      id: '/operator/conversations'
+      path: '/conversations'
+      fullPath: '/operator/conversations'
+      preLoaderRoute: typeof OperatorConversationsRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/leads': {
+      id: '/operator/leads'
+      path: '/leads'
+      fullPath: '/operator/leads'
+      preLoaderRoute: typeof OperatorLeadsRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/new': {
+      id: '/operator/new'
+      path: '/new'
+      fullPath: '/operator/new'
+      preLoaderRoute: typeof OperatorNewRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/online': {
+      id: '/operator/online'
+      path: '/online'
+      fullPath: '/operator/online'
+      preLoaderRoute: typeof OperatorOnlineRouteImport
+      parentRoute: typeof OperatorRoute
+    }
+    '/operator/settings': {
+      id: '/operator/settings'
+      path: '/settings'
+      fullPath: '/operator/settings'
+      preLoaderRoute: typeof OperatorSettingsRouteImport
+      parentRoute: typeof OperatorRoute
     }
     '/admin/conversations/': {
       id: '/admin/conversations/'
@@ -963,19 +963,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminConversationsIndexRouteImport
       parentRoute: typeof AdminConversationsRoute
     }
-    '/operator/chat/$conversationId': {
-      id: '/operator/chat/$conversationId'
-      path: '/chat/$conversationId'
-      fullPath: '/operator/chat/$conversationId'
-      preLoaderRoute: typeof OperatorChatConversationIdRouteImport
-      parentRoute: typeof OperatorRoute
-    }
-    '/app/chat/$conversationId': {
-      id: '/app/chat/$conversationId'
-      path: '/chat/$conversationId'
-      fullPath: '/app/chat/$conversationId'
-      preLoaderRoute: typeof AppChatConversationIdRouteImport
-      parentRoute: typeof AppRoute
+    '/admin/conversations/$conversationId': {
+      id: '/admin/conversations/$conversationId'
+      path: '/$conversationId'
+      fullPath: '/admin/conversations/$conversationId'
+      preLoaderRoute: typeof AdminConversationsConversationIdRouteImport
+      parentRoute: typeof AdminConversationsRoute
     }
     '/app/characters/$characterId': {
       id: '/app/characters/$characterId'
@@ -984,12 +977,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCharactersCharacterIdRouteImport
       parentRoute: typeof AppCharactersRoute
     }
-    '/admin/conversations/$conversationId': {
-      id: '/admin/conversations/$conversationId'
-      path: '/$conversationId'
-      fullPath: '/admin/conversations/$conversationId'
-      preLoaderRoute: typeof AdminConversationsConversationIdRouteImport
-      parentRoute: typeof AdminConversationsRoute
+    '/app/chat/$conversationId': {
+      id: '/app/chat/$conversationId'
+      path: '/chat/$conversationId'
+      fullPath: '/app/chat/$conversationId'
+      preLoaderRoute: typeof AppChatConversationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/operator/chat/$conversationId': {
+      id: '/operator/chat/$conversationId'
+      path: '/chat/$conversationId'
+      fullPath: '/operator/chat/$conversationId'
+      preLoaderRoute: typeof OperatorChatConversationIdRouteImport
+      parentRoute: typeof OperatorRoute
     }
   }
 }
