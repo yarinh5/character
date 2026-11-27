@@ -18,13 +18,16 @@
     "test:concurrency": "node supabase/tests/concurrency/claim-concurrency.mjs",
     "test:handling-concurrency": "node supabase/tests/concurrency/handling-shadow-concurrency.mjs",
     "test:cycle-bound-send-concurrency": "node supabase/tests/concurrency/cycle-bound-send-concurrency.mjs",
+    "test:read-access-concurrency": "node supabase/tests/concurrency/read-access-revocation-concurrency.mjs",
+    "test:read-access-orchestration-safety": "node --test supabase/tests/upgrades/wp01-read-access-117-to-118.orchestration.safety.mjs supabase/tests/concurrency/read-access-revocation-concurrency.orchestration.safety.mjs",
     "test:upgrade:wp01": "node supabase/tests/upgrades/wp01-shadow-113-to-116.mjs",
     "test:upgrade:wp01-strict-send": "node supabase/tests/upgrades/wp01-strict-send-116-to-117.mjs",
+    "test:upgrade:wp01-read-access": "node supabase/tests/upgrades/wp01-read-access-117-to-118.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
-    "@cloudflare/vite-plugin": "^1.25.5",
+    "@cloudflare/vite-plugin": "1.70.2",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -55,9 +58,9 @@
     "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.83.0",
-    "@tanstack/react-router": "^1.168.25",
-    "@tanstack/react-start": "^1.167.50",
-    "@tanstack/router-plugin": "^1.167.28",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/react-start": "^1.168.60",
+    "@tanstack/router-plugin": "^1.168.42",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -77,7 +80,10 @@
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
-    "zod": "^3.24.2"
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "seroval": "^1.6.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
@@ -99,7 +105,7 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^7.3.1",
+    "vite": "7.3.8",
     "vitest": "^5.0.2"
   }
 }

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Coins, PackageOpen, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/app/packages")({
   component: PackagesPage,
@@ -24,6 +27,9 @@ type CreditPackage = {
 const EMPTY_PACKAGES: CreditPackage[] = [];
 
 function PackagesPage() {
+  const { loading: authLoading, role, session, user } = useAuth();
+  const clientId =
+    !authLoading && role === "client" && session?.user.id === user?.id ? (user?.id ?? null) : null;
   useEffect(() => {
     void trackAnalyticsEvent({
       eventName: "packages_viewed",
@@ -62,7 +68,8 @@ function PackagesPage() {
           role="note"
           className="mb-5 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
         >
-          רכישה מתוך האתר אינה זמינה כרגע. לא נשלחה בקשה ולא בוצע חיוב.
+          אין סליקה באתר. אפשר לשלוח בקשת קרדיטים לטיפול אדמין; שליחת בקשה אינה חיוב ואינה מוסיפה
+          קרדיטים עד לאישור מתועד.
         </div>
 
         {initialLoading && (
@@ -149,6 +156,11 @@ function PackagesPage() {
                       </div>
                     </div>
                   </div>
+                  <CreditRequestButton
+                    packageId={pkg.id}
+                    packageName={pkg.name}
+                    clientId={clientId}
+                  />
                 </CardContent>
               </Card>
             ))}
@@ -156,6 +168,96 @@ function PackagesPage() {
         )}
       </div>
     </>
+  );
+}
+
+type CreditRequestResult = {
+  id: string;
+  package_id: string;
+  package_name: string;
+  credits: number;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  requested_at: string;
+};
+
+function isCreditRequestResult(value: unknown): value is CreditRequestResult {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.package_id === "string" &&
+    typeof row.package_name === "string" &&
+    typeof row.credits === "number" &&
+    Number.isInteger(row.credits) &&
+    row.credits > 0 &&
+    (row.status === "pending" ||
+      row.status === "approved" ||
+      row.status === "rejected" ||
+      row.status === "cancelled") &&
+    typeof row.requested_at === "string"
+  );
+}
+
+function CreditRequestButton({
+  packageId,
+  packageName,
+  clientId,
+}: {
+  packageId: string;
+  packageName: string;
+  clientId: string | null;
+}) {
+  const requestKey = useRef<string | null>(null);
+  const requestInFlight = useRef(false);
+  const [result, setResult] = useState<CreditRequestResult | null>(null);
+  const createRequest = useMutation({
+    mutationFn: async () => {
+      if (!clientId) throw new Error("client_identity_required");
+      requestKey.current ??= crypto.randomUUID();
+      const { data, error } = await supabase.rpc("create_credit_request", {
+        _package_id: packageId,
+        _idempotency_key: requestKey.current,
+      });
+      const row = Array.isArray(data) ? data[0] : null;
+      if (error || !isCreditRequestResult(row) || row.package_id !== packageId) {
+        throw new Error("credit_request_failed");
+      }
+      return row;
+    },
+    onSuccess: (row) => {
+      setResult(row);
+      toast.success("בקשת הקרדיטים נשלחה לטיפול");
+    },
+    onError: () => toast.error("שליחת הבקשה נכשלה. אפשר לנסות שוב בלי ליצור כפילות."),
+  });
+  const submit = () => {
+    if (requestInFlight.current || result?.status === "pending") return;
+    requestInFlight.current = true;
+    createRequest.mutate(undefined, { onSettled: () => (requestInFlight.current = false) });
+  };
+
+  return (
+    <div className="mt-5 space-y-2">
+      <Button
+        type="button"
+        className="w-full"
+        variant="outline"
+        onClick={submit}
+        disabled={!clientId || createRequest.isPending || result?.status === "pending"}
+        aria-label={`שליחת בקשת קרדיטים עבור ${packageName}`}
+      >
+        {createRequest.isPending
+          ? "שולח בקשה..."
+          : result?.status === "pending"
+            ? "בקשה ממתינה לטיפול"
+            : "שלח בקשת קרדיטים"}
+      </Button>
+      {result && (
+        <p className="text-xs text-muted-foreground" role="status">
+          בקשה ל־{result.credits.toLocaleString("he-IL")} קרדיטים נרשמה. לא בוצע חיוב.
+        </p>
+      )}
+    </div>
   );
 }
 

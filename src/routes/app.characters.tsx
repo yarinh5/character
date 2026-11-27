@@ -27,22 +27,25 @@ function CharactersRoute() {
 }
 
 function CharactersPage() {
-  const { user } = useAuth();
+  const { user, role, session, loading } = useAuth();
   const navigate = useNavigate();
   const [filters, setFilters] = useState<DiscoveryFiltersState>(EMPTY_DISCOVERY_FILTERS);
-  const discovery = useDiscovery(user?.id, filters);
+  const clientId =
+    !loading && role === "client" && session?.user.id === user?.id ? user?.id : undefined;
+  const discovery = useDiscovery(clientId, filters);
   const [startingId, setStartingId] = useState<string | null>(null);
   const character = discovery.activeCharacter;
+  const viewedId = character?.id;
 
   useEffect(() => {
-    if (!character) return;
+    if (!viewedId) return;
     void trackAnalyticsEvent({
       eventName: "character_viewed",
-      characterId: character.id,
+      characterId: viewedId,
       metadata: { source: "client_discovery" },
       dedupeSeconds: 3600,
     });
-  }, [character]);
+  }, [viewedId, character?.cycle_id, user?.id]);
 
   const handleSwipe = async (action: "like" | "pass") => {
     if (!character || discovery.isSwipePending) return;
@@ -82,11 +85,15 @@ function CharactersPage() {
   };
 
   const deckBusy =
-    discovery.isSwipePending || discovery.isFavoritePending || startingId === character?.id;
+    discovery.isSwipePending ||
+    discovery.isRemoveLikePending ||
+    discovery.isFavoritePending ||
+    startingId === character?.id;
   const hasActiveFilters =
     filters.min_age !== null ||
     filters.max_age !== null ||
     filters.city_id !== null ||
+    filters.max_distance_km !== null ||
     filters.interest !== null ||
     filters.favorites_only ||
     filters.recycled_only;
@@ -162,6 +169,7 @@ function CharactersPage() {
               startingChat={startingId === character.id}
               onPass={() => void handleSwipe("pass")}
               onLike={() => void handleSwipe("like")}
+              onRemoveLike={() => void discovery.removeLike()}
               onFavorite={() => void handleFavorite()}
               onStartChat={() => void startChat()}
               onViewProfile={() =>
@@ -174,6 +182,11 @@ function CharactersPage() {
           )}
         </div>
 
+        {discovery.removeLikeError && (
+          <p role="alert" className="pt-3 text-center text-sm text-destructive">
+            {discovery.removeLikeError}
+          </p>
+        )}
         {showCharacter && discovery.isFavorite && (
           <p className="pt-4 text-center text-xs text-muted-foreground">
             <Heart className="ml-1 inline h-3.5 w-3.5 fill-current text-rose-600" />

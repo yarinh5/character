@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { useRemoveCharacterLike } from "./useRemoveCharacterLike";
+import { refreshLikedProfiles } from "@/lib/clientLikedProfiles";
 
-type DiscoveryCharacter = Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
+type DiscoveryCharacter =
+  Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
 export type DiscoveryFilters = {
   min_age: number | null;
   max_age: number | null;
   city_id: string | null;
+  max_distance_km: number | null;
   favorites_only: boolean;
   recycled_only: boolean;
   interest: string | null;
@@ -17,6 +21,7 @@ type DiscoveryRpcFilters = {
   min_age?: number;
   max_age?: number;
   city_id?: string;
+  max_distance_km?: number;
   favorites_only: boolean;
   recycled_only: boolean;
   interest?: string;
@@ -27,19 +32,25 @@ export type DiscoveryCharacterWithFilters = DiscoveryCharacter & {
 type Swipe = "like" | "pass";
 type DismissedCard = Pick<DiscoveryCharacterWithFilters, "id" | "cycle_id">;
 type FavoriteMutationContext = { previousValue: boolean | undefined };
-type SwipeMutationContext = { previousDismissedCard: DismissedCard | null };
+type SwipeMutationContext = { previousDismissedCard: DismissedCard | null; clientId?: string };
 
 export const EMPTY_DISCOVERY_FILTERS: DiscoveryFilters = {
   min_age: null,
   max_age: null,
   city_id: null,
+  max_distance_km: null,
   favorites_only: false,
   recycled_only: false,
   interest: null,
 };
 
 function isBusinessError(error: unknown, code: string) {
-  return typeof error === "object" && error !== null && "message" in error && String(error.message).includes(code);
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    String(error.message).includes(code)
+  );
 }
 
 function serializeDiscoveryFilters(filters: DiscoveryFilters): DiscoveryRpcFilters {
@@ -51,12 +62,15 @@ function serializeDiscoveryFilters(filters: DiscoveryFilters): DiscoveryRpcFilte
   if (filters.min_age !== null) payload.min_age = filters.min_age;
   if (filters.max_age !== null) payload.max_age = filters.max_age;
   if (filters.city_id !== null) payload.city_id = filters.city_id;
+  if (filters.max_distance_km !== null) payload.max_distance_km = filters.max_distance_km;
   if (filters.interest !== null) payload.interest = filters.interest;
 
   return payload;
 }
 
-async function fetchDiscoveryCharacter(filtersSnapshot: DiscoveryRpcFilters): Promise<DiscoveryCharacterWithFilters | null> {
+async function fetchDiscoveryCharacter(
+  filtersSnapshot: DiscoveryRpcFilters,
+): Promise<DiscoveryCharacterWithFilters | null> {
   const { data, error } = await supabase.rpc("get_discovery_characters", {
     _filters: filtersSnapshot as Json,
   });
@@ -72,7 +86,15 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   const [favoriteOverride, setFavoriteOverride] = useState<boolean | undefined>();
   const filtersSnapshot = useMemo(
     () => serializeDiscoveryFilters(filters),
-    [filters.city_id, filters.favorites_only, filters.interest, filters.max_age, filters.min_age, filters.recycled_only],
+    [
+      filters.city_id,
+      filters.favorites_only,
+      filters.interest,
+      filters.max_age,
+      filters.max_distance_km,
+      filters.min_age,
+      filters.recycled_only,
+    ],
   );
   const filtersKey = JSON.stringify(filtersSnapshot);
   const queryKey = ["discovery-card", userId, filtersKey] as const;
@@ -86,7 +108,10 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   const fetchedCharacter = discoveryQuery.data ?? null;
   const activeCharacter =
     fetchedCharacter &&
-    !(dismissedCard?.id === fetchedCharacter.id && dismissedCard.cycle_id === fetchedCharacter.cycle_id)
+    !(
+      dismissedCard?.id === fetchedCharacter.id &&
+      dismissedCard.cycle_id === fetchedCharacter.cycle_id
+    )
       ? fetchedCharacter
       : null;
 
@@ -101,7 +126,13 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   }, [fetchedCharacter?.cycle_id, fetchedCharacter?.id]);
 
   const swipeMutation = useMutation({
-    mutationFn: async ({ character, swipe }: { character: DiscoveryCharacterWithFilters; swipe: Swipe }) => {
+    mutationFn: async ({
+      character,
+      swipe,
+    }: {
+      character: DiscoveryCharacterWithFilters;
+      swipe: Swipe;
+    }) => {
       const { data, error } = await supabase.rpc("set_character_swipe", {
         _character_id: character.id,
         _cycle_id: character.cycle_id,
@@ -113,12 +144,20 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
     },
     onMutate: ({ character }): SwipeMutationContext => {
       const previousDismissedCard = dismissedCard;
-      if (fetchedCharacter?.id === character.id && fetchedCharacter.cycle_id === character.cycle_id) {
+      if (
+        fetchedCharacter?.id === character.id &&
+        fetchedCharacter.cycle_id === character.cycle_id
+      ) {
         setDismissedCard({ id: fetchedCharacter.id, cycle_id: fetchedCharacter.cycle_id });
       }
-      return { previousDismissedCard };
+      return { previousDismissedCard, clientId: userId };
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onSettled: (_data, _error, { swipe }, context) => {
+      if (swipe === "like" && context?.clientId) {
+        void refreshLikedProfiles(queryClient, context.clientId);
+      }
+    },
     onError: (error, _variables, context) => {
       if (
         isBusinessError(error, "character_not_available") ||
@@ -132,8 +171,16 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
     },
   });
 
+  const removal = useRemoveCharacterLike(userId, activeCharacter);
+
   const favoriteMutation = useMutation({
-    mutationFn: async ({ characterId, isFavorite }: { characterId: string; isFavorite: boolean }) => {
+    mutationFn: async ({
+      characterId,
+      isFavorite,
+    }: {
+      characterId: string;
+      isFavorite: boolean;
+    }) => {
       const { data, error } = await supabase.rpc("set_character_favorite", {
         _character_id: characterId,
         _is_favorite: isFavorite,
@@ -155,12 +202,14 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
   });
 
   const swipe = useCallback(
-    (character: DiscoveryCharacterWithFilters, action: Swipe) => swipeMutation.mutateAsync({ character, swipe: action }),
+    (character: DiscoveryCharacterWithFilters, action: Swipe) =>
+      swipeMutation.mutateAsync({ character, swipe: action }),
     [swipeMutation],
   );
 
   const setFavorite = useCallback(
-    (characterId: string, isFavorite: boolean) => favoriteMutation.mutateAsync({ characterId, isFavorite }),
+    (characterId: string, isFavorite: boolean) =>
+      favoriteMutation.mutateAsync({ characterId, isFavorite }),
     [favoriteMutation],
   );
 
@@ -173,6 +222,7 @@ export function useDiscovery(userId?: string, filters: DiscoveryFilters = EMPTY_
     isError: discoveryQuery.isError,
     isEmpty: !discoveryQuery.isLoading && !discoveryQuery.isError && fetchedCharacter === null,
     isSwipePending: swipeMutation.isPending,
+    ...removal,
     isFavoritePending: favoriteMutation.isPending,
     swipe,
     setFavorite,

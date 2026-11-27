@@ -48,3 +48,58 @@ The following remain DEFERRED rather than solved by this slice:
 ## Acceptance boundary
 
 The defined frontend-only ONLINE alignment slice is implemented and verified. This record does not declare full WP03 DONE and does not declare AC08 end-to-end PASS.
+
+## Current-branch touch targets (2026-11-26)
+
+- Cause: ONLINE search inherited a 36px input, and status/character filter buttons had no 44px minimum target or pressed-state semantics. The search input had only placeholder text, not an accessible name.
+- Change: search, filter, retry and reset controls now have `min-h-11`; search has a name and both filter groups expose `aria-pressed`. Query, authorization, subscription and filtering logic are unchanged.
+- Evidence: the new regression failed on the old DOM and passed after the edit. The ONLINE list/routing/access suites passed 12/12, full Vitest 783/783, typecheck, changed-file lint/format and client/SSR build passed. Live authenticated browser measurement, mobile layout and Product acceptance remain NOT RUN.
+
+## Authorized search and read-only state (2026-11-26)
+
+- Live RED: the old URL redirected correctly and the viewer saw only their assigned character's
+  conversations, but neither an existing city nor an exact age matched the name-only search.
+- The list now uses one bounded server projection also checked against current read authority.
+  It adds only city, age and whether an active cycle belongs to another operator. It drops
+  rows that lose authorization between the list and context reads. It does not grant raw
+  profile access or acquire or change responsibility. Retired cities are not returned.
+- Browser at 375px RTL: no horizontal overflow, 44px search, city and age matches. The reader's
+  composer and media controls were disabled, while the owner could use the composer. Real Auth
+  and PostgREST denied unrelated metadata, the client role, a non-owner send and the retired
+  outreach action. The owner cycle and conversation history were unchanged.
+- Profile/deletion state and recovery transitions notify the existing per-user access version;
+  no profile, deletion or incident content is published. After confirmed PostgreSQL subscription
+  registration, a live reader received only `user_id`, `version` and `updated_at`, and the next
+  read withheld age and city. A channel join acknowledgement alone did not establish CDC
+  readiness; delivery during the initial subscription setup window is not proven.
+- Final PostgreSQL TAP: 50/50 access and 42/42 recovery. Full Vitest: 833/833; typecheck and
+  affected lint/format passed. Both local synthetic stacks were removed after ownership and
+  references were checked; existing inventories matched. Evidence is in
+  `F:/project love/character/.codex-task/wp03-online-browser-20261126-01` and
+  `F:/project love/character/.codex-task/wp03-online-final-20261126-02`.
+
+## Client activity and subscription readiness (2026-11-26)
+
+- R03.5 now derives recent client activity from foreground pointer or keyboard input in the
+  protected client layout. Login, page render, idle tabs and message timestamps do not count.
+  The server authenticates the client, keeps one private server-timed sample with a 45-second
+  write cooldown, and exposes only a nullable activity boolean on already authorized
+  conversations. Samples expire after two minutes; the list refreshes on its existing interval.
+  Blocking or archiving the profile and reopening recovery do not restore an earlier sample.
+- The ONLINE list waits for the Postgres Changes system acknowledgement, not just a WebSocket
+  channel join. Failure or timeout hides the list and clears its user-bound cache. The existing
+  per-user revocation subscription is unchanged. Character availability remains the separate
+  P05 rule based on the configured character and a fresh assigned-worker heartbeat.
+- In the local browser: passive client login created no activity, a normal navigation click
+  recorded one sample, and the assigned operator saw recent activity. A never-active client
+  stayed unknown; an unassigned conversation did not show. The sample expired without a second
+  write or a modified clock, and the 375px RTL layout had no horizontal overflow.
+- Full Vitest 836/836, typecheck and affected lint/format passed. Final live pgTAP: access 87/87,
+  recovery 42/42 and P05 22/22. The first access TAP was interrupted by a PostgreSQL backend
+  crash at an anonymous pgTAP expression; the exact cause inside PostgreSQL was not established.
+  That expression was replaced with a direct privilege assertion, and an independent real
+  anonymous HTTP request was denied with 401/42501. The first outputs remain in the evidence.
+- Evidence: `F:/project love/character/.codex-task/wp03-presence-20261126-01`
+  (`browser-activity-verification.json`, `authorized_read_access_revocation.final.tap`,
+  `p06_restore_recovery.final.tap`, `p05_sla_presence_alerts.tap`, `cleanup.json`).
+  Production presence capacity and integrated Product acceptance were not run.

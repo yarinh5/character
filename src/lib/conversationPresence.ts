@@ -1,214 +1,144 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/lib/auth";
 
 type PresenceRole = Extract<AppRole, "client" | "operator" | "admin">;
-
 export type ConversationPresenceUser = {
   userId: string;
   role: PresenceRole;
   displayName: string;
   onlineAt: string;
 };
-
-type TypingUser = ConversationPresenceUser & {
-  expiresAt: number;
-};
-
-type UseConversationPresenceArgs = {
+type Args = {
   conversationId: string | undefined;
   userId: string | undefined;
   role: PresenceRole;
   displayName: string;
+  enabled?: boolean;
+  accessGeneration?: number;
 };
-
-const TYPING_TIMEOUT_MS = 2800;
-const TYPING_START_THROTTLE_MS = 1400;
+const HEARTBEAT_MS = 25_000;
+const TYPING_STOP_MS = 2_800;
 
 export function useConversationPresence({
   conversationId,
   userId,
   role,
   displayName,
-}: UseConversationPresenceArgs) {
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const typingTimeoutRef = useRef<number | null>(null);
-  const isTypingRef = useRef(false);
-  const lastTypingStartRef = useRef(0);
+  enabled = true,
+  accessGeneration = 0,
+}: Args) {
   const [activeUsers, setActiveUsers] = useState<ConversationPresenceUser[]>([]);
-  const [typingUsersById, setTypingUsersById] = useState<Record<string, TypingUser>>({});
+  const [typingUsers, setTypingUsers] = useState<ConversationPresenceUser[]>([]);
+  const typingTimerRef = useRef<number | null>(null);
+  const scopeRef = useRef({ conversationId, userId, accessGeneration });
+  if (
+    scopeRef.current.conversationId !== conversationId ||
+    scopeRef.current.userId !== userId ||
+    scopeRef.current.accessGeneration !== accessGeneration
+  ) {
+    scopeRef.current = { conversationId, userId, accessGeneration };
+  }
 
-  const self = useMemo(
-    () => ({
-      user_id: userId,
-      role,
-      display_name: displayName,
-      active_in_conversation: true,
-    }),
-    [displayName, role, userId],
+  const writePresence = useCallback(
+    async (active: boolean, typing: boolean) => {
+      if (!conversationId || !userId) return;
+      await supabase.rpc("set_conversation_presence", {
+        _conversation_id: conversationId,
+        _role: role,
+        _display_name: displayName,
+        _active: active,
+        _typing: typing,
+      });
+    },
+    [conversationId, displayName, role, userId],
   );
 
-  const pruneExpiredTyping = useCallback(() => {
-    const now = Date.now();
-    setTypingUsersById((current) => {
-      const next = Object.fromEntries(Object.entries(current).filter(([, user]) => user.expiresAt > now));
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
+  const refresh = useCallback(async () => {
+    const scope = scopeRef.current;
+    if (!enabled || !conversationId || !userId) {
+      setActiveUsers([]);
+      setTypingUsers([]);
+      return;
+    }
+    const { data, error } = await supabase.rpc("get_conversation_presence", {
+      _conversation_id: conversationId,
     });
-  }, []);
+    if (scopeRef.current !== scope) return;
+    if (error) {
+      setActiveUsers([]);
+      setTypingUsers([]);
+      return;
+    }
+    const rows = data ?? [];
+    const users = rows
+      .filter((entry) => entry.user_id !== userId)
+      .map((entry) => ({
+        userId: entry.user_id,
+        role: entry.role as PresenceRole,
+        displayName: entry.display_name,
+        onlineAt: entry.online_at,
+      }));
+    const typingIds = new Set(
+      rows.filter((entry) => entry.is_typing).map((entry) => entry.user_id),
+    );
+    setActiveUsers(users);
+    setTypingUsers(users.filter((entry) => typingIds.has(entry.userId)));
+  }, [conversationId, enabled, userId]);
 
   const stopTyping = useCallback(() => {
-    const channel = channelRef.current;
-    if (typingTimeoutRef.current) {
-      window.clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    if (!channel || !userId || !isTypingRef.current) return;
-
-    isTypingRef.current = false;
-    void channel.send({
-      type: "broadcast",
-      event: "typing:stop",
-      payload: self,
-    });
-  }, [self, userId]);
-
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+    if (enabled) void writePresence(true, false);
+  }, [enabled, writePresence]);
   const startTyping = useCallback(() => {
-    const channel = channelRef.current;
-    if (!channel || !userId) return;
-
-    const now = Date.now();
-    if (!isTypingRef.current || now - lastTypingStartRef.current > TYPING_START_THROTTLE_MS) {
-      isTypingRef.current = true;
-      lastTypingStartRef.current = now;
-      void channel.send({
-        type: "broadcast",
-        event: "typing:start",
-        payload: self,
-      });
-    }
-
-    if (typingTimeoutRef.current) {
-      window.clearTimeout(typingTimeoutRef.current);
-    }
-    typingTimeoutRef.current = window.setTimeout(() => stopTyping(), TYPING_TIMEOUT_MS);
-  }, [self, stopTyping, userId]);
+    if (!enabled) return;
+    void writePresence(true, true);
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(stopTyping, TYPING_STOP_MS);
+  }, [enabled, stopTyping, writePresence]);
 
   useEffect(() => {
-    if (!conversationId || !userId) return;
-
+    setActiveUsers([]);
+    setTypingUsers([]);
+    if (!enabled || !conversationId || !userId) return;
+    void writePresence(true, false).then(refresh);
+    let disposed = false;
     const channel = supabase
-      .channel(`conversation:${conversationId}`, {
-        config: {
-          presence: { key: userId },
-          broadcast: { self: false },
+      .channel(`conversation-presence-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_presence_states",
+          filter: `conversation_id=eq.${conversationId}`,
         },
-      })
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState();
-        const users = Object.values(state)
-          .flat()
-          .map((entry: any) => ({
-            userId: String(entry.user_id ?? ""),
-            role: entry.role as PresenceRole,
-            displayName: String(entry.display_name ?? "משתמש"),
-            onlineAt: String(entry.online_at ?? new Date().toISOString()),
-          }))
-          .filter((entry) => entry.userId && entry.userId !== userId);
-        setActiveUsers(users);
-      })
-      .on("presence", { event: "join" }, () => {
-        void channel.send({
-          type: "broadcast",
-          event: "presence:join",
-          payload: self,
-        });
-        void channel.send({
-          type: "broadcast",
-          event: "active_in_conversation",
-          payload: self,
-        });
-      })
-      .on("presence", { event: "leave" }, ({ leftPresences }) => {
-        const leftIds = new Set((leftPresences as any[]).map((entry) => String(entry.user_id ?? "")));
-        setTypingUsersById((current) =>
-          Object.fromEntries(Object.entries(current).filter(([id]) => !leftIds.has(id))),
-        );
-      })
-      .on("broadcast", { event: "typing:start" }, ({ payload }) => {
-        const incoming = payload as typeof self;
-        if (!incoming?.user_id || incoming.user_id === userId) return;
-        setTypingUsersById((current) => ({
-          ...current,
-          [incoming.user_id!]: {
-            userId: incoming.user_id!,
-            role: incoming.role,
-            displayName: incoming.display_name || "משתמש",
-            onlineAt: new Date().toISOString(),
-            expiresAt: Date.now() + TYPING_TIMEOUT_MS,
-          },
-        }));
-      })
-      .on("broadcast", { event: "typing:stop" }, ({ payload }) => {
-        const incoming = payload as typeof self;
-        if (!incoming?.user_id || incoming.user_id === userId) return;
-        setTypingUsersById((current) => {
-          const next = { ...current };
-          delete next[incoming.user_id!];
-          return next;
-        });
-      })
+        () => void refresh(),
+      )
       .subscribe((status) => {
-        if (status !== "SUBSCRIBED") return;
-        void channel.track({
-          ...self,
-          online_at: new Date().toISOString(),
-        });
-        void channel.send({
-          type: "broadcast",
-          event: "presence:join",
-          payload: self,
-        });
-        void channel.send({
-          type: "broadcast",
-          event: "active_in_conversation",
-          payload: self,
-        });
+        if (disposed) return;
+        if (status === "SUBSCRIBED") {
+          void refresh();
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
+          setActiveUsers([]);
+          setTypingUsers([]);
+        }
       });
-
-    channelRef.current = channel;
-    const cleanupTimer = window.setInterval(pruneExpiredTyping, 1000);
-
+    const heartbeat = window.setInterval(() => void writePresence(true, false), HEARTBEAT_MS);
     return () => {
-      if (typingTimeoutRef.current) {
-        window.clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = null;
-      }
-      if (isTypingRef.current) {
-        void channel.send({
-          type: "broadcast",
-          event: "typing:stop",
-          payload: self,
-        });
-      }
-      void channel.send({
-        type: "broadcast",
-        event: "presence:leave",
-        payload: self,
-      });
-      void channel.untrack();
-      window.clearInterval(cleanupTimer);
-      channelRef.current = null;
-      isTypingRef.current = false;
-      setActiveUsers([]);
-      setTypingUsersById({});
+      disposed = true;
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+      window.clearInterval(heartbeat);
+      void writePresence(false, false);
       supabase.removeChannel(channel);
+      setActiveUsers([]);
+      setTypingUsers([]);
     };
-  }, [conversationId, pruneExpiredTyping, self, userId]);
+  }, [accessGeneration, conversationId, enabled, refresh, userId, writePresence]);
 
-  return {
-    activeUsers,
-    typingUsers: Object.values(typingUsersById),
-    startTyping,
-    stopTyping,
-  };
+  return { activeUsers, typingUsers, startTyping, stopTyping };
 }

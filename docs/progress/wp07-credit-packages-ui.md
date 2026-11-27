@@ -51,3 +51,64 @@ No payment processing, persisted purchase request, approved manual-contact route
 Gifts, the 50/10/10 credit rules, locked-image purchase/open behavior, payment integration, AC17–AC20 and AC33 remain out of scope. This slice does not complete WP07.
 
 Database, migrations, Security and RLS changes: None. Local DB, QA, Production, merge and deploy: NOT EXECUTED.
+
+## Connected Gifts and credit contracts — offline draft, 2026-11-05
+
+- The existing sticker catalog now marks canonical Gifts while preserving historical sticker rows.
+  A paid attachment snapshots the exact Gift ID, name and price; a different or merely more
+  expensive Gift cannot open it.
+- Purchase, 60-second open and media resolution are separate server operations with separate
+  idempotency keys. One purchase charges the snapshotted price once, creates one Gift message and
+  one reward event; a new purchase can create a new open session while a retry cannot charge again.
+- Client Credit and Operator Point ledgers are separate. The Gift debit uses the existing allowed
+  `sticker_spend` transaction type with an attachment-specific reason and binds the message-sticker
+  row to its payer and charge transaction.
+- Signup 50, client text 10 and client image 10 are represented by the server-side settings/writers
+  in this migration chain. The previously removed false package-purchase claim is not restored; an
+  approved purchase/allocation channel remains a separate product dependency.
+- Gift catalog loading is lazy in the existing operator picker. A Gift read failure cannot block
+  ordinary media selection, and retry is read-only.
+
+Focused component tests pass on the local draft. The DB/RLS/concurrency suite for exact Gift,
+idempotency, charging, 60-second sessions and reward events is written and **NOT RUN**. Live DB,
+Edge, signed URLs, Auth, concurrency and browser verification remain **NOT VERIFIED**; WP07 and
+AC17–AC20/AC33 are not closed.
+
+## Efficiency and responsive UX evidence — 2026-11-05
+
+- The Gift catalog is loaded lazily only for paid-open selection. Purchase and open retain separate
+  pending/idempotency paths, so retry does not create a duplicate charge or hold the whole chat UI.
+  Attachment access is read in bounded batches and late per-attachment responses cannot replace a
+  newer request.
+- Offline tests cover exact Gift selection, purchase/open separation, idempotency arguments,
+  pending controls and access refresh behavior. Live DB concurrency and signed-media access remain
+  **NOT RUN**.
+- Browser layout/focus, production catalog volume, live ledger contention and signed-URL latency
+  require later authorized measurement. No claim that the flow is faster is made.
+
+## Persisted credit requests — offline draft, 2026-11-05
+
+- The client can now create a persisted, idempotent credit request without claiming that payment or
+  allocation already occurred. Admin approval is a separate RPC that locks the request, writes one
+  wallet transaction and returns the authoritative balance; rejection never credits the wallet.
+- The admin list is bounded and resolves profiles in one batch rather than one request per row.
+  Both client and admin actions use synchronous duplicate-submit guards and validate returned rows.
+- Focused component regressions cover request creation, canonical approval and malformed results.
+  DB/RLS/concurrency cases are written and **NOT RUN**. Payment processing remains absent, and live
+  wallet contention, Auth/RLS and browser behavior remain **NOT VERIFIED**.
+
+## Manual credit request acceptance (2026-11-26)
+
+- Reproduced a blocked admin workflow with 100 older rejected requests and two new pending ones.
+  The oldest-first query applied its limit to all statuses, hiding both actionable requests.
+- The initial view now fetches only pending requests in arrival order. Resolved requests have their
+  own bounded history, with the latest decisions first. Resolution refreshes both views and the
+  client balances; an unverified RPC response no longer claims that the balance did not change.
+- Browser and DB evidence from a fresh synthetic local stack: two requests left the wallet at 20.
+  Admin approval credited 25 once, rejection created no transaction, and both decisions were
+  audited. Create and approval replays returned the original records. The opposite decision and
+  resolution by clients were denied, and a different client could not read the requests.
+- The live WP07/WP11 pgTAP file passed 67/67; focused UI tests passed 48/48, the full suite passed
+  830/830, and typecheck passed. The task-owned stack was removed and the previous Docker inventory
+  was unchanged. No payment provider, concurrent credit resolutions, production catalog, or
+  integrated Product acceptance was tested in this run.

@@ -19,7 +19,8 @@ import {
   runCleanupSteps,
 } from "./v4_3_http_fixtures";
 
-const suite = describe.skipIf(!localHttpReady || !localStickersEnabled);
+const paidStickerRequired = process.env.SUPABASE_LOCAL_PAID_STICKER_REQUIRED === "1";
+const suite = describe.skipIf(!paidStickerRequired && (!localHttpReady || !localStickersEnabled));
 const ids = {
   character: "00000000-0000-4000-8000-000000020301",
   conversation: "00000000-0000-4000-8000-000000020401",
@@ -38,12 +39,29 @@ const emails = {
 suite("V4-3-C HTTP paid sticker authorization and idempotency", () => {
   let admin: ReturnType<typeof createServiceClient>;
   const users: string[] = [];
+  let eventBaseline: { notifications: Set<string>; analytics: Set<string>; audits: Set<string> };
   let actualMessageId: string | undefined;
   let ownerClient: Awaited<ReturnType<typeof signInSyntheticUser>>;
   let otherClient: Awaited<ReturnType<typeof signInSyntheticUser>>;
 
   beforeAll(async () => {
+    if (paidStickerRequired && (!localHttpReady || !localStickersEnabled)) {
+      throw new Error("Paid-sticker HTTP requires local auth and the verified sticker flag window");
+    }
     admin = createServiceClient();
+    const [notifications, analytics, audits] = await Promise.all([
+      admin.from("notifications").select("id"),
+      admin.from("analytics_events").select("id"),
+      admin.from("audit_logs").select("id"),
+    ]);
+    for (const result of [notifications, analytics, audits]) {
+      if (result.error) throw result.error;
+    }
+    eventBaseline = {
+      notifications: new Set((notifications.data ?? []).map((row) => row.id)),
+      analytics: new Set((analytics.data ?? []).map((row) => row.id)),
+      audits: new Set((audits.data ?? []).map((row) => row.id)),
+    };
     const owner = await createSyntheticUser(admin, emails.owner, (user) => users.push(user.id));
     const other = await createSyntheticUser(admin, emails.other, (user) => users.push(user.id));
     const operator = await createSyntheticUser(admin, emails.operator, (user) =>
@@ -171,6 +189,51 @@ suite("V4-3-C HTTP paid sticker authorization and idempotency", () => {
           run: async () => deleteAuthUser(admin, userId),
         },
       ]),
+      {
+        label: "fixture event cleanup",
+        run: async () => {
+          if (!eventBaseline) throw new Error("paid-sticker event baseline is missing");
+          const [notifications, analytics, audits] = await Promise.all([
+            admin.from("notifications").select("id,type"),
+            admin.from("analytics_events").select("id,event_name"),
+            admin.from("audit_logs").select("id,action"),
+          ]);
+          for (const result of [notifications, analytics, audits]) {
+            if (result.error) throw result.error;
+          }
+          const newNotifications = (notifications.data ?? []).filter(
+            (row) => !eventBaseline.notifications.has(row.id),
+          );
+          const newAnalytics = (analytics.data ?? []).filter(
+            (row) => !eventBaseline.analytics.has(row.id),
+          );
+          const newAudits = (audits.data ?? []).filter((row) => !eventBaseline.audits.has(row.id));
+          const expectedAnalytics = [
+            "client_message_sent",
+            "conversation_started",
+            "first_message_sent",
+            "new_claimed",
+            "paid_sticker_payout_completed",
+            "signup_completed",
+            "signup_completed",
+            "signup_completed",
+          ];
+          if (
+            newNotifications.length !== 1 ||
+            newNotifications[0]?.type !== "character_assignment" ||
+            newAudits.length !== 0 ||
+            newAnalytics
+              .map((row) => row.event_name)
+              .sort()
+              .join("|") !== expectedAnalytics.sort().join("|")
+          ) {
+            throw new Error("paid-sticker fixture events do not match the isolated test window");
+          }
+          for (const row of newNotifications)
+            await deleteByEq(admin, "notifications", "id", row.id);
+          for (const row of newAnalytics) await deleteByEq(admin, "analytics_events", "id", row.id);
+        },
+      },
     ]);
   });
 

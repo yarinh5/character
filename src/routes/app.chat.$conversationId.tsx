@@ -1,11 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { useConversationPresence } from "@/lib/conversationPresence";
 import { fetchReadSummary, type ReadSummary } from "@/lib/readStates";
 import { trackAnalyticsEvent } from "@/lib/analyticsEvents";
+import { fetchCharacterLiveAvailability } from "@/lib/characterAvailability";
 import {
   getOldestMessageCursor,
   isNearScrollBottom,
@@ -15,7 +17,12 @@ import {
 } from "@/lib/messagePagination";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
-import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import { ClientMediaUploadButton } from "@/components/chat/ClientMediaUploadButton";
+import {
+  MessageSticker,
+  StickerHydrationPlaceholder,
+  type ChatMessageSticker,
+} from "@/components/chat/MessageSticker";
 import { StickerPicker } from "@/components/chat/StickerPicker";
 import type { StickerSendResult } from "@/hooks/useStickerSend";
 import { useMessageAttachmentAccessMap } from "@/hooks/useMessageAttachmentAccessMap";
@@ -24,13 +31,15 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowRight, Send, Flag, Trash2, Smile } from "lucide-react";
+import { ArrowRight, Send, Flag, EyeOff, Smile } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/chat/$conversationId")({
@@ -96,16 +105,35 @@ function ChatPage() {
   const loadingOlderRef = useRef(false);
   const attachmentIds = useMemo(
     () =>
-      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+      [
+        ...new Set(
+          messages
+            .flatMap((message) => message.message_attachments ?? [])
+            .filter((attachment) => attachment.kind === "image")
+            .map((attachment) => attachment.id),
+        ),
+      ].sort(),
     [messages],
   );
   const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
   useActiveConversation(conversationId, "client");
-  const { activeUsers, typingUsers, startTyping, stopTyping } = useConversationPresence({
+  const { typingUsers, startTyping, stopTyping } = useConversationPresence({
     conversationId,
     userId: user?.id,
     role: "client",
     displayName: user?.email?.split("@")[0] ?? "לקוח",
+  });
+  const characterId = conv?.characters?.id ?? null;
+  const characterAvailability = useQuery({
+    queryKey: ["character-live-availability", characterId],
+    enabled: Boolean(characterId),
+    retry: false,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      if (!characterId) throw new Error("missing_character_availability_id");
+      const availability = await fetchCharacterLiveAvailability([characterId]);
+      return availability.get(characterId)!;
+    },
   });
 
   const hydrateMessageDecorations = async (message: Msg) => {
@@ -117,7 +145,9 @@ function ChatPage() {
         .order("position", { ascending: true }),
       supabase
         .from("message_stickers")
-        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .select(
+          "id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at",
+        )
         .eq("message_id", message.id),
     ]);
 
@@ -140,9 +170,13 @@ function ChatPage() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
+      .select(
+        "*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+      )
       .eq("conversation_id", conversationId)
-      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .or(
+        `created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`,
+      )
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(MESSAGE_PAGE_SIZE);
@@ -172,22 +206,31 @@ function ChatPage() {
     shouldStickToBottomRef.current = true;
     (async () => {
       setLoading(true);
-      const [{ data: c, error: ce }, { data: m, error: me }, { data: wallet }, { data: profile }] = await Promise.all([
-        supabase
-          .from("conversations")
-          .select("id, client_id, status, client_hidden_at, characters(id, name, avatar_url, availability_status)")
-          .eq("id", conversationId)
-          .maybeSingle(),
-        supabase
-          .from("messages")
-          .select("*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
-          .eq("conversation_id", conversationId)
-          .order("created_at", { ascending: false })
-          .order("id", { ascending: false })
-          .limit(MESSAGE_PAGE_SIZE),
-        supabase.from("credit_wallets").select("balance").maybeSingle(),
-        supabase.from("profiles").select("display_name, avatar_url").eq("user_id", user?.id ?? "").maybeSingle(),
-      ]);
+      const [{ data: c, error: ce }, { data: m, error: me }, { data: wallet }, { data: profile }] =
+        await Promise.all([
+          supabase
+            .from("conversations")
+            .select(
+              "id, client_id, status, client_hidden_at, characters(id, name, avatar_url, availability_status)",
+            )
+            .eq("id", conversationId)
+            .maybeSingle(),
+          supabase
+            .from("messages")
+            .select(
+              "*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+            )
+            .eq("conversation_id", conversationId)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(MESSAGE_PAGE_SIZE),
+          supabase.from("credit_wallets").select("balance").maybeSingle(),
+          supabase
+            .from("profiles")
+            .select("display_name, avatar_url")
+            .eq("user_id", user?.id ?? "")
+            .maybeSingle(),
+        ]);
       if (cancelled) return;
       if (ce || !c || c.client_hidden_at) {
         toast.error("שיחה לא נמצאה");
@@ -197,7 +240,14 @@ function ChatPage() {
       if (me) toast.error("שגיאה בטעינת הודעות");
       setConv(c as unknown as Conv);
       const latestMessages = sortMessagesAsc((m ?? []) as Msg[]);
-      setMessages(latestMessages);
+      setMessages((prev) =>
+        me
+          ? []
+          : mergeMessagesById(
+              prev.filter((message) => message.conversation_id === conversationId),
+              latestMessages,
+            ),
+      );
       setHasOlderMessages(latestMessages.length === MESSAGE_PAGE_SIZE);
       setCreditBalance(wallet?.balance ?? null);
       setClientAvatarUrl(profile?.avatar_url ?? null);
@@ -208,7 +258,9 @@ function ChatPage() {
         _conversation_id: conversationId,
         _as: "client",
       });
-      fetchReadSummary(conversationId).then(setReadSummary).catch(() => undefined);
+      fetchReadSummary(conversationId)
+        .then(setReadSummary)
+        .catch(() => undefined);
     })();
     return () => {
       cancelled = true;
@@ -217,6 +269,26 @@ function ChatPage() {
 
   // Realtime
   useEffect(() => {
+    let disposed = false;
+    let joined = false;
+    const reconcileMessages = async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select(
+          "*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+        )
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
+      if (disposed || error) return;
+      setMessages((prev) =>
+        mergeMessagesById(
+          prev.filter((message) => message.conversation_id === conversationId),
+          (data ?? []) as Msg[],
+        ),
+      );
+    };
     const channel = supabase
       .channel(`chat-${conversationId}`)
       .on(
@@ -247,11 +319,21 @@ function ChatPage() {
               _as: "client",
             });
           }
-          fetchReadSummary(conversationId).then(setReadSummary).catch(() => undefined);
+          fetchReadSummary(conversationId)
+            .then(setReadSummary)
+            .catch(() => undefined);
         },
       )
-      .subscribe();
+      .on("system", {}, (payload: { extension?: string; status?: string }) => {
+        if (joined && payload.extension === "postgres_changes" && payload.status === "ok") {
+          void reconcileMessages();
+        }
+      })
+      .subscribe((status) => {
+        joined = status === "SUBSCRIBED";
+      });
     return () => {
+      disposed = true;
       supabase.removeChannel(channel);
     };
   }, [conversationId]);
@@ -292,12 +374,15 @@ function ChatPage() {
           metadata: { source: "client_chat_send" },
           dedupeSeconds: 300,
         });
-        toast.error("נגמרו לך הקרדיטים. אפשר להמשיך לקרוא את השיחה, אבל כדי לשלוח הודעה צריך להטעין קרדיטים.", {
-          action: {
-            label: "לחבילות",
-            onClick: () => navigate({ to: "/app/packages" }),
+        toast.error(
+          "נגמרו לך הקרדיטים. אפשר להמשיך לקרוא את השיחה, אבל כדי לשלוח הודעה צריך להטעין קרדיטים.",
+          {
+            action: {
+              label: "לחבילות",
+              onClick: () => navigate({ to: "/app/packages" }),
+            },
           },
-        });
+        );
         return;
       }
       toast.error("שליחה נכשלה");
@@ -322,6 +407,12 @@ function ChatPage() {
     setMessages((prev) => mergeMessagesById(prev, [message]));
   };
 
+  const handleClientMediaSent = (message: Msg, balance: number | null) => {
+    if (typeof balance === "number") setCreditBalance(balance);
+    shouldStickToBottomRef.current = true;
+    setMessages((previous) => mergeMessagesById(previous, [message]));
+  };
+
   const deleteConversation = async () => {
     if (!user || deleting) return;
 
@@ -332,12 +423,12 @@ function ChatPage() {
     setDeleting(false);
 
     if (error) {
-      toast.error("מחיקת השיחה נכשלה");
+      toast.error("הסתרת השיחה נכשלה");
       return;
     }
 
     setDeleteOpen(false);
-    toast.success("השיחה נמחקה מהרשימה שלך");
+    toast.success("השיחה הוסתרה מהרשימה שלך");
     navigate({ to: "/app/conversations" });
   };
 
@@ -350,22 +441,35 @@ function ChatPage() {
   }
 
   const character = conv?.characters;
-  const characterActive = activeUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
-  const characterTyping = typingUsers.some((presence) => presence.role === "operator" || presence.role === "admin");
+  const characterTyping = typingUsers.some(
+    (presence) => presence.role === "operator" || presence.role === "admin",
+  );
   const operatorLastReadAt = readSummary?.operator_last_read_at
-    ? new Date(readSummary.operator_last_read_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })
+    ? new Date(readSummary.operator_last_read_at).toLocaleTimeString("he-IL", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
     : null;
 
   return (
     <div className="flex flex-col h-[calc(100dvh-5rem)] md:h-screen bg-background" dir="rtl">
       {/* Header */}
       <header className="h-16 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
-        <Button variant="ghost" size="icon" onClick={() => navigate({ to: "/app/conversations" })}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="חזרה לרשימת השיחות"
+          onClick={() => navigate({ to: "/app/conversations" })}
+        >
           <ArrowRight className="h-5 w-5" />
         </Button>
         <div className="h-10 w-10 rounded-full bg-muted overflow-hidden shrink-0">
           {character?.avatar_url ? (
-            <img src={character.avatar_url} alt={character.name} className="h-full w-full object-cover" />
+            <img
+              src={character.avatar_url}
+              alt={character.name}
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="h-full w-full flex items-center justify-center font-semibold">
               {character?.name?.[0] ?? "?"}
@@ -374,20 +478,49 @@ function ChatPage() {
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold truncate">{character?.name ?? "—"}</h2>
-          <p className="text-xs text-muted-foreground">
-            {characterActive
-              ? "פעיל/ה עכשיו"
-              : character?.availability_status === "available"
-                ? "זמין/ה"
-                : "לא זמין/ה כעת"}
-          </p>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              {characterAvailability.isLoading
+                ? "בודק/ת זמינות…"
+                : characterAvailability.isError
+                  ? "זמינות לא זמינה"
+                  : characterAvailability.data === "available"
+                    ? "זמין/ה עכשיו"
+                    : "לא זמין/ה כעת"}
+            </span>
+            {characterAvailability.isError && (
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={() => void characterAvailability.refetch()}
+              >
+                נסה שוב
+              </button>
+            )}
+          </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setReportOpen(true)}>
-          <Flag className="h-5 w-5" />
-        </Button>
-        <Button variant="ghost" size="icon" onClick={() => setDeleteOpen(true)}>
-          <Trash2 className="h-5 w-5" />
-        </Button>
+        <ReportDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          conversationId={conversationId}
+          userId={user?.id}
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="דיווח על השיחה">
+              <Flag className="h-5 w-5" />
+            </Button>
+          }
+        />
+        <DeleteConversationDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onConfirm={deleteConversation}
+          deleting={deleting}
+          trigger={
+            <Button variant="ghost" size="icon" aria-label="הסרת השיחה מהרשימה">
+              <EyeOff className="h-5 w-5" />
+            </Button>
+          }
+        />
       </header>
 
       {/* Messages */}
@@ -435,12 +568,16 @@ function ChatPage() {
           const avatarName = mine ? clientDisplayName : character?.name;
           const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
           const hasStickers = !!m.message_stickers;
-          const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+          const stickerHydrationPending =
+            m.content === "[sticker]" && m.message_stickers === undefined;
           const showContent =
             (m.content !== "[image]" || !hasAttachments) &&
             (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
           return (
-            <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-start" : "justify-end"}`}>
+            <div
+              key={m.id}
+              className={`flex items-end gap-2 ${mine ? "justify-start" : "justify-end"}`}
+            >
               <ChatAvatar src={avatarUrl} name={avatarName} />
               <div
                 className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2 ${
@@ -449,7 +586,9 @@ function ChatPage() {
                     : "bg-card border border-border rounded-br-sm"
                 }`}
               >
-                {showContent && <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>}
+                {showContent && (
+                  <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                )}
                 {m.message_attachments?.map((attachment) => (
                   <MessageAttachment
                     key={attachment.id}
@@ -457,20 +596,19 @@ function ChatPage() {
                     access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
                     accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
                     refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                    onBalanceChange={setCreditBalance}
                   />
                 ))}
                 {stickerHydrationPending && <StickerHydrationPlaceholder />}
                 {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
-                <p className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                <p
+                  className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                >
                   {new Date(m.created_at).toLocaleTimeString("he-IL", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
-                  {mine && (
-                    <span className="ms-2">
-                      {m.is_read ? "נראה" : "נשלח"}
-                    </span>
-                  )}
+                  {mine && <span className="ms-2">{m.is_read ? "נראה" : "נשלח"}</span>}
                 </p>
               </div>
             </div>
@@ -493,10 +631,13 @@ function ChatPage() {
       {/* Composer */}
       <div className="border-t border-border bg-card p-3 shrink-0">
         {creditBalance !== null && (
-          <p className="text-xs text-muted-foreground mb-2 text-end">יתרת קרדיטים: {creditBalance}</p>
+          <p className="text-xs text-muted-foreground mb-2 text-end">
+            יתרת קרדיטים: {creditBalance}
+          </p>
         )}
         <div className="flex gap-2 items-end">
           <Textarea
+            aria-label="הודעה"
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
@@ -515,6 +656,14 @@ function ChatPage() {
             maxLength={2000}
             className="min-w-0 flex-1 resize-none min-h-[40px] max-h-32"
           />
+          {user && (
+            <ClientMediaUploadButton
+              conversationId={conversationId}
+              identityKey={user.id}
+              disabled={sending}
+              onSent={handleClientMediaSent}
+            />
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -548,23 +697,9 @@ function ChatPage() {
             <TooltipContent>שליחת הודעה</TooltipContent>
           </Tooltip>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1 text-end">
-          {input.length}/2000
-        </p>
+        <p className="text-[10px] text-muted-foreground mt-1 text-end">{input.length}/2000</p>
       </div>
 
-      <ReportDialog
-        open={reportOpen}
-        onOpenChange={setReportOpen}
-        conversationId={conversationId}
-        userId={user?.id}
-      />
-      <DeleteConversationDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onConfirm={deleteConversation}
-        deleting={deleting}
-      />
       <StickerPicker
         conversationId={conversationId}
         open={stickerPickerOpen}
@@ -582,27 +717,30 @@ function DeleteConversationDialog({
   onOpenChange,
   onConfirm,
   deleting,
+  trigger,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onConfirm: () => void;
   deleting: boolean;
+  trigger: ReactElement;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent dir="rtl">
         <DialogHeader>
-          <DialogTitle>מחיקת שיחה מהרשימה</DialogTitle>
+          <DialogTitle>הסתרת שיחה מהרשימה</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground leading-6">
-          השיחה תוסתר רק אצלך. העובדים והאדמין עדיין יראו את ההיסטוריה, ואם תפתח שוב את אותה דמות תיווצר שיחה חדשה.
-        </p>
+        <DialogDescription className="leading-6">
+          השיחה תוסתר רק מהרשימה שלך. ההסתרה לא מוחקת את ההיסטוריה. אפשר לחזור לשיחה דרך אותה דמות.
+        </DialogDescription>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
             ביטול
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={deleting}>
-            {deleting ? "מוחק..." : "מחק שיחה"}
+          <Button onClick={onConfirm} disabled={deleting}>
+            {deleting ? "מסתיר..." : "הסתר שיחה"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -615,12 +753,15 @@ function ReportDialog({
   onOpenChange,
   conversationId,
   userId,
+  trigger,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   conversationId: string;
   userId: string | undefined;
+  trigger: ReactElement;
 }) {
+  const reportId = useId();
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -650,14 +791,18 @@ function ReportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl">
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent dir="rtl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>דיווח על שיחה</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <label className="text-sm font-medium">סיבה</label>
+            <label className="text-sm font-medium" htmlFor={`${reportId}-reason`}>
+              סיבה
+            </label>
             <Input
+              id={`${reportId}-reason`}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               maxLength={200}
@@ -665,8 +810,11 @@ function ReportDialog({
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">פירוט (אופציונלי)</label>
+            <label className="text-sm font-medium" htmlFor={`${reportId}-details`}>
+              פירוט (אופציונלי)
+            </label>
             <Textarea
+              id={`${reportId}-details`}
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               maxLength={1000}

@@ -5,8 +5,15 @@ import { supabase } from "@/integrations/supabase/client";
 import type { DiscoveryFilters } from "@/hooks/useDiscovery";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 
 type DiscoveryCity = {
@@ -28,20 +35,27 @@ const AGE_MIN = 18;
 const AGE_MAX = 80;
 
 async function fetchAvailableCities() {
-  const [{ data: cities, error: citiesError }, { data: characters, error: charactersError }] = await Promise.all([
-    supabase.from("discovery_cities").select("id, display_name_he").eq("is_active", true).order("display_name_he"),
-    supabase
-      .from("characters")
-      .select("interests, discovery_city_id")
-      .eq("is_active", true)
-      .eq("is_visible", true),
-  ]);
+  const [{ data: cities, error: citiesError }, { data: characters, error: charactersError }] =
+    await Promise.all([
+      supabase
+        .from("discovery_cities")
+        .select("id, display_name_he")
+        .eq("is_active", true)
+        .order("display_name_he"),
+      supabase
+        .from("characters")
+        .select("interests, discovery_city_id")
+        .eq("is_active", true)
+        .eq("is_visible", true),
+    ]);
 
   if (citiesError) throw citiesError;
   if (charactersError) throw charactersError;
 
   const assignedCityIds = new Set(
-    (characters ?? []).map((character) => character.discovery_city_id).filter((cityId): cityId is string => Boolean(cityId)),
+    (characters ?? [])
+      .map((character) => character.discovery_city_id)
+      .filter((cityId): cityId is string => Boolean(cityId)),
   );
   const interests = Array.from(
     new Set(
@@ -75,6 +89,7 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
   const hasActiveFilters =
     hasAgeFilter ||
     filters.city_id !== null ||
+    filters.max_distance_km !== null ||
     filters.favorites_only ||
     filters.recycled_only ||
     filters.interest !== null;
@@ -82,8 +97,10 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
   useEffect(() => {
     if (!citiesQuery.data) return;
 
-    const cityIsAvailable = !filters.city_id || citiesQuery.data.cities.some((city) => city.id === filters.city_id);
-    const interestIsAvailable = !filters.interest || citiesQuery.data.interests.includes(filters.interest);
+    const cityIsAvailable =
+      !filters.city_id || citiesQuery.data.cities.some((city) => city.id === filters.city_id);
+    const interestIsAvailable =
+      !filters.interest || citiesQuery.data.interests.includes(filters.interest);
     if (cityIsAvailable && interestIsAvailable) return;
 
     onChange({
@@ -98,7 +115,11 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-baseline gap-2">
           <Label htmlFor="discovery-age-range">טווח גיל</Label>
-          <span className={hasAgeFilter ? "text-sm font-medium text-foreground" : "text-sm text-muted-foreground"}>
+          <span
+            className={
+              hasAgeFilter ? "text-sm font-medium text-foreground" : "text-sm text-muted-foreground"
+            }
+          >
             {ageRangeLabel}
           </span>
         </div>
@@ -112,6 +133,7 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
                 min_age: null,
                 max_age: null,
                 city_id: null,
+                max_distance_km: null,
                 favorites_only: false,
                 recycled_only: false,
                 interest: null,
@@ -154,7 +176,9 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
           <Label htmlFor="discovery-city">עיר</Label>
           <Select
             value={filters.city_id ?? "all"}
-            onValueChange={(cityId) => onChange({ ...filters, city_id: cityId === "all" ? null : cityId })}
+            onValueChange={(cityId) =>
+              onChange({ ...filters, city_id: cityId === "all" ? null : cityId })
+            }
           >
             <SelectTrigger id="discovery-city">
               <SelectValue placeholder="כל הערים" />
@@ -171,26 +195,54 @@ export function DiscoveryFilters({ filters, onChange }: DiscoveryFiltersProps) {
         </div>
       )}
 
+      <div className="mt-4 space-y-2">
+        <Label htmlFor="discovery-distance">מרחק מרבי מהעיר שלי (ק״מ)</Label>
+        <Input
+          id="discovery-distance"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={1000}
+          value={filters.max_distance_km ?? ""}
+          placeholder="ללא הגבלת מרחק"
+          onChange={(event) => {
+            const raw = event.target.value;
+            const distance = raw === "" ? null : Number(raw);
+            if (
+              distance !== null &&
+              (!Number.isInteger(distance) || distance < 1 || distance > 1000)
+            )
+              return;
+            onChange({ ...filters, max_distance_km: distance });
+          }}
+        />
+        <p className="text-xs text-muted-foreground">
+          דמויות ללא קואורדינטות אינן מוצגות כאשר מסנן המרחק פעיל.
+        </p>
+      </div>
+
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         {showInterestFilter && (
           <div className="space-y-2">
-          <Label htmlFor="discovery-interest">תחום עניין</Label>
-          <Select
-            value={filters.interest ?? "all"}
-            onValueChange={(interest) => onChange({ ...filters, interest: interest === "all" ? null : interest })}
-          >
-            <SelectTrigger id="discovery-interest">
-              <SelectValue placeholder="כל תחומי העניין" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">כל תחומי העניין</SelectItem>
-              {citiesQuery.data?.interests.map((interest) => (
-                <SelectItem key={interest} value={interest}>
-                  {interest}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Label htmlFor="discovery-interest">תחום עניין</Label>
+            <Select
+              value={filters.interest ?? "all"}
+              onValueChange={(interest) =>
+                onChange({ ...filters, interest: interest === "all" ? null : interest })
+              }
+            >
+              <SelectTrigger id="discovery-interest">
+                <SelectValue placeholder="כל תחומי העניין" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">כל תחומי העניין</SelectItem>
+                {citiesQuery.data?.interests.map((interest) => (
+                  <SelectItem key={interest} value={interest}>
+                    {interest}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

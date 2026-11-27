@@ -179,7 +179,13 @@ $$;
 CREATE TEMP TABLE wp01_handling_writer_inventory (
   signature TEXT PRIMARY KEY,
   classification TEXT NOT NULL CHECK (
-    classification IN ('relevant_writer', 'relevant_guard', 'cutover_safe_non_handling')
+    classification IN (
+      'relevant_writer',
+      'relevant_guard',
+      'delegated_writer',
+      'rejected_compatibility',
+      'cutover_safe_non_handling'
+    )
   ),
   justification TEXT NOT NULL
 ) ON COMMIT DROP;
@@ -200,15 +206,21 @@ VALUES
   ('public.return_stale_work_items_to_new()', 'relevant_writer', 'delegates stale handling-state writes'),
   ('public.operator_heartbeat()', 'relevant_writer', 'delegates stale handling-state writes'),
   ('public.admin_set_conversation_status(uuid, public.conversation_status)', 'relevant_writer', 'changes conversation lifecycle'),
-  ('public.admin_reassign_conversation(uuid, uuid)', 'relevant_writer', 'changes handling ownership'),
+  ('public.admin_reassign_conversation(uuid, uuid)', 'rejected_compatibility', 'rejects transfers without a reason before any write'),
+  ('public.admin_reassign_conversation(uuid, uuid, text)', 'relevant_writer', 'transfers ownership with a required reason'),
   ('public.archive_client_pii(uuid, text, text)', 'relevant_writer', 'closes conversations and handling state'),
   ('public.start_or_get_conversation(uuid)', 'relevant_writer', 'creates and locks conversation lifecycle rows'),
   ('public.hide_conversation_for_client(uuid)', 'relevant_writer', 'changes conversation visibility lifecycle'),
   ('public.handle_new_message()', 'relevant_writer', 'message trigger changes conversation lifecycle and legacy projections'),
   ('public.mark_conversation_read(uuid, text)', 'cutover_safe_non_handling', 'updates read-state, unread counters and is_read only'),
+  ('public.update_operator_conversation_status(uuid, public.conversation_status)', 'relevant_writer', 'owner/admin RPC changes conversation lifecycle under the writer barrier'),
   ('private.create_operator_message_with_scoring(uuid, uuid, uuid, text, jsonb)', 'relevant_writer', 'writes staff messages and score projections'),
   ('private.send_sticker_message(uuid, uuid, uuid, text)', 'relevant_writer', 'writes messages, attempts and ledger effects'),
-  ('private.return_stale_work_items_to_new()', 'relevant_writer', 'returns stale work items and closes cycles'),
+  ('private.return_stale_work_items_to_new()', 'delegated_writer', 'only calls the barrier-protected overload with a null fresh operator'),
+  ('private.return_stale_work_items_to_new(uuid)', 'relevant_writer', 'locks conversations and releases stale ownership'),
+  ('private.finish_handling_cycle(uuid, uuid, text, timestamptz, uuid)', 'relevant_writer', 'ends a cycle and updates the conversation and work item'),
+  ('private.allocate_new_conversations(integer, uuid)', 'relevant_writer', 'claims pending work and creates its active cycle'),
+  ('public.run_handling_allocation(integer)', 'delegated_writer', 'checks admin then delegates both stale release and allocation'),
   ('private.close_handling_cycle_on_staff_message()', 'relevant_writer', 'message trigger closes active cycles'),
   ('private.close_conversation_work_items()', 'relevant_writer', 'conversation trigger closes work items and cycles'),
   ('private.upsert_conversation_work_item_from_client_message()', 'relevant_writer', 'message trigger creates or updates NEW work items'),
@@ -233,6 +245,16 @@ VALUES
   ('public.send_operator_locked_media_message(uuid, text, uuid)', 'relevant_writer', 'strict token public locked-media wrapper'),
   ('public.send_operator_sticker_message(uuid, uuid, uuid, uuid)', 'relevant_writer', 'strict token public Sticker wrapper'),
   ('private.assert_operator_can_claim_conversation(uuid)', 'relevant_guard', 'guards claim before ownership writes'),
+  ('private.send_operator_gift_media_message(uuid, uuid, text)', 'relevant_writer', 'writes gifted operator media under the shared barrier'),
+  ('public.send_operator_gift_media_message(uuid, uuid, text, uuid)', 'relevant_writer', 'establishes cycle authority before delegating the gift send'),
+  ('public.finalize_client_media_upload_for_server(uuid, uuid, text, text, bigint, uuid)', 'relevant_writer', 'locks the conversation and writes a client message'),
+  ('public.purchase_attachment_gift(uuid, uuid, uuid)', 'relevant_writer', 'locks the conversation and writes the purchase message'),
+  ('public.request_conversation_deletion(uuid, text, uuid, boolean)', 'relevant_writer', 'closes the conversation, cycles and work items'),
+  ('private.block_business_mutation_during_recovery()', 'cutover_safe_non_handling', 'row trigger checks recovery policy without writing handling state'),
+  ('private.count_plain_client_message_level()', 'cutover_safe_non_handling', 'message trigger projects client levels without changing handling authority'),
+  ('private.sync_operational_wait_cycle()', 'cutover_safe_non_handling', 'projects pending state into SLA records and notifications'),
+  ('public.execute_account_deletion_database_step_for_server(uuid, uuid)', 'cutover_safe_non_handling', 'redacts client message content and identity without changing handling projections or ownership'),
+  ('public.execute_conversation_deletion_database_step_for_server(uuid, uuid)', 'cutover_safe_non_handling', 'redacts conversation content after closure without changing handling projections or ownership'),
   ('public.set_updated_at()', 'cutover_safe_non_handling', 'touches updated_at only'),
   ('public.notify_on_new_message()', 'cutover_safe_non_handling', 'emits notifications without changing handling authority'),
   ('public.notify_analytics_conversation_started()', 'cutover_safe_non_handling', 'records conversation-start analytics only'),
@@ -246,6 +268,39 @@ VALUES
   ('private.record_v2_33_outreach_replied()', 'cutover_safe_non_handling', 'records outreach analytics only');
 
 SELECT no_plan();
+
+SELECT ok(
+  NOT has_function_privilege(
+    'public',
+    'public.start_operator_outreach(uuid,uuid,text,text)'::regprocedure,
+    'EXECUTE'
+  ),
+  'PUBLIC cannot execute the retired operator outreach action'
+);
+SELECT ok(
+  NOT has_function_privilege(
+    'anon',
+    'public.start_operator_outreach(uuid,uuid,text,text)'::regprocedure,
+    'EXECUTE'
+  ),
+  'anonymous users cannot execute the retired operator outreach action'
+);
+SELECT ok(
+  NOT has_function_privilege(
+    'authenticated',
+    'public.start_operator_outreach(uuid,uuid,text,text)'::regprocedure,
+    'EXECUTE'
+  ),
+  'authenticated users cannot execute the retired operator outreach action'
+);
+SELECT ok(
+  NOT has_function_privilege(
+    'service_role',
+    'public.start_operator_outreach(uuid,uuid,text,text)'::regprocedure,
+    'EXECUTE'
+  ),
+  'service role cannot reopen the retired operator outreach action'
+);
 
 SELECT is(
   COALESCE((
@@ -274,6 +329,44 @@ SELECT is(
   '',
   'Every discovered handling writer is explicitly classified in the inventory'
 );
+
+-- Delegates and fail-closed compatibility entry points are classified
+-- individually. Their writable callees remain subject to the barrier-first
+-- assertion above.
+SELECT is(
+  (
+    SELECT btrim(regexp_replace(prosrc, '[[:space:]]+', ' ', 'g'))
+    FROM pg_proc
+    WHERE oid = 'private.return_stale_work_items_to_new()'::regprocedure
+  ),
+  'SELECT private.return_stale_work_items_to_new(NULL::uuid);',
+  'The no-argument stale-work entry point only calls the protected overload'
+);
+SELECT is(
+  (
+    SELECT btrim(regexp_replace(prosrc, '[[:space:]]+', ' ', 'g'))
+    FROM pg_proc
+    WHERE oid = 'public.admin_reassign_conversation(uuid,uuid)'::regprocedure
+  ),
+  $body$BEGIN RAISE EXCEPTION 'admin_transfer_reason_required'; END;$body$,
+  'The two-argument Admin transfer only rejects the missing reason'
+);
+SELECT ok((
+  SELECT starts_with(
+    btrim(regexp_replace(prosrc, '[[:space:]]+', ' ', 'g')),
+    btrim(regexp_replace($body$
+      DECLARE _released integer; _allocated integer;
+      BEGIN
+        IF auth.uid() IS NULL OR public.is_admin() IS NOT TRUE THEN
+          RAISE EXCEPTION 'admin_required';
+        END IF;
+        _released := private.return_stale_work_items_to_new();
+        _allocated := private.allocate_new_conversations(_max_assignments);
+    $body$, '[[:space:]]+', ' ', 'g'))
+  )
+  FROM pg_proc
+  WHERE oid = 'public.run_handling_allocation(integer)'::regprocedure
+), 'The Admin allocation entry point authorizes and delegates both writes first');
 
 SELECT ok(
   (
@@ -343,8 +436,8 @@ SELECT is(
 );
 SELECT is(
   has_column_privilege('authenticated', 'public.conversations', 'status', 'UPDATE'),
-  true,
-  'Authenticated retains direct status UPDATE subject to RLS'
+  false,
+  'Authenticated status writes are RPC-only after owner enforcement'
 );
 SELECT is(
   has_column_privilege('authenticated', 'public.conversations', 'needs_handling', 'UPDATE'),
@@ -470,6 +563,10 @@ VALUES
   ('00000000-0000-4000-8000-0000000a2101', '00000000-0000-4000-8000-0000000a1104'),
   ('00000000-0000-4000-8000-0000000a2102', '00000000-0000-4000-8000-0000000a1104');
 
+-- One server anchor for this live-send graph; preserve the historical offsets.
+CREATE TEMP TABLE wp01_send_clock ON COMMIT DROP AS
+SELECT clock_timestamp() AS observed_at;
+
 INSERT INTO public.conversations (id, client_id, character_id, assigned_operator_id, status)
 VALUES (
   '00000000-0000-4000-8000-0000000a3101',
@@ -488,7 +585,7 @@ VALUES (
   'client',
   '00000000-0000-4000-8000-0000000a0101',
   'first client request',
-  '2026-10-06 20:00:00+00'
+  (SELECT observed_at - interval '90 seconds' FROM wp01_send_clock)
 );
 
 SELECT is(
@@ -508,7 +605,7 @@ SELECT is(
 );
 SELECT is(
   (SELECT pending_since FROM public.conversations WHERE id = '00000000-0000-4000-8000-0000000a3101'),
-  '2026-10-06 20:00:00+00'::timestamptz,
+  (SELECT observed_at - interval '90 seconds' FROM wp01_send_clock),
   'First client message starts pending_since'
 );
 
@@ -521,7 +618,7 @@ VALUES (
   'client',
   '00000000-0000-4000-8000-0000000a0101',
   'second client request',
-  '2026-10-06 20:01:00+00'
+  (SELECT observed_at - interval '30 seconds' FROM wp01_send_clock)
 );
 
 SELECT is(
@@ -531,12 +628,12 @@ SELECT is(
 );
 SELECT is(
   (SELECT pending_since FROM public.conversations WHERE id = '00000000-0000-4000-8000-0000000a3101'),
-  '2026-10-06 20:00:00+00'::timestamptz,
+  (SELECT observed_at - interval '90 seconds' FROM wp01_send_clock),
   'Additional Client messages do not reset pending_since'
 );
 SELECT is(
   (SELECT inactivity_expires_at FROM public.conversations WHERE id = '00000000-0000-4000-8000-0000000a3101'),
-  '2026-10-06 20:04:00+00'::timestamptz,
+  (SELECT observed_at + interval '150 seconds' FROM wp01_send_clock),
   'Latest successful business message advances the shadow 180-second expiry'
 );
 
@@ -569,7 +666,7 @@ SELECT
   '00000000-0000-4000-8000-0000000a3101',
   work_item.id,
   '00000000-0000-4000-8000-0000000a1102',
-  '2026-10-06 20:01:30+00'
+  (SELECT observed_at FROM wp01_send_clock)
 FROM public.conversation_work_items work_item
 WHERE work_item.conversation_id = '00000000-0000-4000-8000-0000000a3101'
   AND work_item.status IN ('new', 'assigned', 'in_progress');
@@ -583,8 +680,8 @@ VALUES
     '00000000-0000-4000-8000-0000000a3101',
     NULL,
     '00000000-0000-4000-8000-0000000a1102',
-    '2026-10-06 19:00:00+00',
-    '2026-10-06 19:30:00+00',
+    (SELECT observed_at - interval '3690 seconds' FROM wp01_send_clock),
+    (SELECT observed_at - interval '1890 seconds' FROM wp01_send_clock),
     'released'
   ),
   (
@@ -592,8 +689,8 @@ VALUES
     '00000000-0000-4000-8000-0000000a3101',
     NULL,
     '00000000-0000-4000-8000-0000000a1102',
-    '2026-10-06 19:31:00+00',
-    '2026-10-06 19:59:00+00',
+    (SELECT observed_at - interval '1830 seconds' FROM wp01_send_clock),
+    (SELECT observed_at - interval '150 seconds' FROM wp01_send_clock),
     'reassigned'
   );
 
@@ -719,17 +816,35 @@ VALUES (
   '00000000-0000-4000-8000-0000000a2101',
   'open'
 );
-INSERT INTO public.conversation_work_items (
-  id, conversation_id, client_id, character_id, status, last_activity_at
-)
+INSERT INTO public.messages (id, conversation_id, sender_type, sender_id, content, created_at)
 VALUES (
-  '00000000-0000-4000-8000-0000000a5104',
-  '00000000-0000-4000-8000-0000000a3104',
-  '00000000-0000-4000-8000-0000000a0105',
-  '00000000-0000-4000-8000-0000000a2101',
-  'new',
-  clock_timestamp()
+  '00000000-0000-4000-8000-0000000a4104',
+  '00000000-0000-4000-8000-0000000a3104', 'client', '00000000-0000-4000-8000-0000000a0105',
+  'Client request for claim and replay', clock_timestamp()
 );
+
+-- Snapshot the trigger-created ID before any replay or deliberate corruption.
+CREATE TEMP TABLE wp01_claim_target ON COMMIT DROP AS
+SELECT w.id AS work_item_id
+FROM public.conversation_work_items w
+WHERE w.conversation_id = '00000000-0000-4000-8000-0000000a3104';
+
+SELECT is((
+  SELECT count(*)
+  FROM wp01_claim_target target
+  JOIN public.conversation_work_items w ON w.id = target.work_item_id
+  JOIN public.conversations c ON c.id = w.conversation_id
+  JOIN public.messages m ON w.last_client_message_id = m.id AND m.conversation_id = c.id
+  WHERE m.id = '00000000-0000-4000-8000-0000000a4104'
+    AND (SELECT count(*) FROM wp01_claim_target) = 1
+    AND c.needs_handling IS TRUE AND c.pending_since = m.created_at
+    AND c.assigned_operator_id IS NULL AND w.status = 'new'
+    AND w.responsible_operator_id IS NULL AND w.assigned_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM public.conversation_handling_cycles cycle
+      WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL
+    )
+), 1::bigint, 'Client request projects one unowned NEW item for the first claim');
 
 CREATE TEMP TABLE wp01_claim_results (
   attempt TEXT PRIMARY KEY,
@@ -737,9 +852,9 @@ CREATE TEMP TABLE wp01_claim_results (
 ) ON COMMIT DROP;
 
 INSERT INTO wp01_claim_results (attempt, result)
-SELECT 'first', public.claim_new_conversation('00000000-0000-4000-8000-0000000a5104');
+SELECT 'first', public.claim_new_conversation((SELECT work_item_id FROM wp01_claim_target));
 INSERT INTO wp01_claim_results (attempt, result)
-SELECT 'replay', public.claim_new_conversation('00000000-0000-4000-8000-0000000a5104');
+SELECT 'replay', public.claim_new_conversation((SELECT work_item_id FROM wp01_claim_target));
 
 SELECT ok(
   (SELECT result->>'cycle_id' FROM wp01_claim_results WHERE attempt = 'first') IS NOT NULL,
@@ -760,7 +875,7 @@ UPDATE public.conversation_handling_cycles
 SET ended_at = clock_timestamp(), end_reason = 'released'
 WHERE conversation_id = '00000000-0000-4000-8000-0000000a3104' AND ended_at IS NULL;
 SELECT throws_like(
-  $$SELECT public.claim_new_conversation('00000000-0000-4000-8000-0000000a5104'::uuid)$$,
+  $$SELECT public.claim_new_conversation((SELECT work_item_id FROM wp01_claim_target))$$,
   'conversation_claim_state_inconsistent',
   'Replay rejects an ended claim cycle'
 );
@@ -783,18 +898,18 @@ UPDATE public.conversation_handling_cycles
 SET work_item_id = '00000000-0000-4000-8000-0000000a5199'
 WHERE conversation_id = '00000000-0000-4000-8000-0000000a3104' AND ended_at IS NULL;
 SELECT throws_like(
-  $$SELECT public.claim_new_conversation('00000000-0000-4000-8000-0000000a5104'::uuid)$$,
+  $$SELECT public.claim_new_conversation((SELECT work_item_id FROM wp01_claim_target))$$,
   'conversation_claim_state_inconsistent',
   'Replay rejects a cycle linked to a different work item'
 );
 UPDATE public.conversation_handling_cycles
-SET work_item_id = '00000000-0000-4000-8000-0000000a5104'
+SET work_item_id = (SELECT work_item_id FROM wp01_claim_target)
 WHERE conversation_id = '00000000-0000-4000-8000-0000000a3104' AND ended_at IS NULL;
 
 DELETE FROM public.conversation_handling_cycles
 WHERE conversation_id = '00000000-0000-4000-8000-0000000a3104';
 SELECT throws_like(
-  $$SELECT public.claim_new_conversation('00000000-0000-4000-8000-0000000a5104'::uuid)$$,
+  $$SELECT public.claim_new_conversation((SELECT work_item_id FROM wp01_claim_target))$$,
   'conversation_claim_state_inconsistent',
   'Replay rejects a missing active cycle'
 );
@@ -850,6 +965,31 @@ SELECT is(
   current_setting('wp01.other_operator_send_before')::jsonb,
   'Rejected active-cycle send creates no message, ledger, projection or audit side effect'
 );
+
+-- Live owner send prerequisites: the token still belongs to the projected item.
+SELECT is((
+  SELECT count(*)
+  FROM public.conversations c
+  JOIN public.conversation_handling_cycles cycle ON cycle.conversation_id = c.id
+  JOIN public.conversation_work_items w ON w.id = cycle.work_item_id AND w.conversation_id = c.id
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3101'
+    AND c.needs_handling IS TRUE
+    AND c.pending_since = (SELECT observed_at - interval '90 seconds' FROM wp01_send_clock)
+    AND c.last_business_message_at = (SELECT observed_at - interval '30 seconds' FROM wp01_send_clock)
+    AND c.inactivity_expires_at = c.last_business_message_at + interval '180 seconds'
+    AND c.inactivity_expires_at > clock_timestamp()
+    AND c.assigned_operator_id = '00000000-0000-4000-8000-0000000a1102'
+    AND cycle.id = '00000000-0000-4000-8000-0000000a6101'
+    AND cycle.ended_at IS NULL
+    AND cycle.operator_id = c.assigned_operator_id
+    AND cycle.started_at = (SELECT observed_at FROM wp01_send_clock)
+    AND w.responsible_operator_id = cycle.operator_id
+    AND w.status = 'assigned'
+    AND w.last_client_message_id = '00000000-0000-4000-8000-0000000a4102'
+    AND (SELECT count(*) FROM public.conversation_work_items active
+         WHERE active.conversation_id = c.id AND active.status IN ('new', 'assigned', 'in_progress')) = 1
+    AND (SELECT count(*) FROM public.messages WHERE conversation_id = c.id) = 2
+), 1::bigint, 'Owner send prerequisites retain the active token and a valid 180-second window');
 
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-0000000a0102';
 SET LOCAL ROLE authenticated;
@@ -910,6 +1050,23 @@ SELECT is(
   'Active-cycle owner bypasses the contradictory legacy lock without mutating it'
 );
 
+-- Non-pending work remains ineligible; a foreign legacy lock is not the rejection reason.
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM public.conversations c
+    WHERE c.id = '00000000-0000-4000-8000-0000000a3101'
+      AND c.needs_handling IS FALSE AND c.pending_since IS NULL
+      AND c.assigned_operator_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public.conversation_handling_cycles cycle
+                      WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM public.conversation_work_items w
+                      WHERE w.conversation_id = c.id AND w.status IN ('new', 'assigned', 'in_progress'))
+      AND EXISTS (SELECT 1 FROM public.conversation_locks legacy_lock
+                  WHERE legacy_lock.conversation_id = c.id
+                    AND legacy_lock.locked_by_operator_id = '00000000-0000-4000-8000-0000000a1104'
+                    AND legacy_lock.released_at IS NULL AND legacy_lock.expires_at > clock_timestamp())
+  ), 'Non-pending work is ineligible even while the foreign legacy lock remains valid'
+);
 SELECT set_config(
   'wp01.legacy_lock_rejection_before',
   pg_temp.wp01_conversation_state(
@@ -922,11 +1079,11 @@ SET LOCAL ROLE authenticated;
 SELECT throws_like(
   $$SELECT public.send_operator_message(
     '00000000-0000-4000-8000-0000000a3101'::uuid,
-    'legacy lock must still block',
+    'non-pending legacy-lock probe',
     NULL::uuid
   )$$,
-  'conversation_locked_by_other_operator',
-  'Without an active cycle the contradictory legacy lock remains authoritative'
+  'conversation_not_available_for_claim',
+  'Non-pending conversation remains unavailable despite a foreign legacy lock'
 );
 RESET ROLE;
 SELECT is(
@@ -943,6 +1100,39 @@ WHERE conversation_id = '00000000-0000-4000-8000-0000000a3101';
 UPDATE public.system_settings
 SET value = '"open"'::jsonb
 WHERE key = 'concurrency_mode';
+
+-- A successful Staff response and release leave no NEW work without a new request.
+INSERT INTO public.messages (id, conversation_id, sender_type, sender_id, content, created_at)
+VALUES (
+  '00000000-0000-4000-8000-0000000a4103',
+  '00000000-0000-4000-8000-0000000a3101',
+  'client',
+  '00000000-0000-4000-8000-0000000a0101',
+  'Client request for atomic claim after release', clock_timestamp()
+);
+SELECT is((
+  SELECT count(*)
+  FROM public.conversations c
+  JOIN public.messages m ON m.conversation_id = c.id
+  JOIN public.conversation_work_items w ON w.conversation_id = c.id AND w.last_client_message_id = m.id
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3101'
+    AND m.id = '00000000-0000-4000-8000-0000000a4103'
+    AND c.needs_handling IS TRUE
+    AND c.pending_since = m.created_at
+    AND c.last_business_message_at = m.created_at
+    AND c.inactivity_expires_at = m.created_at + interval '180 seconds'
+    AND c.inactivity_expires_at > clock_timestamp()
+    AND c.assigned_operator_id IS NULL
+    AND w.status = 'new'
+    AND w.responsible_operator_id IS NULL
+    AND w.assigned_at IS NULL
+    AND (SELECT count(*) FROM public.conversation_work_items active
+         WHERE active.conversation_id = c.id AND active.status IN ('new', 'assigned', 'in_progress')) = 1
+    AND NOT EXISTS (
+      SELECT 1 FROM public.conversation_handling_cycles cycle
+      WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL
+    )
+), 1::bigint, 'Client request prepares atomic send with one unowned NEW item and a valid window');
 
 SET LOCAL ROLE authenticated;
 SELECT lives_ok(
@@ -1088,6 +1278,20 @@ SELECT is(
 );
 DELETE FROM private.handling_reconciliation_issues
 WHERE message_id = '00000000-0000-4000-8000-0000000a4101';
+
+-- Require the successful owner response before dependent reconciliation.
+SELECT is(
+  (SELECT count(*) FROM public.messages WHERE content = 'owner response'),
+  1::bigint,
+  'Owner response exists exactly once before reconciliation ID use'
+);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.messages WHERE content = 'owner response') <> 1 THEN
+    RAISE EXCEPTION 'owner_response_fixture_prerequisite_failed';
+  END IF;
+END;
+$$;
 
 INSERT INTO private.handling_reconciliation_issues (
   conversation_id, message_id, issue_kind, status, can_change_canonical_state, evidence
@@ -2449,6 +2653,276 @@ SELECT is(
   current_setting('wp01.rollback_baseline')::jsonb,
   'Forced failure rolls back message, sequence, shadow, work-item, ledger and audit effects'
 );
+
+-- Approved legacy claim contract: LEGACY-CLAIM-20261123.
+-- New identities isolate eligibility/capacity from earlier fixtures. All rows roll back with this suite.
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0201', 'legacy-atomic-client@example.invalid');
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0202', 'legacy-explicit-client@example.invalid');
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0203', 'legacy-automatic-client@example.invalid');
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0204', 'legacy-claimant@example.invalid');
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0205', 'legacy-lock-holder@example.invalid');
+SELECT pg_temp.wp01_create_user('00000000-0000-4000-8000-0000000a0206', 'legacy-allocation-admin@example.invalid');
+
+INSERT INTO public.user_roles (user_id, role) VALUES
+  ('00000000-0000-4000-8000-0000000a0204', 'operator'),
+  ('00000000-0000-4000-8000-0000000a0205', 'operator'),
+  ('00000000-0000-4000-8000-0000000a0206', 'admin');
+INSERT INTO public.operators (id, user_id, full_name, is_active, availability_status, presence_status, last_seen_at)
+VALUES
+  ('00000000-0000-4000-8000-0000000a1201', '00000000-0000-4000-8000-0000000a0204', 'Legacy contract claimant', TRUE, 'available', 'online', clock_timestamp()),
+  ('00000000-0000-4000-8000-0000000a1202', '00000000-0000-4000-8000-0000000a0205', 'Legacy contract lock holder', TRUE, 'available', 'offline', clock_timestamp());
+INSERT INTO public.characters (id, name, is_active, is_visible, availability_status)
+VALUES ('00000000-0000-4000-8000-0000000a2201', 'Legacy claim contract character', TRUE, TRUE, 'available');
+INSERT INTO public.character_operator_assignments (character_id, operator_id) VALUES
+  ('00000000-0000-4000-8000-0000000a2201', '00000000-0000-4000-8000-0000000a1201'),
+  ('00000000-0000-4000-8000-0000000a2201', '00000000-0000-4000-8000-0000000a1202');
+UPDATE public.system_settings SET value = '"lock"'::jsonb WHERE key = 'concurrency_mode';
+INSERT INTO public.conversations (id, client_id, character_id, status) VALUES
+  ('00000000-0000-4000-8000-0000000a3201', '00000000-0000-4000-8000-0000000a0201', '00000000-0000-4000-8000-0000000a2201', 'open'),
+  ('00000000-0000-4000-8000-0000000a3202', '00000000-0000-4000-8000-0000000a0202', '00000000-0000-4000-8000-0000000a2201', 'open'),
+  ('00000000-0000-4000-8000-0000000a3203', '00000000-0000-4000-8000-0000000a0203', '00000000-0000-4000-8000-0000000a2201', 'open');
+-- No manual pending, expiry or work-item projection: the canonical Client triggers own it.
+INSERT INTO public.messages (id, conversation_id, sender_type, sender_id, content, created_at)
+SELECT request.message_id, conversation.id, 'client'::public.sender_type, conversation.client_id,
+       'Legacy claim request ' || request.route, clock_timestamp()
+FROM (VALUES
+  ('atomic', '00000000-0000-4000-8000-0000000a3201'::uuid, '00000000-0000-4000-8000-0000000a4401'::uuid),
+  ('explicit', '00000000-0000-4000-8000-0000000a3202'::uuid, '00000000-0000-4000-8000-0000000a4402'::uuid),
+  ('automatic', '00000000-0000-4000-8000-0000000a3203'::uuid, '00000000-0000-4000-8000-0000000a4403'::uuid)
+) request(route, conversation_id, message_id)
+JOIN public.conversations conversation ON conversation.id = request.conversation_id;
+INSERT INTO public.conversation_locks (
+  conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at
+)
+SELECT conversation.id, '00000000-0000-4000-8000-0000000a1202', '00000000-0000-4000-8000-0000000a0205',
+       clock_timestamp(), clock_timestamp(), clock_timestamp() + interval '1 hour'
+FROM public.conversations conversation WHERE conversation.character_id = '00000000-0000-4000-8000-0000000a2201';
+CREATE TEMP TABLE wp01_legacy_contract_targets ON COMMIT DROP AS
+SELECT c.id AS conversation_id, w.id AS work_item_id, to_jsonb(legacy_lock) AS lock_before
+FROM public.conversations c
+JOIN public.conversation_work_items w ON w.conversation_id = c.id
+JOIN public.conversation_locks legacy_lock ON legacy_lock.conversation_id = c.id
+WHERE c.character_id = '00000000-0000-4000-8000-0000000a2201';
+
+-- Legacy contract route: atomic
+SELECT is((
+  SELECT count(*) FROM wp01_legacy_contract_targets target
+  JOIN public.conversations c ON c.id = target.conversation_id
+  JOIN public.conversation_work_items w ON w.id = target.work_item_id AND w.conversation_id = c.id
+  JOIN public.messages m ON m.id = w.last_client_message_id AND m.conversation_id = c.id
+  JOIN public.conversation_locks legacy_lock ON legacy_lock.conversation_id = c.id
+  JOIN public.operators claimant ON claimant.id = '00000000-0000-4000-8000-0000000a1201'
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3201' AND m.id = '00000000-0000-4000-8000-0000000a4401'
+    AND (SELECT value FROM public.system_settings WHERE key = 'concurrency_mode') = '"lock"'::jsonb
+    AND c.needs_handling IS TRUE AND c.pending_since = m.created_at
+    AND c.last_business_message_at = m.created_at
+    AND c.inactivity_expires_at = m.created_at + interval '180 seconds'
+    AND c.inactivity_expires_at > clock_timestamp()
+    AND c.assigned_operator_id IS NULL AND w.status = 'new'
+    AND w.responsible_operator_id IS NULL AND w.assigned_at IS NULL
+    AND (SELECT count(*) FROM public.conversation_work_items active
+         WHERE active.conversation_id = c.id AND active.status IN ('new', 'assigned', 'in_progress')) = 1
+    AND NOT EXISTS (SELECT 1 FROM public.conversation_handling_cycles cycle
+                    WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL)
+    AND claimant.is_active IS TRUE AND claimant.deleted_at IS NULL
+    AND claimant.availability_status = 'available' AND claimant.presence_status = 'online'
+    AND claimant.last_seen_at >= clock_timestamp() - make_interval(mins => GREATEST(private.setting_int('operator_heartbeat_stale_minutes', 5), 1))
+    AND (SELECT count(*) FROM public.conversation_handling_cycles owned
+         WHERE owned.operator_id = claimant.id AND owned.ended_at IS NULL) < 5
+    AND EXISTS (SELECT 1 FROM public.character_operator_assignments assignment
+                WHERE assignment.character_id = c.character_id AND assignment.operator_id = claimant.id)
+    AND NOT EXISTS (SELECT 1 FROM public.operator_client_blocks blocked
+                    WHERE blocked.operator_id = claimant.id AND blocked.client_id = c.client_id)
+    AND legacy_lock.locked_by_operator_id = '00000000-0000-4000-8000-0000000a1202'
+    AND legacy_lock.released_at IS NULL AND legacy_lock.expires_at > clock_timestamp()
+    AND to_jsonb(legacy_lock) = target.lock_before
+), 1::bigint, 'Legacy atomic prerequisites: eligible NEW work and a valid foreign lock');
+SET LOCAL "request.jwt.claim.role" = 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-0000000a0204';
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-0000000a3201'::uuid, 'Legacy lock atomic response', NULL::uuid)$$,
+  'Legacy atomic acquisition succeeds despite the valid foreign lock'
+);
+RESET ROLE;
+SELECT is((
+  SELECT count(*) FROM public.conversation_handling_cycles cycle
+  JOIN public.conversations c ON c.id = cycle.conversation_id
+  JOIN public.conversation_work_items w ON w.id = cycle.work_item_id AND w.conversation_id = c.id
+  JOIN wp01_legacy_contract_targets target ON target.conversation_id = c.id AND target.work_item_id = w.id
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3201' AND cycle.ended_at IS NULL
+    AND cycle.operator_id = '00000000-0000-4000-8000-0000000a1201'
+    AND c.assigned_operator_id = cycle.operator_id AND w.responsible_operator_id = cycle.operator_id
+    AND w.status IN ('assigned', 'in_progress')
+    AND (SELECT count(*) FROM public.conversation_handling_cycles active
+         WHERE active.conversation_id = c.id AND active.ended_at IS NULL) = 1
+), 1::bigint, 'Legacy atomic acquisition produces exactly one consistently owned cycle');
+SELECT is((
+  SELECT count(*) FROM public.messages m
+  JOIN private.handling_send_authority_evidence evidence ON evidence.message_id = m.id AND evidence.conversation_id = m.conversation_id
+  JOIN public.conversation_handling_cycles cycle ON cycle.id = evidence.handling_cycle_id AND cycle.conversation_id = m.conversation_id
+  WHERE m.conversation_id = '00000000-0000-4000-8000-0000000a3201' AND m.content = 'Legacy lock atomic response'
+    AND m.sender_type = 'operator' AND m.handling_effect = 'staff_response'
+    AND m.handling_cycle_id = cycle.id AND evidence.operator_id = cycle.operator_id
+    AND evidence.actor_user_id = '00000000-0000-4000-8000-0000000a0204'
+    AND evidence.authority_source = 'atomic_claim_and_send'
+    AND (SELECT count(*) FROM public.messages operator_message
+         WHERE operator_message.conversation_id = m.conversation_id AND operator_message.sender_type = 'operator') = 1
+    AND (SELECT count(*) FROM private.handling_send_authority_evidence all_evidence
+         WHERE all_evidence.conversation_id = m.conversation_id) = 1
+), 1::bigint, 'Legacy atomic send persists one message with exact cycle-bound authority evidence');
+SELECT is(
+  (SELECT to_jsonb(legacy_lock) FROM public.conversation_locks legacy_lock WHERE legacy_lock.conversation_id = '00000000-0000-4000-8000-0000000a3201'),
+  (SELECT target.lock_before FROM wp01_legacy_contract_targets target WHERE target.conversation_id = '00000000-0000-4000-8000-0000000a3201'),
+  'Legacy atomic acquisition leaves the valid foreign lock unchanged'
+);
+-- A foreign legacy holder still cannot send through another operator's active cycle.
+SELECT set_config('wp01.legacy_active_cycle_id', (SELECT id::text FROM public.conversation_handling_cycles WHERE conversation_id = '00000000-0000-4000-8000-0000000a3201' AND ended_at IS NULL), true);
+SELECT set_config('wp01.legacy_foreign_owner_before', pg_temp.wp01_conversation_state('00000000-0000-4000-8000-0000000a3201', '00000000-0000-4000-8000-0000000a0201')::text, true);
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-0000000a0205';
+SET LOCAL ROLE authenticated;
+SELECT throws_like(
+  $$SELECT public.send_operator_message('00000000-0000-4000-8000-0000000a3201'::uuid, 'Legacy holder cannot bypass the active cycle', current_setting('wp01.legacy_active_cycle_id')::uuid)$$,
+  'conversation_not_responsible_operator',
+  'A foreign legacy lock never authorizes sending through another operator cycle'
+);
+RESET ROLE;
+SELECT is(
+  pg_temp.wp01_conversation_state('00000000-0000-4000-8000-0000000a3201', '00000000-0000-4000-8000-0000000a0201'),
+  current_setting('wp01.legacy_foreign_owner_before')::jsonb,
+  'Rejected foreign-cycle send has no side effects'
+);
+
+-- Legacy contract route: explicit
+SELECT is((
+  SELECT count(*) FROM wp01_legacy_contract_targets target
+  JOIN public.conversations c ON c.id = target.conversation_id
+  JOIN public.conversation_work_items w ON w.id = target.work_item_id AND w.conversation_id = c.id
+  JOIN public.messages m ON m.id = w.last_client_message_id AND m.conversation_id = c.id
+  JOIN public.conversation_locks legacy_lock ON legacy_lock.conversation_id = c.id
+  JOIN public.operators claimant ON claimant.id = '00000000-0000-4000-8000-0000000a1201'
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3202' AND m.id = '00000000-0000-4000-8000-0000000a4402'
+    AND (SELECT value FROM public.system_settings WHERE key = 'concurrency_mode') = '"lock"'::jsonb
+    AND c.needs_handling IS TRUE AND c.pending_since = m.created_at
+    AND c.last_business_message_at = m.created_at
+    AND c.inactivity_expires_at = m.created_at + interval '180 seconds'
+    AND c.inactivity_expires_at > clock_timestamp()
+    AND c.assigned_operator_id IS NULL AND w.status = 'new'
+    AND w.responsible_operator_id IS NULL AND w.assigned_at IS NULL
+    AND (SELECT count(*) FROM public.conversation_work_items active
+         WHERE active.conversation_id = c.id AND active.status IN ('new', 'assigned', 'in_progress')) = 1
+    AND NOT EXISTS (SELECT 1 FROM public.conversation_handling_cycles cycle
+                    WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL)
+    AND claimant.is_active IS TRUE AND claimant.deleted_at IS NULL
+    AND claimant.availability_status = 'available' AND claimant.presence_status = 'online'
+    AND claimant.last_seen_at >= clock_timestamp() - make_interval(mins => GREATEST(private.setting_int('operator_heartbeat_stale_minutes', 5), 1))
+    AND (SELECT count(*) FROM public.conversation_handling_cycles owned
+         WHERE owned.operator_id = claimant.id AND owned.ended_at IS NULL) < 5
+    AND EXISTS (SELECT 1 FROM public.character_operator_assignments assignment
+                WHERE assignment.character_id = c.character_id AND assignment.operator_id = claimant.id)
+    AND NOT EXISTS (SELECT 1 FROM public.operator_client_blocks blocked
+                    WHERE blocked.operator_id = claimant.id AND blocked.client_id = c.client_id)
+    AND legacy_lock.locked_by_operator_id = '00000000-0000-4000-8000-0000000a1202'
+    AND legacy_lock.released_at IS NULL AND legacy_lock.expires_at > clock_timestamp()
+    AND to_jsonb(legacy_lock) = target.lock_before
+), 1::bigint, 'Legacy explicit prerequisites: eligible NEW work and a valid foreign lock');
+SELECT set_config('wp01.legacy_explicit_item_id', (SELECT work_item_id::text FROM wp01_legacy_contract_targets WHERE conversation_id = '00000000-0000-4000-8000-0000000a3202'), true);
+SET LOCAL "request.jwt.claim.role" = 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-0000000a0204';
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+  $$SELECT public.claim_new_conversation(current_setting('wp01.legacy_explicit_item_id')::uuid)$$,
+  'Legacy explicit acquisition succeeds despite the valid foreign lock'
+);
+RESET ROLE;
+SELECT is((
+  SELECT count(*) FROM public.conversation_handling_cycles cycle
+  JOIN public.conversations c ON c.id = cycle.conversation_id
+  JOIN public.conversation_work_items w ON w.id = cycle.work_item_id AND w.conversation_id = c.id
+  JOIN wp01_legacy_contract_targets target ON target.conversation_id = c.id AND target.work_item_id = w.id
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3202' AND cycle.ended_at IS NULL
+    AND cycle.operator_id = '00000000-0000-4000-8000-0000000a1201'
+    AND c.assigned_operator_id = cycle.operator_id AND w.responsible_operator_id = cycle.operator_id
+    AND w.status IN ('assigned', 'in_progress')
+    AND (SELECT count(*) FROM public.conversation_handling_cycles active
+         WHERE active.conversation_id = c.id AND active.ended_at IS NULL) = 1
+), 1::bigint, 'Legacy explicit acquisition produces exactly one consistently owned cycle');
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-0000000a3202' AND sender_type = 'operator')
+  AND NOT EXISTS (SELECT 1 FROM private.handling_send_authority_evidence WHERE conversation_id = '00000000-0000-4000-8000-0000000a3202'),
+  'Legacy explicit acquisition does not manufacture an Operator message or send authority evidence'
+);
+SELECT is(
+  (SELECT to_jsonb(legacy_lock) FROM public.conversation_locks legacy_lock WHERE legacy_lock.conversation_id = '00000000-0000-4000-8000-0000000a3202'),
+  (SELECT target.lock_before FROM wp01_legacy_contract_targets target WHERE target.conversation_id = '00000000-0000-4000-8000-0000000a3202'),
+  'Legacy explicit acquisition leaves the valid foreign lock unchanged'
+);
+
+-- Legacy contract route: automatic
+SELECT is((
+  SELECT count(*) FROM wp01_legacy_contract_targets target
+  JOIN public.conversations c ON c.id = target.conversation_id
+  JOIN public.conversation_work_items w ON w.id = target.work_item_id AND w.conversation_id = c.id
+  JOIN public.messages m ON m.id = w.last_client_message_id AND m.conversation_id = c.id
+  JOIN public.conversation_locks legacy_lock ON legacy_lock.conversation_id = c.id
+  JOIN public.operators claimant ON claimant.id = '00000000-0000-4000-8000-0000000a1201'
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3203' AND m.id = '00000000-0000-4000-8000-0000000a4403'
+    AND (SELECT value FROM public.system_settings WHERE key = 'concurrency_mode') = '"lock"'::jsonb
+    AND c.needs_handling IS TRUE AND c.pending_since = m.created_at
+    AND c.last_business_message_at = m.created_at
+    AND c.inactivity_expires_at = m.created_at + interval '180 seconds'
+    AND c.inactivity_expires_at > clock_timestamp()
+    AND c.assigned_operator_id IS NULL AND w.status = 'new'
+    AND w.responsible_operator_id IS NULL AND w.assigned_at IS NULL
+    AND (SELECT count(*) FROM public.conversation_work_items active
+         WHERE active.conversation_id = c.id AND active.status IN ('new', 'assigned', 'in_progress')) = 1
+    AND NOT EXISTS (SELECT 1 FROM public.conversation_handling_cycles cycle
+                    WHERE cycle.conversation_id = c.id AND cycle.ended_at IS NULL)
+    AND claimant.is_active IS TRUE AND claimant.deleted_at IS NULL
+    AND claimant.availability_status = 'available' AND claimant.presence_status = 'online'
+    AND claimant.last_seen_at >= clock_timestamp() - make_interval(mins => GREATEST(private.setting_int('operator_heartbeat_stale_minutes', 5), 1))
+    AND (SELECT count(*) FROM public.conversation_handling_cycles owned
+         WHERE owned.operator_id = claimant.id AND owned.ended_at IS NULL) < 5
+    AND EXISTS (SELECT 1 FROM public.character_operator_assignments assignment
+                WHERE assignment.character_id = c.character_id AND assignment.operator_id = claimant.id)
+    AND NOT EXISTS (SELECT 1 FROM public.operator_client_blocks blocked
+                    WHERE blocked.operator_id = claimant.id AND blocked.client_id = c.client_id)
+    AND legacy_lock.locked_by_operator_id = '00000000-0000-4000-8000-0000000a1202'
+    AND legacy_lock.released_at IS NULL AND legacy_lock.expires_at > clock_timestamp()
+    AND to_jsonb(legacy_lock) = target.lock_before
+), 1::bigint, 'Legacy automatic prerequisites: eligible NEW work and a valid foreign lock');
+SET LOCAL "request.jwt.claim.role" = 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-0000000a0206';
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+  $$SELECT public.run_handling_allocation(500)$$,
+  'Legacy automatic acquisition succeeds despite the valid foreign lock'
+);
+RESET ROLE;
+SELECT is((
+  SELECT count(*) FROM public.conversation_handling_cycles cycle
+  JOIN public.conversations c ON c.id = cycle.conversation_id
+  JOIN public.conversation_work_items w ON w.id = cycle.work_item_id AND w.conversation_id = c.id
+  JOIN wp01_legacy_contract_targets target ON target.conversation_id = c.id AND target.work_item_id = w.id
+  WHERE c.id = '00000000-0000-4000-8000-0000000a3203' AND cycle.ended_at IS NULL
+    AND cycle.operator_id = '00000000-0000-4000-8000-0000000a1201'
+    AND c.assigned_operator_id = cycle.operator_id AND w.responsible_operator_id = cycle.operator_id
+    AND w.status IN ('assigned', 'in_progress')
+    AND (SELECT count(*) FROM public.conversation_handling_cycles active
+         WHERE active.conversation_id = c.id AND active.ended_at IS NULL) = 1
+), 1::bigint, 'Legacy automatic acquisition produces exactly one consistently owned cycle');
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM public.messages WHERE conversation_id = '00000000-0000-4000-8000-0000000a3203' AND sender_type = 'operator')
+  AND NOT EXISTS (SELECT 1 FROM private.handling_send_authority_evidence WHERE conversation_id = '00000000-0000-4000-8000-0000000a3203'),
+  'Legacy automatic acquisition does not manufacture an Operator message or send authority evidence'
+);
+SELECT is(
+  (SELECT to_jsonb(legacy_lock) FROM public.conversation_locks legacy_lock WHERE legacy_lock.conversation_id = '00000000-0000-4000-8000-0000000a3203'),
+  (SELECT target.lock_before FROM wp01_legacy_contract_targets target WHERE target.conversation_id = '00000000-0000-4000-8000-0000000a3203'),
+  'Legacy automatic acquisition leaves the valid foreign lock unchanged'
+);
+
+-- End legacy claim contract. These are serial assertions, not cross-session race evidence.
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
 import { fetchUnreadCounts, logSupabaseError } from "@/lib/readStates";
 import { fetchSlaRiskConversations } from "@/lib/slaMonitoring";
@@ -16,6 +17,9 @@ export const Route = createFileRoute("/operator/conversations")({
   component: OperatorConversationsPage,
 });
 
+type OnlineContext =
+  Database["public"]["Functions"]["get_operator_online_context"]["Returns"][number];
+
 type Row = {
   id: string;
   status: string;
@@ -27,6 +31,7 @@ type Row = {
   sla_minutes_waiting?: number;
   characters: { id: string; name: string; avatar_url: string | null } | null;
   profiles: { display_name: string | null; avatar_url: string | null } | null;
+  client_context: OnlineContext;
 };
 
 const FILTERS = [
@@ -47,16 +52,24 @@ function formatTime(iso: string | null) {
   return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" });
 }
 
-function OperatorConversationsPage() {
+export function OperatorConversationsPage() {
   const { operator, isAdmin, walletBalance } = useOperator();
   const { user } = useAuth();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
   const [characterFilter, setCharacterFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [accessGeneration, setAccessGeneration] = useState(0);
+  const [accessChannelState, setAccessChannelState] = useState<"checking" | "ready" | "error">(
+    "checking",
+  );
+  const conversationQueryPrefix = useMemo(
+    () => ["operator-conversations", user?.id ?? "anonymous"] as const,
+    [user?.id],
+  );
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ["operator-conversations", operator?.id ?? "admin"],
+    queryKey: [...conversationQueryPrefix, operator?.id ?? "admin", isAdmin, accessGeneration],
     queryFn: async () => {
       let characterIds: string[] | null = null;
       if (operator && !isAdmin) {
@@ -105,30 +118,65 @@ function OperatorConversationsPage() {
         );
       }
 
-      const [unread, slaRisks] = await Promise.all([
-        fetchUnreadCounts((data ?? []).map((c) => c.id)),
+      const conversationIds = (data ?? []).map((c) => c.id);
+      if (conversationIds.length === 0) return [];
+      const [unread, slaRisks, context] = await Promise.all([
+        fetchUnreadCounts(conversationIds),
         fetchSlaRiskConversations(100),
+        supabase.rpc("get_operator_online_context", { _conversation_ids: conversationIds }),
       ]);
+      if (context.error) throw context.error;
       const slaMap = new Map(slaRisks.map((risk) => [risk.conversation_id, risk]));
-      return (data ?? []).map((c) => ({
-        ...c,
-        operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
-        is_sla_risk: slaMap.has(c.id),
-        sla_minutes_waiting: slaMap.get(c.id)?.minutes_waiting,
-        profiles: profileMap.get(c.client_id) ?? null,
-      })) as Row[];
+      const contextsByConversation = new Map(
+        (context.data ?? []).map((row) => [row.conversation_id, row]),
+      );
+      return (data ?? []).flatMap((c): Row[] => {
+        const clientContext = contextsByConversation.get(c.id);
+        if (!clientContext) return [];
+        return [
+          {
+            ...c,
+            operator_unread_count: unread.get(c.id)?.unread_count ?? 0,
+            is_sla_risk: slaMap.has(c.id),
+            sla_minutes_waiting: slaMap.get(c.id)?.minutes_waiting,
+            profiles: profileMap.get(c.client_id) ?? null,
+            client_context: clientContext,
+          },
+        ];
+      });
     },
+    enabled: Boolean(user?.id) && accessChannelState === "ready",
     refetchInterval: 30000,
   });
 
   useEffect(() => {
+    if (!user?.id) {
+      qc.removeQueries({ queryKey: ["operator-conversations"] });
+      setAccessChannelState("checking");
+      return;
+    }
+    const userQueryPrefix = ["operator-conversations", user.id] as const;
+    let disposed = false;
+    let joined = false;
+    let readinessTimer: number | undefined;
+    setAccessChannelState("checking");
+    qc.removeQueries({ queryKey: userQueryPrefix });
+    const invalidateCurrentUser = () => {
+      qc.removeQueries({ queryKey: userQueryPrefix });
+      setAccessGeneration((current) => current + 1);
+    };
+    const failAccess = () => {
+      window.clearTimeout(readinessTimer);
+      qc.removeQueries({ queryKey: userQueryPrefix });
+      setAccessChannelState("error");
+    };
     const ch = supabase
       .channel("operator-conversations-list")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
       .on(
         "postgres_changes",
@@ -138,11 +186,50 @@ function OperatorConversationsPage() {
           table: "conversation_read_states",
           filter: user?.id ? `user_id=eq.${user.id}` : undefined,
         },
-        () => qc.invalidateQueries({ queryKey: ["operator-conversations"] }),
+        () => qc.invalidateQueries({ queryKey: userQueryPrefix }),
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_conversation_access_versions",
+          filter: user?.id ? `user_id=eq.${user.id}` : undefined,
+        },
+        () => {
+          invalidateCurrentUser();
+        },
+      )
+      .on("system", {}, (payload: { extension?: string; status?: string }) => {
+        if (disposed || !joined || payload.extension !== "postgres_changes") return;
+        if (payload.status !== "ok") {
+          failAccess();
+          return;
+        }
+        window.clearTimeout(readinessTimer);
+        invalidateCurrentUser();
+        setAccessChannelState("ready");
+      })
+      .subscribe((status) => {
+        if (disposed) return;
+        if (status === "SUBSCRIBED") {
+          joined = true;
+          invalidateCurrentUser();
+          setAccessChannelState("checking");
+          window.clearTimeout(readinessTimer);
+          readinessTimer = window.setTimeout(failAccess, 12_000);
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
+          joined = false;
+          failAccess();
+        }
+      });
     return () => {
+      disposed = true;
+      window.clearTimeout(readinessTimer);
       supabase.removeChannel(ch);
+      qc.removeQueries({ queryKey: userQueryPrefix });
     };
   }, [qc, user?.id]);
 
@@ -160,7 +247,12 @@ function OperatorConversationsPage() {
     if (characterFilter !== "all") list = list.filter((c) => c.characters?.id === characterFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((c) => (c.profiles?.display_name ?? "").toLowerCase().includes(q));
+      list = list.filter(
+        (c) =>
+          (c.profiles?.display_name ?? "").toLowerCase().includes(q) ||
+          (c.client_context?.client_city ?? "").toLowerCase().includes(q) ||
+          String(c.client_context?.client_age ?? "") === q,
+      );
     }
     // unread first, then last_message_at
     return [...list].sort((a, b) => {
@@ -199,16 +291,19 @@ function OperatorConversationsPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="חיפוש לפי שם לקוח..."
-            className="pr-9"
+            aria-label="חיפוש שיחות לפי שם, עיר או גיל"
+            placeholder="שם, עיר או גיל"
+            className="min-h-11 pr-9"
           />
         </div>
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
             <button
               key={f.value}
+              type="button"
               onClick={() => setFilter(f.value)}
-              className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+              aria-pressed={filter === f.value}
+              className={`min-h-11 px-3 py-1.5 rounded-full text-sm border transition-colors ${
                 filter === f.value
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-input hover:bg-accent"
@@ -221,8 +316,10 @@ function OperatorConversationsPage() {
         {characters.length > 1 && (
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => setCharacterFilter("all")}
-              className={`px-3 py-1 rounded-full text-xs border ${
+              aria-pressed={characterFilter === "all"}
+              className={`min-h-11 px-3 py-1 rounded-full text-xs border ${
                 characterFilter === "all" ? "bg-secondary border-secondary" : "border-input"
               }`}
             >
@@ -231,8 +328,10 @@ function OperatorConversationsPage() {
             {characters.map(([id, name]) => (
               <button
                 key={id}
+                type="button"
                 onClick={() => setCharacterFilter(id)}
-                className={`px-3 py-1 rounded-full text-xs border ${
+                aria-pressed={characterFilter === id}
+                className={`min-h-11 px-3 py-1 rounded-full text-xs border ${
                   characterFilter === id ? "bg-secondary border-secondary" : "border-input"
                 }`}
               >
@@ -243,7 +342,7 @@ function OperatorConversationsPage() {
         )}
       </div>
 
-      {isLoading && (
+      {(accessChannelState === "checking" || isLoading) && (
         <div className="space-y-2" role="status" aria-label="טוען שיחות">
           <span className="sr-only">טוען שיחות</span>
           {Array.from({ length: 5 }).map((_, i) => (
@@ -252,15 +351,19 @@ function OperatorConversationsPage() {
         </div>
       )}
 
-      {!isLoading && error && (
+      {accessChannelState !== "checking" && (accessChannelState === "error" || error) && (
         <div className="py-12 text-center" role="alert">
           <p className="font-medium text-destructive">לא ניתן לטעון את השיחות כרגע</p>
-          <p className="mt-2 text-sm text-muted-foreground">אפשר לנסות שוב בעוד רגע.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {accessChannelState === "error"
+              ? "החיבור המאובטח נותק. הרשימה הוסתרה עד לחיבור מחדש."
+              : "אפשר לנסות שוב בעוד רגע."}
+          </p>
           <Button
             variant="outline"
-            className="mt-4"
+            className="mt-4 min-h-11"
             onClick={() => void refetch()}
-            disabled={isFetching}
+            disabled={isFetching || accessChannelState !== "ready"}
           >
             <RefreshCw className={`ml-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             {isFetching ? "מנסה שוב" : "נסה שוב"}
@@ -268,25 +371,30 @@ function OperatorConversationsPage() {
         </div>
       )}
 
-      {!isLoading && !error && !hasConversations && (
+      {accessChannelState === "ready" && !isLoading && !error && !hasConversations && (
         <div className="text-center py-16">
           <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
           <p className="text-muted-foreground">אין שיחות</p>
         </div>
       )}
 
-      {!isLoading && !error && hasConversations && filtered.length === 0 && (
-        <div className="text-center py-16">
-          <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
-          <Button variant="outline" className="mt-4" onClick={resetFilters}>
-            איפוס מסננים
-          </Button>
-        </div>
-      )}
+      {accessChannelState === "ready" &&
+        !isLoading &&
+        !error &&
+        hasConversations &&
+        filtered.length === 0 && (
+          <div className="text-center py-16">
+            <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">לא נמצאו שיחות תואמות</p>
+            <Button variant="outline" className="mt-4 min-h-11" onClick={resetFilters}>
+              איפוס מסננים
+            </Button>
+          </div>
+        )}
 
       <div className="space-y-2">
-        {!isLoading &&
+        {accessChannelState === "ready" &&
+          !isLoading &&
           !error &&
           filtered.map((c) => (
             <Link key={c.id} to="/operator/chat/$conversationId" params={{ conversationId: c.id }}>
@@ -328,7 +436,27 @@ function OperatorConversationsPage() {
                     <span className="text-xs text-muted-foreground truncate">
                       {c.profiles?.display_name ?? "לקוח"}
                     </span>
+                    {c.client_context?.client_city && (
+                      <span className="text-xs text-muted-foreground break-words">
+                        {c.client_context.client_city}
+                      </span>
+                    )}
+                    {c.client_context?.client_age != null && (
+                      <span className="text-xs text-muted-foreground">
+                        גיל {c.client_context.client_age}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {c.client_context?.client_online === true
+                        ? "פעילות לאחרונה"
+                        : c.client_context?.client_online === false
+                          ? "לא זוהתה פעילות"
+                          : "נוכחות לא ידועה"}
+                    </span>
                     <ConversationStatusBadge status={c.status} />
+                    {c.client_context?.under_other_operator && (
+                      <span className="text-xs font-medium">קריאה בלבד</span>
+                    )}
                     {c.is_sla_risk && (
                       <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
                         בסיכון {c.sla_minutes_waiting} דק׳

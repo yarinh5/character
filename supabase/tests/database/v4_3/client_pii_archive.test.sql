@@ -43,6 +43,15 @@ UPDATE public.profiles
 SET display_name = 'V4-3-D1 client name', email = 'v4-3-d1-client@example.invalid', avatar_url = 'https://example.invalid/v4-3-d1-avatar.png'
 WHERE user_id = '00000000-0000-4000-8000-000000040102'::uuid;
 
+INSERT INTO storage.objects (id, bucket_id, name, owner_id, metadata)
+VALUES (
+  gen_random_uuid(),
+  'user-avatars',
+  '00000000-0000-4000-8000-000000040102/v4-3-d1-profile.webp',
+  '00000000-0000-4000-8000-000000040102',
+  jsonb_build_object('mimetype', 'image/webp', 'size', 1024)
+);
+
 UPDATE public.client_profiles
 SET age = 31,
     gender = 'other',
@@ -60,8 +69,8 @@ SET age = 31,
     preferred_distance_km = 25,
     content_preferences = '["synthetic"]'::jsonb,
     character_preferences = '["synthetic"]'::jsonb,
-    profile_image_url = 'https://example.invalid/v4-3-d1-profile.png',
-    profile_image_urls = ARRAY['https://example.invalid/v4-3-d1-profile.png']
+    profile_image_url = 'https://project.invalid/storage/v1/object/public/user-avatars/00000000-0000-4000-8000-000000040102/v4-3-d1-profile.webp',
+    profile_image_urls = ARRAY['https://project.invalid/storage/v1/object/public/user-avatars/00000000-0000-4000-8000-000000040102/v4-3-d1-profile.webp']
 WHERE user_id = '00000000-0000-4000-8000-000000040102'::uuid;
 
 INSERT INTO public.characters (id, name, is_active, is_visible, availability_status)

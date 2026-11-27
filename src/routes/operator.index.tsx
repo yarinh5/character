@@ -102,18 +102,16 @@ function OperatorDashboard() {
           : Promise.resolve({ data: [] as unknown[] }),
         operator
           ? supabase
-              .from("credit_transactions")
+              .from("operator_point_transactions")
               .select("amount")
-              .eq("user_id", operator.user_id)
-              .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
+              .eq("operator_id", operator.id)
               .gte("created_at", monthStartIso)
           : Promise.resolve({ data: [] }),
         operator
           ? supabase
-              .from("credit_transactions")
+              .from("operator_point_transactions")
               .select("amount")
-              .eq("user_id", operator.user_id)
-              .in("type", ["message_payout", "sticker_payout", "operator_message_payout"])
+              .eq("operator_id", operator.id)
               .gte("created_at", previousMonthStartIso)
               .lt("created_at", monthStartIso)
           : Promise.resolve({ data: [] }),
@@ -229,18 +227,24 @@ function OperatorDashboard() {
           filter: operator?.user_id ? `user_id=eq.${operator.user_id}` : undefined,
         },
         () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .on("postgres_changes", { event: "*", schema: "public", table: "credit_transactions" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .on("postgres_changes", { event: "*", schema: "public", table: "credit_wallets" }, () =>
-        qc.invalidateQueries({ queryKey: ["operator-stats"] }),
-      )
-      .subscribe();
+      );
+    if (operator?.id) {
+      ch.on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "operator_point_wallets",
+          filter: `operator_id=eq.${operator.id}`,
+        },
+        () => qc.invalidateQueries({ queryKey: ["operator-stats"] }),
+      );
+    }
+    ch.subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [qc, operator?.user_id]);
+  }, [qc, operator?.id, operator?.user_id]);
 
   const updateStatus = async (status: "available" | "busy" | "offline") => {
     if (!operator) return;
@@ -295,19 +299,15 @@ function OperatorDashboard() {
           <CardContent className="p-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <div className="text-sm font-medium">קרדיטים עובד</div>
+                <div className="text-sm font-medium">Operator Points</div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  יתרה זמינה והשוואת תשלומי קרדיטים חודשיים בפועל.
+                  יתרת נקודות פנימית והשוואה חודשית; אין לנקודות יחס כספי.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3 md:min-w-[250px]">
+                <QuickStat label="נקודות זמינות" value={stats?.walletBalance} loading={isLoading} />
                 <QuickStat
-                  label="קרדיטים זמינים"
-                  value={stats?.walletBalance}
-                  loading={isLoading}
-                />
-                <QuickStat
-                  label="קרדיטים מול חודש קודם"
+                  label="נקודות מול חודש קודם"
                   value={stats?.monthlyPointChange}
                   signed
                   loading={isLoading}
@@ -326,7 +326,7 @@ function OperatorDashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
-          label="קרדיטים זמינים"
+          label="נקודות זמינות"
           value={stats?.walletBalance}
           icon={Award}
           loading={isLoading}

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CharacterMediaDialog } from "@/components/admin/CharacterMediaDialog";
 
 type RpcReply = { data: unknown; error: unknown };
@@ -72,6 +72,7 @@ function mediaAsset(
     height: 512,
     id,
     ingest_status: "ready",
+    is_global: false,
     locked_derivative_error_code: null,
     locked_derivative_status: "ready",
     locked_derivatives_generated_at: "2026-01-01T00:00:00Z",
@@ -79,6 +80,14 @@ function mediaAsset(
     locked_price_credits: null,
     media_tag_id: mediaTagId,
     media_tag_name: mediaTagId === "tag-two" ? tagTwo.name : tagOne.name,
+    media_tags: [
+      {
+        character_id: "character-a",
+        id: mediaTagId,
+        name: mediaTagId === "tag-two" ? tagTwo.name : tagOne.name,
+      },
+    ],
+    character_ids: ["character-a"],
     paid_open_price_credits: null,
     preview_available: true,
     processing_attempts: 1,
@@ -155,7 +164,40 @@ beforeEach(() => {
   setDefaultReads();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 describe("admin character media read states", () => {
+  it("uploads through the configured gateway before processing the signed asset", async () => {
+    vi.stubEnv("VITE_SUPABASE_URL", "http://127.0.0.1:62021");
+    const put = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", put);
+    io.invoke.mockResolvedValueOnce({
+      data: {
+        asset_id: "new-asset",
+        upload_url:
+          "http://kong:8000/storage/v1/object/upload/sign/character-media/assets/new/source.webp?token=signed",
+      },
+      error: null,
+    });
+    io.invoke.mockResolvedValueOnce({ data: {}, error: null });
+    renderMedia();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("admin media file input not found");
+    const file = new File(["synthetic"], "photo.webp", { type: "image/webp" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(io.invoke).toHaveBeenCalledTimes(2));
+    expect(put).toHaveBeenCalledWith(
+      "http://127.0.0.1:62021/storage/v1/object/upload/sign/character-media/assets/new/source.webp?token=signed",
+      expect.objectContaining({ body: file, method: "PUT" }),
+    );
+    expect(io.invoke).toHaveBeenNthCalledWith(2, "process-character-media", {
+      body: { asset_id: "new-asset", mode: "standard" },
+    });
+  });
+
   it("shows initial loading without an empty state, then shows the true empty state", async () => {
     const assetsRead = deferred<RpcReply>();
     const tagsRead = deferred<RpcReply>();
@@ -383,5 +425,58 @@ describe("admin character media read states", () => {
         _asset_id: "asset-alpha",
       }),
     );
+  });
+
+  it("filters by every canonical tag assigned to an asset", async () => {
+    const multiTagged = mediaAsset("asset-multi", "Multi Tagged", "tag-one", {
+      media_tags: [
+        { character_id: "character-a", id: "tag-one", name: tagOne.name },
+        { character_id: "character-a", id: "tag-two", name: tagTwo.name },
+      ],
+    });
+    setDefaultReads([multiTagged], [tagOne, tagTwo]);
+    renderMedia();
+    await loadedAsset("Multi Tagged");
+    const tagFilter = screen.getByRole("combobox", { name: "סינון לפי תגית" });
+    fireEvent.keyDown(tagFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "תגית שתיים" }));
+    expect(screen.getByText("Multi Tagged")).toBeInTheDocument();
+  });
+
+  it("removes the current character and only its tags, while preserving the draft after refresh failure", async () => {
+    const otherTag = { character_id: "character-b", id: "tag-b", name: "תגית ב" };
+    const sharedAsset = mediaAsset("asset-shared", "Shared Asset", "tag-one", {
+      character_ids: ["character-a", "character-b"],
+      is_global: true,
+      media_tags: [{ character_id: "character-a", id: "tag-one", name: tagOne.name }, otherTag],
+    });
+    let assetReads = 0;
+    io.rpc.mockImplementation(async (name) => {
+      if (name === "get_admin_character_media_assets") {
+        assetReads += 1;
+        return assetReads === 1
+          ? { data: [sharedAsset], error: null }
+          : { data: null, error: { message: "refresh failed" } };
+      }
+      if (name === "get_admin_media_tags") return { data: [tagOne], error: null };
+      return { data: null, error: null };
+    });
+    renderMedia();
+    await loadedAsset("Shared Asset");
+    fireEvent.click(screen.getByRole("button", { name: "הסר מהדמות" }));
+
+    await waitFor(() =>
+      expect(io.rpc).toHaveBeenCalledWith("set_admin_media_asset_assignments", {
+        _asset_id: "asset-shared",
+        _character_ids: ["character-b"],
+        _is_global: true,
+        _media_tag_ids: ["tag-b"],
+      }),
+    );
+    expect(await screen.findByRole("alert", { name: "שגיאת טעינת מדיה" })).toHaveTextContent(
+      "עשויים להיות לא מעודכנים",
+    );
+    expect(screen.getByText("Shared Asset")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "הסר מהדמות" })).toBeEnabled();
   });
 });

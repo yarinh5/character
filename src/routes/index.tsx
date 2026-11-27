@@ -1,19 +1,35 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
-  MessageCircle, Sparkles, Users, Clock, Shield, Heart,
-  ArrowLeft, Check
+  MessageCircle,
+  Sparkles,
+  Users,
+  Clock,
+  Shield,
+  Heart,
+  ArrowLeft,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { useAuth, rolePath } from "@/lib/auth";
+import { SkipLink } from "@/components/common/SkipLink";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Character Chat OS — שיחות אישיות עם דמויות שמרגישות אמיתיות" },
-      { name: "description", content: "פלטפורמת SaaS לשיחות אישיות עם דמויות. בחרו דמות, התחילו שיחה והמשיכו את החוויה בכל זמן." },
+      {
+        name: "description",
+        content:
+          "פלטפורמת SaaS לשיחות אישיות עם דמויות. בחרו דמות, התחילו שיחה והמשיכו את החוויה בכל זמן.",
+      },
     ],
   }),
   component: LandingPage,
@@ -31,12 +47,15 @@ function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SkipLink />
       <Header />
-      <Hero />
-      <HowItWorks />
-      <Features />
-      <FAQ />
-      <CTA />
+      <main id="main-content" tabIndex={-1}>
+        <Hero />
+        <HowItWorks />
+        <Features />
+        <FAQ />
+        <CTA />
+      </main>
       <Footer />
     </div>
   );
@@ -46,17 +65,17 @@ function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-lg">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2">
+        <Link to="/" className="flex min-h-11 items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-primary shadow-soft">
             <MessageCircle className="h-5 w-5 text-primary-foreground" />
           </div>
           <span className="text-lg font-bold tracking-tight">Character Chat</span>
         </Link>
         <nav className="flex items-center gap-2">
-          <Button variant="ghost" asChild>
+          <Button variant="ghost" asChild className="min-h-11">
             <Link to="/login">התחברות</Link>
           </Button>
-          <Button asChild>
+          <Button asChild className="min-h-11">
             <Link to="/register">התחל עכשיו</Link>
           </Button>
         </nav>
@@ -88,13 +107,17 @@ function Hero() {
             בחרו דמות, התחילו שיחה, והמשיכו את החוויה בכל זמן.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button size="lg" asChild className="bg-gradient-primary shadow-elegant hover:shadow-glow transition-shadow text-base">
+            <Button
+              size="lg"
+              asChild
+              className="min-h-11 bg-gradient-primary shadow-elegant hover:shadow-glow transition-shadow text-base"
+            >
               <Link to="/register">
                 התחל עכשיו
                 <ArrowLeft className="mr-1 h-4 w-4" />
               </Link>
             </Button>
-            <Button size="lg" variant="outline" asChild className="text-base">
+            <Button size="lg" variant="outline" asChild className="min-h-11 text-base">
               <Link to="/login">התחברות לחשבון קיים</Link>
             </Button>
           </div>
@@ -120,7 +143,10 @@ function HowItWorks() {
         </div>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {steps.map((s) => (
-            <Card key={s.n} className="bg-gradient-card p-6 shadow-soft transition-all hover:shadow-elegant">
+            <Card
+              key={s.n}
+              className="bg-gradient-card p-6 shadow-soft transition-all hover:shadow-elegant"
+            >
               <div className="mb-3 text-2xl font-bold text-primary/40">{s.n}</div>
               <h3 className="text-lg font-semibold">{s.title}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{s.desc}</p>
@@ -164,7 +190,10 @@ function Features() {
 function FAQ() {
   const items = [
     { q: "האם השירות בתשלום?", a: "כרגע השירות בשלב בטא וניתן להתנסות בו ללא עלות." },
-    { q: "האם השיחות שלי פרטיות?", a: "כן. הגישה לשיחות שלך מוגבלת לך בלבד, וצוות התמיכה רואה רק שיחות שדווחו." },
+    {
+      q: "האם השיחות שלי פרטיות?",
+      a: "כן. הגישה לשיחות שלך מוגבלת לך בלבד, וצוות התמיכה רואה רק שיחות שדווחו.",
+    },
     { q: "מה גיל המינימום?", a: "השירות מיועד לבני 18 ומעלה." },
     { q: "האם אני יכול למחוק את החשבון שלי?", a: "כן, מתוך הגדרות הפרופיל." },
   ];
@@ -172,7 +201,9 @@ function FAQ() {
     <section className="py-20">
       <div className="container mx-auto px-4">
         <div className="mx-auto max-w-2xl">
-          <h2 className="mb-8 text-center text-3xl font-bold tracking-tight md:text-4xl">שאלות נפוצות</h2>
+          <h2 className="mb-8 text-center text-3xl font-bold tracking-tight md:text-4xl">
+            שאלות נפוצות
+          </h2>
           <Accordion type="single" collapsible className="rounded-2xl bg-card shadow-soft">
             {items.map((item, i) => (
               <AccordionItem key={i} value={`item-${i}`} className="px-6">
@@ -195,17 +226,19 @@ function CTA() {
           <h2 className="text-3xl font-bold tracking-tight text-primary-foreground md:text-4xl">
             מוכנים להתחיל?
           </h2>
-          <p className="mt-3 text-primary-foreground/80">
-            יצירת חשבון לוקחת פחות מדקה
-          </p>
+          <p className="mt-3 text-primary-foreground/80">יצירת חשבון לוקחת פחות מדקה</p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Button size="lg" variant="secondary" asChild>
+            <Button size="lg" variant="secondary" asChild className="min-h-11">
               <Link to="/register">צור חשבון בחינם</Link>
             </Button>
           </div>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-sm text-primary-foreground/80">
-            <span className="inline-flex items-center gap-1.5"><Check className="h-4 w-4" /> ללא כרטיס אשראי</span>
-            <span className="inline-flex items-center gap-1.5"><Check className="h-4 w-4" /> ביטול בכל עת</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Check className="h-4 w-4" /> ללא כרטיס אשראי
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Check className="h-4 w-4" /> ביטול בכל עת
+            </span>
           </div>
         </div>
       </div>
@@ -219,9 +252,15 @@ function Footer() {
       <div className="container mx-auto flex flex-col items-center justify-between gap-4 px-4 text-sm text-muted-foreground md:flex-row">
         <p>© {new Date().getFullYear()} Character Chat OS</p>
         <nav className="flex flex-wrap items-center gap-4">
-          <Link to="/terms" className="hover:text-foreground">תנאי שימוש</Link>
-          <Link to="/privacy" className="hover:text-foreground">מדיניות פרטיות</Link>
-          <Link to="/service" className="hover:text-foreground">הצהרת שירות</Link>
+          <Link to="/terms" className="inline-flex min-h-11 items-center hover:text-foreground">
+            תנאי שימוש
+          </Link>
+          <Link to="/privacy" className="inline-flex min-h-11 items-center hover:text-foreground">
+            מדיניות פרטיות
+          </Link>
+          <Link to="/service" className="inline-flex min-h-11 items-center hover:text-foreground">
+            הצהרת שירות
+          </Link>
         </nav>
       </div>
     </footer>

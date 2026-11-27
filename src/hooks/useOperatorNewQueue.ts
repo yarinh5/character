@@ -7,7 +7,7 @@ export type OperatorNewQueueItem = {
   conversation_id: string;
   character_id: string;
   status: string;
-  queue_state: "new" | "returned";
+  queue_state: "new" | "returned" | "assigned";
   client_display_name: string | null;
   character_name: string;
   character_avatar_url: string | null;
@@ -32,15 +32,23 @@ const EMPTY_SLA_SUMMARY: OperatorNewSlaSummary = {
   oldest_wait_seconds: 0,
 };
 
-type ClaimResult =
-  | { ok: true; conversationId: string }
-  | { ok: false; errorMessage: string };
+type ClaimResult = { ok: true; conversationId: string } | { ok: false; errorMessage: string };
 
 export function operatorNewQueueClaimError(message: string) {
   if (message.includes("conversation_already_claimed")) return "השיחה כבר נלקחה על ידי עובד אחר.";
-  if (message.includes("conversation_locked_by_other_operator")) return "השיחה נעולה כרגע על ידי עובד אחר.";
-  if (message.includes("operator_not_assigned_to_character")) return "אין לך שיוך לדמות של השיחה הזו.";
+  if (message.includes("conversation_locked_by_other_operator"))
+    return "השיחה נעולה כרגע על ידי עובד אחר.";
+  if (message.includes("operator_not_assigned_to_character"))
+    return "אין לך שיוך לדמות של השיחה הזו.";
   if (message.includes("conversation_closed")) return "השיחה כבר נסגרה.";
+  if (message.includes("operator_capacity_reached")) return "הגעת למכסת 5 טיפולים פעילים.";
+  if (message.includes("operator_not_connected")) return "יש להתחבר ולהופיע כזמין לפני לקיחת שיחה.";
+  if (
+    message.includes("handling_cycle_expired") ||
+    message.includes("conversation_claim_state_expired")
+  ) {
+    return "תוקף הטיפול הסתיים. הרשימה תתרענן.";
+  }
   return "לא ניתן לקחת את השיחה כרגע. נסה שוב.";
 }
 
@@ -87,9 +95,21 @@ export function useOperatorNewQueue(operatorId?: string | null) {
 
     const channel = supabase
       .channel(`operator-new-sla-${operatorId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_work_items" }, refreshQueue)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_handling_cycles" }, refreshQueue)
-      .on("postgres_changes", { event: "*", schema: "public", table: "operator_client_blocks" }, refreshQueue)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_work_items" },
+        refreshQueue,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_handling_cycles" },
+        refreshQueue,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "operator_client_blocks" },
+        refreshQueue,
+      )
       .subscribe();
 
     return () => {

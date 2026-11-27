@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -54,12 +54,24 @@ function AuditWorkspace({ adminId }: { adminId: string }) {
   const [action, setAction] = useState("all");
   const [search, setSearch] = useState("");
   const listFn = useServerFn(adminListAuditLogs);
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ["audit-logs", adminId, action],
-    queryFn: () => listFn({ data: { limit: 200, ...(action === "all" ? {} : { action }) } }),
+    initialPageParam: null as { createdAt: string; id: string } | null,
+    queryFn: ({ pageParam }) =>
+      listFn({
+        data: {
+          limit: 200,
+          ...(action === "all" ? {} : { action }),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+      }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
   const { data, isLoading } = query;
-  const filtered = (data ?? []).filter((log) =>
+  const logs = Array.from(
+    new Map((data?.pages.flatMap((page) => page.items) ?? []).map((log) => [log.id, log])).values(),
+  );
+  const filtered = logs.filter((log) =>
     [
       log.action,
       ACTION_LABEL[log.action],
@@ -74,8 +86,8 @@ function AuditWorkspace({ adminId }: { adminId: string }) {
     <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-4" dir="rtl">
       <PageHeader title="יומן פעולות" description="פעולות ניהול לפי סדר כרונולוגי" />
       <p className="text-sm text-muted-foreground">
-        מוצגות עד 200 הרשומות האחרונות לפי מסנן הפעולה. החיפוש מקומי ברשומות שנטענו בלבד; היעדר
-        תוצאה אינו מעיד על היעדר אירוע בהיסטוריה.
+        היומן נטען בעמודים לפי מסנן הפעולה. החיפוש מקומי ברשומות שנטענו בלבד; היעדר תוצאה אינו מעיד
+        על היעדר אירוע בהיסטוריה שטרם נטענה.
       </p>
       <Input
         aria-label="חיפוש ביומן שנטען"
@@ -106,17 +118,21 @@ function AuditWorkspace({ adminId }: { adminId: string }) {
         איפוס מסנני יומן
       </Button>
       <Button variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}>
-        {query.isError ? "נסה לטעון יומן שוב" : "רענון יומן"}
+        {query.isError && !query.isFetchNextPageError ? "נסה לטעון יומן שוב" : "רענון יומן"}
       </Button>
-      {query.isFetching && data !== undefined && <p role="status">מרענן יומן…</p>}
-      {query.isError && (
+      {query.isRefetching && !query.isFetchingNextPage && <p role="status">מרענן יומן…</p>}
+      {query.isError && !query.isFetchNextPageError && (
         <p role="alert">
           {data === undefined ? "טעינת היומן נכשלה." : "רענון היומן נכשל. המידע השמור לא עודכן."}
         </p>
       )}
+      {query.isFetchNextPageError && (
+        <p role="alert">טעינת הרשומות הנוספות נכשלה. הרשומות שכבר נטענו נשמרו.</p>
+      )}
       {data !== undefined && (
         <p>
-          {filtered.length} מתוך {data.length} רשומות שנטענו (מגבלה: 200)
+          {filtered.length} מתוך {logs.length} רשומות שנטענו
+          {query.hasNextPage ? "; קיימות רשומות נוספות" : ""}
         </p>
       )}
       <Card>
@@ -127,12 +143,12 @@ function AuditWorkspace({ adminId }: { adminId: string }) {
               <Skeleton className="h-10" />
             </div>
           )}
-          {data !== undefined && data.length === 0 && (
+          {data !== undefined && logs.length === 0 && (
             <div className="p-12 text-center text-muted-foreground">
               לא הוחזרו אירועים בקריאה זו.
             </div>
           )}
-          {data !== undefined && data.length > 0 && filtered.length === 0 && (
+          {data !== undefined && logs.length > 0 && filtered.length === 0 && (
             <p>אין תוצאות ברשומות שנטענו.</p>
           )}
           {filtered.length > 0 && (
@@ -185,6 +201,19 @@ function AuditWorkspace({ adminId }: { adminId: string }) {
           )}
         </CardContent>
       </Card>
+      {query.hasNextPage && (
+        <Button
+          variant="outline"
+          disabled={query.isFetchingNextPage}
+          onClick={() => void query.fetchNextPage()}
+        >
+          {query.isFetchingNextPage
+            ? "טוען רשומות נוספות…"
+            : query.isFetchNextPageError
+              ? "נסה לטעון רשומות נוספות שוב"
+              : "טעינת רשומות נוספות"}
+        </Button>
+      )}
     </div>
   );
 }

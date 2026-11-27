@@ -34,6 +34,7 @@ const emails = {
   operator: "v4-3-d1-http-operator@example.invalid",
 };
 const archiveReason = "V4-3-D1 archive reason";
+const profileImageBucket = "user-avatars";
 
 type ArchiveResult = { archived: boolean; archived_at: string; idempotent_replay: boolean };
 
@@ -45,6 +46,7 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
   let nonAdminClient: HttpClient;
   let operatorClient: HttpClient;
   let archivedAt: string | undefined;
+  let profileImagePath: string | undefined;
 
   const trackUser = (email: string) => (user: { id: string }) => users.push({ id: user.id, email });
   const userId = (email: string) => users.find((user) => user.email === email)?.id;
@@ -71,6 +73,23 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
       setRole(admin, operatorUser.user.id, "operator"),
     ]);
     await updateProfile(admin, clientUser.user.id, emails.client, "V4-3-D1 HTTP client");
+    clientSession = await signInSyntheticUser(emails.client, clientUser.password);
+    const objectPath = `${clientUser.user.id}/v4-3-d1-profile.webp`;
+    const syntheticWebp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x04, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    ]);
+    const upload = await clientSession.storage
+      .from(profileImageBucket)
+      .upload(objectPath, syntheticWebp, {
+        contentType: "image/webp",
+        upsert: false,
+      });
+    if (upload.error) throw upload.error;
+    profileImagePath = objectPath;
+    const { data: publicImage } = clientSession.storage
+      .from(profileImageBucket)
+      .getPublicUrl(objectPath);
+    const profileImageUrl = publicImage.publicUrl;
     await seedOperator(admin, ids.operator, operatorUser.user.id, "V4-3-D1 HTTP operator");
     await seedCharacter(admin, ids.character, "V4-3-D1 HTTP character");
     await seedConversation(admin, ids.conversation, clientUser.user.id, ids.character);
@@ -99,8 +118,8 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
         last_name: "Client",
         content_preferences: ["synthetic"],
         character_preferences: ["synthetic"],
-        profile_image_url: "https://example.invalid/v4-3-d1-profile.png",
-        profile_image_urls: ["https://example.invalid/v4-3-d1-profile.png"],
+        profile_image_url: profileImageUrl,
+        profile_image_urls: [profileImageUrl],
       },
       "user_id",
     );
@@ -137,7 +156,6 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
     });
 
     adminClient = await signInSyntheticUser(emails.admin, adminUser.password);
-    clientSession = await signInSyntheticUser(emails.client, clientUser.password);
     nonAdminClient = await signInSyntheticUser(emails.nonAdminClient, nonAdminUser.password);
     operatorClient = await signInSyntheticUser(emails.operator, operatorUser.password);
   });
@@ -189,6 +207,14 @@ suite("V4-3-D1 HTTP client PII archive authorization", () => {
       {
         label: "archive audit row",
         run: async () => deleteByEq(admin, "audit_logs", "entity_id", targetUserId ?? ""),
+      },
+      {
+        label: "profile image Storage object",
+        run: async () => {
+          if (!profileImagePath) return;
+          const { error } = await admin.storage.from(profileImageBucket).remove([profileImagePath]);
+          if (error) throw error;
+        },
       },
       {
         label: "notifications",

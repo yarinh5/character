@@ -1,17 +1,52 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const projectId = "qmgkmsarzfjnqltljkjl";
+import {
+  DockerInspectQueryError,
+  PortBindingContractError,
+  PortBindingEvidenceError,
+  captureDockerInspectForPortValidation,
+  validatePublishedPortBindings,
+} from "./local-docker-port-contract.mjs";
+
+const defaultProjectId = "qmgkmsarzfjnqltljkjl";
+export function resolveLocalTestBinding(environment) {
+  const requested = environment.PRODUCT_TEST_PROJECT_ID;
+  if (requested === undefined && environment.PRODUCT_TEST_ENGINE_ID === undefined) {
+    return { projectId: defaultProjectId, engineId: null };
+  }
+  if (
+    typeof requested !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{2,62}$/.test(requested) ||
+    requested === defaultProjectId ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(environment.PRODUCT_TEST_ENGINE_ID ?? "")
+  ) {
+    throw new Error("Refusing local database tests: isolated project and Engine pins are required");
+  }
+  return { projectId: requested, engineId: environment.PRODUCT_TEST_ENGINE_ID };
+}
+
+const binding = resolveLocalTestBinding(process.env);
+const projectId = binding.projectId;
 const dbContainerName = `supabase_db_${projectId}`;
 const apiContainerName = `supabase_kong_${projectId}`;
 const runnerDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(runnerDirectory, "..", "..");
 const configPath = join(repositoryRoot, "supabase", "config.toml");
 const databaseTestsDirectory = join(runnerDirectory, "database", "v4_3");
+const pgTapEvidenceInvocationId = randomUUID();
+let pgTapEvidenceSequence = 0;
 
 function fail(message) {
   throw new Error(`Refusing local database tests: ${message}`);
@@ -22,6 +57,14 @@ export class LocalDbTargetError extends Error {
     super(`Refusing local database tests: ${message}`);
     this.code = code;
     this.retryable = retryable;
+  }
+}
+
+export class PgTapProcessError extends Error {}
+export class PgTapEvidenceError extends Error {
+  constructor(message, { cause, primaryFailure = null } = {}) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.primaryFailure = primaryFailure;
   }
 }
 
@@ -55,9 +98,9 @@ function readConfiguredPort(configText, section) {
   fail(`missing ${section}.port in supabase/config.toml`);
 }
 
-function readConfiguredProjectId(configText) {
+function readConfiguredProjectId(configText, expectedProjectId) {
   const projectMatch = configText.match(/^project_id\s*=\s*"([^"]+)"\s*$/m);
-  if (!projectMatch || projectMatch[1] !== projectId) {
+  if (!projectMatch || projectMatch[1] !== expectedProjectId) {
     fail("supabase/config.toml project identity does not match this repository");
   }
   return projectMatch[1];
@@ -80,22 +123,6 @@ function parseLoopbackUrl(value, label) {
   return port;
 }
 
-function mappedHostPort(container, containerPort) {
-  const bindings = container.NetworkSettings?.Ports?.[containerPort];
-  if (!Array.isArray(bindings) || bindings.length !== 1) return null;
-  const [binding] = bindings;
-  if (
-    !binding ||
-    (binding.HostIp !== "127.0.0.1" &&
-      binding.HostIp !== "::1" &&
-      binding.HostIp !== "0.0.0.0" &&
-      binding.HostIp !== "::") ||
-    !/^\d+$/.test(binding.HostPort)
-  )
-    return null;
-  return Number(binding.HostPort);
-}
-
 function validateContainer(
   container,
   expectedName,
@@ -103,6 +130,7 @@ function validateContainer(
   containerPort,
   healthRequired,
   targetKind,
+  selectedBinding,
 ) {
   const retryableDbState = targetKind === "db";
   if (!container || container.Name !== `/${expectedName}`) {
@@ -112,6 +140,12 @@ function validateContainer(
   }
   if (!/^[a-f0-9]{64}$/i.test(container.Id ?? "")) {
     targetFailure(`${targetKind}_id`, `${expectedName} container ID is invalid`);
+  }
+  if (
+    selectedBinding.engineId !== null &&
+    container.Config?.Labels?.["com.supabase.cli.project"] !== selectedBinding.projectId
+  ) {
+    targetFailure(`${targetKind}_project_label`, `${expectedName} project label does not match`);
   }
   if (container.State?.Running !== true) {
     targetFailure(`${targetKind}_running`, `${expectedName} is not running`, {
@@ -123,7 +157,14 @@ function validateContainer(
       retryable: retryableDbState,
     });
   }
-  if (mappedHostPort(container, containerPort) !== expectedPort) {
+  try {
+    validatePublishedPortBindings(
+      container.NetworkSettings?.Ports?.[containerPort],
+      expectedPort,
+      `${expectedName} ${containerPort}`,
+    );
+  } catch (error) {
+    if (!(error instanceof PortBindingContractError)) throw error;
     targetFailure(
       `${targetKind}_mapping`,
       `${expectedName} port mapping does not match supabase/config.toml`,
@@ -132,9 +173,19 @@ function validateContainer(
   return { id: container.Id, name: expectedName };
 }
 
-export function validateLocalDbTarget({ configBytes, status, dbContainer, apiContainer }) {
+export function validateLocalDbTarget({
+  configBytes,
+  status,
+  dbContainer,
+  apiContainer,
+  binding: selectedBinding = binding,
+  engineId = null,
+}) {
   const configText = Buffer.isBuffer(configBytes) ? configBytes.toString("utf8") : configBytes;
-  const configuredProjectId = readConfiguredProjectId(configText);
+  if (selectedBinding.engineId !== null && engineId !== selectedBinding.engineId) {
+    targetFailure("engine_identity", "Docker Engine does not match the isolated target pin");
+  }
+  const configuredProjectId = readConfiguredProjectId(configText, selectedBinding.projectId);
   const apiPort = readConfiguredPort(configText, "api");
   const dbPort = readConfiguredPort(configText, "db");
   if (
@@ -144,11 +195,28 @@ export function validateLocalDbTarget({ configBytes, status, dbContainer, apiCon
     fail("Supabase status ports do not match supabase/config.toml");
   return {
     projectId: configuredProjectId,
+    engineId,
     configHash: createHash("sha256").update(configBytes).digest("hex"),
     apiPort,
     dbPort,
-    api: validateContainer(apiContainer, apiContainerName, apiPort, "8000/tcp", false, "api"),
-    db: validateContainer(dbContainer, dbContainerName, dbPort, "5432/tcp", true, "db"),
+    api: validateContainer(
+      apiContainer,
+      `supabase_kong_${configuredProjectId}`,
+      apiPort,
+      "8000/tcp",
+      false,
+      "api",
+      selectedBinding,
+    ),
+    db: validateContainer(
+      dbContainer,
+      `supabase_db_${configuredProjectId}`,
+      dbPort,
+      "5432/tcp",
+      true,
+      "db",
+      selectedBinding,
+    ),
   };
 }
 
@@ -160,10 +228,21 @@ export function assertValidatedTargetIdentity(target, currentTarget) {
   }
 }
 
-function inspectContainer(name, targetKind) {
+function inspectContainer(name, targetKind, expectedHostPort, internalPort) {
   try {
-    return JSON.parse(command("docker", ["inspect", name]))[0];
-  } catch {
+    return captureDockerInspectForPortValidation({
+      configPath,
+      cwd: repositoryRoot,
+      evidencePrefix: "db-local",
+      evidenceRoot: process.env.RUN_EVIDENCE,
+      expectedHostPort,
+      internalPort,
+      name,
+      targetKind,
+    });
+  } catch (error) {
+    if (error instanceof PortBindingEvidenceError) throw error;
+    if (!(error instanceof DockerInspectQueryError)) throw error;
     targetFailure(`${targetKind}_unavailable`, `${name} is unavailable`, {
       retryable: targetKind === "db",
     });
@@ -190,11 +269,17 @@ function readLocalStatus() {
 
 export function discoverLocalDbTarget() {
   const configBytes = readFileSync(configPath);
+  const configText = configBytes.toString("utf8");
+  const apiPort = readConfiguredPort(configText, "api");
+  const dbPort = readConfiguredPort(configText, "db");
   return validateLocalDbTarget({
     configBytes,
+    binding,
+    engineId:
+      binding.engineId === null ? null : command("docker", ["info", "--format", "{{.ID}}"]).trim(),
     status: readLocalStatus(),
-    dbContainer: inspectContainer(dbContainerName, "db"),
-    apiContainer: inspectContainer(apiContainerName, "api"),
+    dbContainer: inspectContainer(dbContainerName, "db", dbPort, "5432/tcp"),
+    apiContainer: inspectContainer(apiContainerName, "api", apiPort, "8000/tcp"),
   });
 }
 
@@ -319,6 +404,84 @@ export function formatDbSuiteFailure(testFile, error) {
   return `pgTAP assertions failed in ${basename(testFile)}: ${sanitizeTapReason(error)}`;
 }
 
+function preparePgTapEvidencePath(evidenceRoot, testFile) {
+  if (typeof evidenceRoot !== "string" || evidenceRoot.length === 0) {
+    throw new PgTapEvidenceError("RUN_EVIDENCE is required for pgTAP evidence");
+  }
+  const root = lstatSync(evidenceRoot);
+  if (!root.isDirectory() || root.isSymbolicLink()) {
+    throw new PgTapEvidenceError("RUN_EVIDENCE is not a private directory");
+  }
+  const directory = join(evidenceRoot, "db-tap");
+  if (!existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
+  const directoryState = lstatSync(directory);
+  if (!directoryState.isDirectory() || directoryState.isSymbolicLink()) {
+    throw new PgTapEvidenceError("pgTAP evidence path is not a directory");
+  }
+  const fileName = basename(testFile);
+  if (!/^[A-Za-z0-9._-]+\.test\.sql$/.test(fileName)) {
+    throw new PgTapEvidenceError("pgTAP test filename is invalid for evidence");
+  }
+  pgTapEvidenceSequence += 1;
+  const sequence = String(pgTapEvidenceSequence).padStart(4, "0");
+  return join(directory, `db-tap-${pgTapEvidenceInvocationId}-${sequence}-${fileName}.json`);
+}
+
+function normalizePgTapProcessResult(result) {
+  const text = (value) => {
+    if (typeof value === "string") return value;
+    if (Buffer.isBuffer(value)) return value.toString("utf8");
+    return "";
+  };
+  return {
+    status: Number.isInteger(result?.status) ? result.status : null,
+    signal: typeof result?.signal === "string" ? result.signal : null,
+    stdout: text(result?.stdout),
+    stderr: text(result?.stderr),
+    error: result?.error,
+  };
+}
+
+export function preservePgTapProcessEvidence({
+  evidenceRoot,
+  result,
+  testFile,
+  writeEvidence = writeFileSync,
+}) {
+  let evidencePath;
+  try {
+    evidencePath = preparePgTapEvidencePath(evidenceRoot, testFile);
+  } catch (error) {
+    if (error instanceof PgTapEvidenceError) throw error;
+    throw new PgTapEvidenceError("failed to prepare pgTAP evidence", { cause: error });
+  }
+  const normalized = normalizePgTapProcessResult(result);
+  const evidence = {
+    schemaVersion: 1,
+    invocationId: pgTapEvidenceInvocationId,
+    sequence: pgTapEvidenceSequence,
+    testFile: basename(testFile),
+    process: {
+      exitCode: normalized.status,
+      signal: normalized.signal,
+      timedOut: normalized.error?.code === "ETIMEDOUT",
+      errorCode: typeof normalized.error?.code === "string" ? normalized.error.code : null,
+      stdout: normalized.stdout,
+      stderr: normalized.stderr,
+    },
+  };
+  try {
+    writeEvidence(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    throw new PgTapEvidenceError("failed to preserve pgTAP evidence", { cause: error });
+  }
+  return evidencePath;
+}
+
 export function validateTapOutput(output) {
   const lines = String(output)
     .split(/\r?\n/)
@@ -366,33 +529,86 @@ export function validateTapOutput(output) {
   }
   return expected;
 }
+
+export function executePgTapFile({
+  evidenceRoot,
+  path,
+  runner = spawnSync,
+  target,
+  testFile,
+  writeEvidence = writeFileSync,
+}) {
+  const args = [
+    "exec",
+    target.db.id,
+    "psql",
+    "-X",
+    "-qAt",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-f",
+    path,
+  ];
+  const options = {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  let result;
+  try {
+    result = runner("docker", args, options);
+  } catch (error) {
+    result = { status: null, signal: null, stdout: "", stderr: "", error };
+  }
+  const normalized = normalizePgTapProcessResult(result);
+  let primaryFailure =
+    normalized.status !== 0 || normalized.signal !== null || normalized.error
+      ? new PgTapProcessError(`pgTAP SQL execution failed in ${basename(testFile)}.`)
+      : null;
+  let evidenceFailure;
+  try {
+    preservePgTapProcessEvidence({ evidenceRoot, result: normalized, testFile, writeEvidence });
+  } catch (error) {
+    evidenceFailure = error;
+  }
+  if (evidenceFailure) {
+    if (!primaryFailure) {
+      try {
+        validateTapOutput(normalized.stdout);
+      } catch (error) {
+        primaryFailure = new Error(formatDbSuiteFailure(testFile, error), { cause: error });
+      }
+    }
+    throw new PgTapEvidenceError(
+      primaryFailure
+        ? `${primaryFailure.message} pgTAP evidence preservation also failed.`
+        : `pgTAP evidence preservation failed in ${basename(testFile)}.`,
+      { cause: evidenceFailure, primaryFailure },
+    );
+  }
+  if (primaryFailure) throw primaryFailure;
+  try {
+    return validateTapOutput(normalized.stdout);
+  } catch (error) {
+    throw new Error(formatDbSuiteFailure(testFile, error), { cause: error });
+  }
+}
+
 function executePgTap(target, temporaryDirectory, testFiles) {
   let assertionCount = 0;
   for (const testFile of testFiles) {
     const path = `${temporaryDirectory}/${basename(testFile)}`;
-    let output;
-    try {
-      output = dockerExec(target, [
-        "psql",
-        "-X",
-        "-qAt",
-        "-U",
-        "postgres",
-        "-d",
-        "postgres",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-f",
-        path,
-      ]);
-    } catch (error) {
-      throw new Error(`pgTAP SQL execution failed in ${basename(testFile)}.`, { cause: error });
-    }
-    try {
-      assertionCount += validateTapOutput(output);
-    } catch (error) {
-      throw new Error(formatDbSuiteFailure(testFile, error), { cause: error });
-    }
+    assertionCount += executePgTapFile({
+      evidenceRoot: process.env.RUN_EVIDENCE,
+      path,
+      target,
+      testFile,
+    });
   }
   return assertionCount;
 }

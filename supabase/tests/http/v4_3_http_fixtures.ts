@@ -16,6 +16,44 @@ const localUrl = process.env.SUPABASE_LOCAL_URL ?? "";
 const anonKey = process.env.SUPABASE_LOCAL_ANON_KEY ?? "";
 const serviceRoleKey = process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY ?? "";
 
+export function verifiedLocalFixtureDbContainer(
+  runDocker: (args: string[]) => string = (args) =>
+    execFileSync("docker", args, { encoding: "utf8", windowsHide: true }),
+): string {
+  const id = process.env.SUPABASE_LOCAL_DB_CONTAINER ?? "";
+  const isolatedProject = process.env.PRODUCT_TEST_PROJECT_ID;
+  const isolatedEngine = process.env.PRODUCT_TEST_ENGINE_ID;
+  const project =
+    isolatedProject ??
+    process.env.PRODUCT_PROJECT_ID ??
+    process.env.SUPABASE_LOCAL_PROJECT_ID ??
+    "";
+  const engine = isolatedEngine ?? process.env.PRODUCT_EXPECTED_ENGINE_ID;
+  if (!/^[a-f0-9]{64}$/i.test(id) || !/^[a-z0-9][a-z0-9-]{2,62}$/.test(project)) {
+    throw new Error("local fixture DB identity is missing or invalid");
+  }
+  if (
+    (isolatedProject === undefined) !== (isolatedEngine === undefined) ||
+    (isolatedProject !== undefined && isolatedProject === "qmgkmsarzfjnqltljkjl")
+  ) {
+    throw new Error("local fixture requires paired non-QA project and Engine pins");
+  }
+  if (engine) {
+    const actual = runDocker(["info", "--format", "{{.ID}}"]).trim();
+    if (actual !== engine) throw new Error("local fixture Engine identity changed");
+  }
+  const [info] = JSON.parse(runDocker(["inspect", id]));
+  if (
+    info?.Id !== id ||
+    info.Name !== `/supabase_db_${project}` ||
+    info.Config?.Labels?.["com.supabase.cli.project"] !== project ||
+    info.State?.Running !== true
+  ) {
+    throw new Error("local fixture DB container does not match the admitted project");
+  }
+  return id;
+}
+
 export function createAnonymousClient(): HttpClient {
   return createClient(localUrl, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
@@ -299,17 +337,7 @@ export async function assertNoFixtureEvents(client: HttpClient, ownedTokens: str
 
 export async function cleanupPrivateStickerAttempts(keys: string[]) {
   if (keys.length === 0) return;
-  const db = execFileSync(
-    "docker",
-    ["ps", "--filter", "name=supabase_db_qmgkmsarzfjnqltljkjl", "--format", "{{.Names}}"],
-    {
-      encoding: "utf8",
-      windowsHide: true,
-    },
-  )
-    .trim()
-    .split(/\r?\n/)[0];
-  if (!db) throw new Error("local fixture cleanup could not find the target DB container");
+  const db = verifiedLocalFixtureDbContainer();
   const literals = keys.map((key) => `'${key.replaceAll("'", "''")}'`).join(", ");
   execFileSync(
     "docker",
@@ -335,14 +363,7 @@ export async function readLocalPrivateStickerAttemptCount(actorUserIds: string[]
   if (!actorUserIds.every((value) => uuidPattern.test(value))) {
     throw new Error("local sticker-attempt count received a non-UUID actor identifier");
   }
-  const db = execFileSync(
-    "docker",
-    ["ps", "--filter", "name=supabase_db_qmgkmsarzfjnqltljkjl", "--format", "{{.Names}}"],
-    { encoding: "utf8", windowsHide: true },
-  )
-    .trim()
-    .split(/\r?\n/)[0];
-  if (!db) throw new Error("local fixture inspection could not find the target DB container");
+  const db = verifiedLocalFixtureDbContainer();
   const predicate =
     actorUserIds.length === 0
       ? ""
@@ -376,14 +397,7 @@ export async function cleanupPrivateMediaOpenState(attachmentIds: string[], clie
   if (![...attachmentIds, ...clientIds].every((value) => uuidPattern.test(value))) {
     throw new Error("local media cleanup received a non-UUID identifier");
   }
-  const db = execFileSync(
-    "docker",
-    ["ps", "--filter", "name=supabase_db_qmgkmsarzfjnqltljkjl", "--format", "{{.Names}}"],
-    { encoding: "utf8", windowsHide: true },
-  )
-    .trim()
-    .split(/\r?\n/)[0];
-  if (!db) throw new Error("local media cleanup could not find the target DB container");
+  const db = verifiedLocalFixtureDbContainer();
   const attachmentLiterals = attachmentIds.map((value) => `'${value}'::uuid`).join(", ");
   const clientLiterals = clientIds.map((value) => `'${value}'::uuid`).join(", ");
   const sessionPredicates = [

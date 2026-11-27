@@ -4,7 +4,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { useSwipeGesture } from "@/hooks/useSwipeGesture";
 import { DiscoveryActionBar } from "@/components/discovery/DiscoveryActionBar";
 
-type DiscoveryCharacter = Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
+type DiscoveryCharacter =
+  Database["public"]["Functions"]["get_discovery_characters"]["Returns"][number];
 
 type DiscoveryCardProps = {
   character: DiscoveryCharacter;
@@ -16,6 +17,7 @@ type DiscoveryCardProps = {
   startingChat: boolean;
   onPass: () => void;
   onLike: () => void;
+  onRemoveLike: () => void;
   onFavorite: () => void;
   onStartChat: () => void;
   onViewProfile: () => void;
@@ -31,6 +33,7 @@ export function DiscoveryCard({
   startingChat,
   onPass,
   onLike,
+  onRemoveLike,
   onFavorite,
   onStartChat,
   onViewProfile,
@@ -53,7 +56,12 @@ export function DiscoveryCard({
     >
       <div className="relative aspect-[4/3] bg-muted">
         {character.avatar_url ? (
-          <img src={character.avatar_url} alt={character.name} className="h-full w-full object-cover" draggable={false} />
+          <img
+            src={character.avatar_url}
+            alt={character.name}
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-5xl font-bold text-muted-foreground">
             {character.name[0]}
@@ -94,15 +102,22 @@ export function DiscoveryCard({
             <h2 ref={headingRef} tabIndex={-1} className="text-xl font-semibold outline-none">
               {character.name}
             </h2>
-            {character.fictional_age && <span className="text-sm text-muted-foreground">גיל {character.fictional_age}</span>}
+            {character.fictional_age && (
+              <span className="text-sm text-muted-foreground">גיל {character.fictional_age}</span>
+            )}
           </div>
           {character.category && <p className="text-sm text-primary">{character.category}</p>}
         </div>
-        {character.short_description && <p className="text-sm leading-6 text-muted-foreground">{character.short_description}</p>}
+        {character.short_description && (
+          <p className="text-sm leading-6 text-muted-foreground">{character.short_description}</p>
+        )}
         {character.interests.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {character.interests.slice(0, 3).map((interest) => (
-              <span key={interest} className="rounded-full bg-accent px-2 py-1 text-xs text-accent-foreground">
+              <span
+                key={interest}
+                className="rounded-full bg-accent px-2 py-1 text-xs text-accent-foreground"
+              >
                 {interest}
               </span>
             ))}
@@ -116,6 +131,7 @@ export function DiscoveryCard({
           startingChat={startingChat}
           onPass={onPass}
           onLike={onLike}
+          onRemoveLike={onRemoveLike}
           onFavorite={onFavorite}
           onStartChat={onStartChat}
           onViewProfile={onViewProfile}

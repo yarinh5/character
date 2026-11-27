@@ -65,6 +65,47 @@ beforeEach(() => {
 });
 
 describe("AvatarUpload lifecycle contract", () => {
+  it("names the crop controls for assistive technology", async () => {
+    const { container } = render(
+      <AvatarUpload bucket="user-avatars" folder="user-a" value={null} onChange={vi.fn()} />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["image"], "avatar.png", { type: "image/png" })] },
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "חיתוך תמונת פרופיל" });
+    expect(dialog).toHaveAccessibleDescription();
+    expect(screen.getByRole("slider", { name: "זום" })).toBeInTheDocument();
+  });
+
+  it.each(["Escape", "Cancel"])(
+    "returns focus to the file chooser button on %s",
+    async (dismissal) => {
+      const onChange = vi.fn();
+      const { container } = render(
+        <AvatarUpload bucket="user-avatars" folder="user-a" value={null} onChange={onChange} />,
+      );
+      const opener = screen.getByRole("button", { name: "העלה תמונה" });
+      opener.focus();
+      fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [new File(["image"], "avatar.png", { type: "image/png" })] },
+      });
+
+      const dialog = await screen.findByRole("dialog", { name: "חיתוך תמונת פרופיל" });
+      if (dismissal === "Escape") {
+        fireEvent.keyDown(dialog, { key: "Escape" });
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "ביטול" }));
+      }
+
+      await waitFor(() => expect(opener).toHaveFocus());
+      expect(dialog).not.toBeInTheDocument();
+      expect(io.upload).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+
   it("preserves the existing user-avatar upload and crop behavior by default", async () => {
     const onChange = vi.fn();
     const { container } = render(

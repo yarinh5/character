@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   LocalDbTargetError,
+  PgTapEvidenceError,
+  PgTapProcessError,
   assertValidatedTargetIdentity,
+  executePgTapFile,
   formatDbSuiteFailure,
+  preservePgTapProcessEvidence,
+  resolveLocalTestBinding,
   runValidatedDbSuite,
   validateLocalDbTarget,
   validateTapOutput,
@@ -26,6 +35,10 @@ const targetInput = (overrides = {}) => ({
   dbContainer: container(`supabase_db_${projectId}`, "a", 61422, "5432/tcp", "healthy"),
   apiContainer: container(`supabase_kong_${projectId}`, "b", 61421, "8000/tcp"),
   ...overrides,
+});
+const withBindings = (value, containerPort, bindings) => ({
+  ...value,
+  NetworkSettings: { Ports: { [containerPort]: bindings } },
 });
 const target = (id = "a") =>
   validateLocalDbTarget(
@@ -89,10 +102,112 @@ function suiteOperations(stableTarget, overrides = {}) {
 }
 
 const expectedId = "a".repeat(64);
+const responsibilityFixtureSql = readFileSync(
+  new URL("./database/v4_3/active_new_responsibility_send.test.sql", import.meta.url),
+  "utf8",
+);
+const activeConversationFixture = responsibilityFixtureSql.match(
+  /WITH active_conversation_clock AS \([\s\S]*?INSERT INTO public\.conversation_work_items/,
+);
+assert.ok(activeConversationFixture, "active-cycle fixture must define a shared server clock");
+assert.match(
+  activeConversationFixture[0],
+  /SELECT clock_timestamp\(\) AS activity_at/,
+  "active-cycle fixture must use the PostgreSQL server clock",
+);
+assert.match(
+  activeConversationFixture[0],
+  /activity_at,\s*activity_at \+ interval '180 seconds'/,
+  "active-cycle fixture must derive its expiry from the same anchor by exactly 180 seconds",
+);
 const accepted = target();
 assert.equal(accepted.apiPort, 61421);
 assert.equal(accepted.dbPort, 61422);
 assert.equal(accepted.db.id, expectedId);
+const isolatedId = "wp12-isolated-01";
+const isolatedEngine = "9bfee319-9d33-4def-8cc7-0e08fd977777";
+assert.deepEqual(resolveLocalTestBinding({}), { projectId, engineId: null });
+const isolatedBinding = resolveLocalTestBinding({
+  PRODUCT_TEST_PROJECT_ID: isolatedId,
+  PRODUCT_TEST_ENGINE_ID: isolatedEngine,
+});
+assert.deepEqual(isolatedBinding, { projectId: isolatedId, engineId: isolatedEngine });
+for (const environment of [
+  { PRODUCT_TEST_PROJECT_ID: projectId, PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+  { PRODUCT_TEST_PROJECT_ID: isolatedId },
+  { PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+  { PRODUCT_TEST_PROJECT_ID: "../qa", PRODUCT_TEST_ENGINE_ID: isolatedEngine },
+]) {
+  expectFailure(() => resolveLocalTestBinding(environment));
+}
+const labeledContainer = (name, id, port, containerPort, health) => ({
+  ...container(name, id, port, containerPort, health),
+  Config: { Labels: { "com.supabase.cli.project": isolatedId } },
+});
+const isolatedTarget = targetInput({
+  configBytes: config(61421, 61422, isolatedId),
+  dbContainer: labeledContainer(`supabase_db_${isolatedId}`, "a", 61422, "5432/tcp", "healthy"),
+  apiContainer: labeledContainer(`supabase_kong_${isolatedId}`, "b", 61421, "8000/tcp"),
+  binding: isolatedBinding,
+  engineId: isolatedEngine,
+});
+assert.equal(validateLocalDbTarget(isolatedTarget).projectId, isolatedId);
+expectFailure(() => validateLocalDbTarget({ ...isolatedTarget, engineId: "other-engine" }));
+expectFailure(() => validateLocalDbTarget({ ...isolatedTarget, configBytes: config() }));
+expectFailure(() =>
+  validateLocalDbTarget({
+    ...isolatedTarget,
+    dbContainer: container(`supabase_db_${isolatedId}`, "a", 61422, "5432/tcp", "healthy"),
+  }),
+);
+assert.equal(
+  validateLocalDbTarget(
+    targetInput({
+      configBytes: config(61521, 61522),
+      status: { API_URL: "http://127.0.0.1:61521", DB_URL: "postgres://127.0.0.1:61522" },
+      dbContainer: container(`supabase_db_${projectId}`, "a", 61522, "5432/tcp", "healthy"),
+      apiContainer: container(`supabase_kong_${projectId}`, "b", 61521, "8000/tcp"),
+    }),
+  ).apiPort,
+  61521,
+);
+assert.doesNotThrow(() =>
+  validateLocalDbTarget(
+    targetInput({
+      apiContainer: withBindings(
+        container(`supabase_kong_${projectId}`, "b", 61421, "8000/tcp"),
+        "8000/tcp",
+        [
+          { HostIp: "0.0.0.0", HostPort: "61421" },
+          { HostIp: "::", HostPort: "61421" },
+        ],
+      ),
+    }),
+  ),
+);
+for (const apiBindings of [
+  [
+    { HostIp: "127.0.0.1", HostPort: "61421" },
+    { HostIp: "192.0.2.10", HostPort: "61421" },
+  ],
+  [
+    { HostIp: "127.0.0.1", HostPort: "61421" },
+    { HostIp: "::1", HostPort: "61422" },
+  ],
+  null,
+]) {
+  expectFailure(() =>
+    validateLocalDbTarget(
+      targetInput({
+        apiContainer: withBindings(
+          container(`supabase_kong_${projectId}`, "b", 61421, "8000/tcp"),
+          "8000/tcp",
+          apiBindings,
+        ),
+      }),
+    ),
+  );
+}
 expectFailure(() =>
   validateLocalDbTarget(targetInput({ configBytes: config(61421, 61422, "wrong-project") })),
 );
@@ -360,4 +475,130 @@ for (const invalidTap of [
     /wp01-pgtap-test\.sql: Refusing local database tests: pgTAP assertion failed #1/,
   );
   assert.doesNotMatch(diagnostic, /postgres:|password|config\.toml/i);
+}
+
+const pgTapResult = (overrides = {}) => ({
+  status: 0,
+  signal: null,
+  stdout: "1..1\nok 1 - valid\n",
+  stderr: "",
+  error: undefined,
+  ...overrides,
+});
+
+{
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "db-tap-not-ok-"));
+  const tap = [
+    "1..1",
+    "not ok 1 - Cycle owner can send an operator message",
+    "# Failed test 'Cycle owner can send an operator message'",
+    "# handling_cycle_expired",
+    "",
+  ].join("\n");
+  try {
+    const failure = capturedFailure(() =>
+      executePgTapFile({
+        evidenceRoot,
+        path: "/tmp/active_new_responsibility_send.test.sql",
+        runner: () => pgTapResult({ stdout: tap, stderr: "psql diagnostic\n" }),
+        target: target(),
+        testFile: "/candidate/active_new_responsibility_send.test.sql",
+      }),
+    );
+    assert.match(failure.message, /pgTAP assertion failed #1/);
+    const files = readdirSync(join(evidenceRoot, "db-tap"));
+    assert.equal(files.length, 1);
+    const evidence = JSON.parse(readFileSync(join(evidenceRoot, "db-tap", files[0]), "utf8"));
+    assert.equal(evidence.process.stdout, tap);
+    assert.equal(evidence.process.stderr, "psql diagnostic\n");
+    assert.equal(evidence.process.exitCode, 0);
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "db-tap-nonzero-"));
+  try {
+    const failure = capturedFailure(() =>
+      executePgTapFile({
+        evidenceRoot,
+        path: "/tmp/partial.test.sql",
+        runner: () =>
+          pgTapResult({ status: 7, stdout: "1..2\nok 1 - partial\n", stderr: "query failed\n" }),
+        target: target(),
+        testFile: "/candidate/partial.test.sql",
+      }),
+    );
+    assert.equal(failure instanceof PgTapProcessError, true);
+    const [file] = readdirSync(join(evidenceRoot, "db-tap"));
+    const evidence = JSON.parse(readFileSync(join(evidenceRoot, "db-tap", file), "utf8"));
+    assert.equal(evidence.process.exitCode, 7);
+    assert.equal(evidence.process.stdout, "1..2\nok 1 - partial\n");
+    assert.equal(evidence.process.stderr, "query failed\n");
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "db-tap-write-failure-"));
+  try {
+    const failure = capturedFailure(() =>
+      executePgTapFile({
+        evidenceRoot,
+        path: "/tmp/nonzero.test.sql",
+        runner: () => pgTapResult({ status: 9, stderr: "primary SQL failure\n" }),
+        target: target(),
+        testFile: "/candidate/nonzero.test.sql",
+        writeEvidence: () => {
+          throw new Error("evidence disk unavailable");
+        },
+      }),
+    );
+    assert.equal(failure instanceof PgTapEvidenceError, true);
+    assert.equal(failure.primaryFailure instanceof PgTapProcessError, true);
+    assert.match(failure.message, /SQL execution failed.*evidence preservation also failed/i);
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "db-tap-separate-processes-"));
+  const moduleUrl = new URL("./run-db-local.mjs", import.meta.url).href;
+  const childScript = `
+    import { preservePgTapProcessEvidence } from ${JSON.stringify(moduleUrl)};
+    preservePgTapProcessEvidence({
+      evidenceRoot: process.env.RUN_EVIDENCE,
+      result: { status: 0, signal: null, stdout: process.env.TAP_PAYLOAD, stderr: "", error: undefined },
+      testFile: "/candidate/active_new_responsibility_send.test.sql"
+    });
+  `;
+  try {
+    const first = spawnSync(process.execPath, ["--input-type=module", "-e", childScript], {
+      encoding: "utf8",
+      env: { ...process.env, RUN_EVIDENCE: evidenceRoot, TAP_PAYLOAD: "first invocation" },
+    });
+    assert.equal(first.status, 0, first.stderr);
+    const directory = join(evidenceRoot, "db-tap");
+    const [firstName] = readdirSync(directory);
+    const firstBytes = readFileSync(join(directory, firstName));
+
+    const second = spawnSync(process.execPath, ["--input-type=module", "-e", childScript], {
+      encoding: "utf8",
+      env: { ...process.env, RUN_EVIDENCE: evidenceRoot, TAP_PAYLOAD: "second invocation" },
+    });
+    assert.equal(second.status, 0, second.stderr);
+    const files = readdirSync(directory).sort();
+    assert.equal(files.length, 2);
+    assert.deepEqual(readFileSync(join(directory, firstName)), firstBytes);
+    assert.notEqual(files[0], files[1]);
+    const payloads = files.map(
+      (name) => JSON.parse(readFileSync(join(directory, name), "utf8")).process.stdout,
+    );
+    assert.deepEqual(new Set(payloads), new Set(["first invocation", "second invocation"]));
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
 }

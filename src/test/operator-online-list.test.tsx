@@ -11,6 +11,12 @@ type ConversationRow = {
   client_id: string;
   characters: { id: string; name: string; avatar_url: string | null };
   profiles: { display_name: string; avatar_url: string | null };
+  client_context?: {
+    client_age: number | null;
+    client_city: string | null;
+    client_online?: boolean | null;
+    under_other_operator: boolean;
+  };
 };
 
 const query = vi.hoisted(() => ({
@@ -22,9 +28,18 @@ const query = vi.hoisted(() => ({
 }));
 
 const rpc = vi.hoisted(() => vi.fn());
+const queryClient = vi.hoisted(() => ({ invalidateQueries: vi.fn(), removeQueries: vi.fn() }));
+let systemCallback: ((payload: { extension: string; status: string }) => void) | undefined;
 const channel = {
-  on: vi.fn(() => channel),
-  subscribe: vi.fn(() => channel),
+  on: vi.fn((kind: string, _filter: unknown, callback: typeof systemCallback) => {
+    if (kind === "system") systemCallback = callback;
+    return channel;
+  }),
+  subscribe: vi.fn((callback?: (status: string) => void) => {
+    callback?.("SUBSCRIBED");
+    systemCallback?.({ extension: "postgres_changes", status: "ok" });
+    return channel;
+  }),
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -46,7 +61,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => query,
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => queryClient,
 }));
 
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "user-a" } }) }));
@@ -85,6 +100,7 @@ const rows: ConversationRow[] = [
     client_id: "client-a",
     characters: { id: "character-a", name: "נועה", avatar_url: null },
     profiles: { display_name: "אייל", avatar_url: null },
+    client_context: { client_age: 29, client_city: "נמל הבדיקה", under_other_operator: true },
   },
   {
     id: "conversation-newest",
@@ -95,6 +111,7 @@ const rows: ConversationRow[] = [
     client_id: "client-b",
     characters: { id: "character-b", name: "מאיה", avatar_url: null },
     profiles: { display_name: "בר", avatar_url: null },
+    client_context: { client_age: 48, client_city: "גבעת הבדיקה", under_other_operator: false },
   },
   {
     id: "conversation-closed",
@@ -119,11 +136,64 @@ beforeEach(() => {
   query.isLoading = false;
   query.refetch.mockClear();
   rpc.mockReset();
+  queryClient.invalidateQueries.mockClear();
+  queryClient.removeQueries.mockClear();
   channel.on.mockClear();
   channel.subscribe.mockClear();
+  systemCallback = undefined;
 });
 
 describe("ONLINE conversation list", () => {
+  it("distinguishes active, expired and unknown without using the last message", () => {
+    query.data = rows.map((row, i) => ({
+      ...row,
+      client_context: {
+        client_city: null,
+        client_age: null,
+        under_other_operator: false,
+        client_online: i === 0 ? true : i === 1 ? false : null,
+      },
+    }));
+    renderPage();
+    expect(screen.getByRole("link", { name: /אייל/ })).toHaveTextContent("פעילות לאחרונה");
+    expect(screen.getByRole("link", { name: /בר/ })).toHaveTextContent("לא זוהתה פעילות");
+    expect(screen.getByRole("link", { name: /גיל/ })).toHaveTextContent("נוכחות לא ידועה");
+  });
+
+  it("finds a conversation by authorized city or exact age and identifies read-only rows", () => {
+    renderPage();
+    const search = screen.getByRole("textbox");
+    fireEvent.change(search, { target: { value: "נמל הבדיקה" } });
+    const match = screen.getByRole("link", { name: /אייל/ });
+    expect(match).toHaveTextContent("נמל הבדיקה");
+    expect(match).toHaveTextContent("29");
+    expect(match).toHaveTextContent("קריאה בלבד");
+    expect(screen.queryByText("בר")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "48" } });
+    expect(screen.getByRole("link", { name: /בר/ })).toBeInTheDocument();
+    expect(screen.queryByText("אייל")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "4" } });
+    expect(screen.getByText("לא נמצאו שיחות תואמות")).toBeInTheDocument();
+  });
+
+  it("keeps search and filters labelled with 44px minimum touch targets", () => {
+    renderPage();
+
+    expect(screen.getByRole("textbox", { name: "חיפוש שיחות לפי שם, עיר או גיל" })).toHaveClass(
+      "min-h-11",
+    );
+    for (const name of ["הכל", "ממתינות", "פתוחות", "נענו", "סגורות", "כל הדמויות", "מאיה"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass("min-h-11");
+    }
+    expect(screen.getByRole("button", { name: "הכל" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "ממתינות" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
   it("preserves conversation content and sorts unread before last-message activity", () => {
     renderPage();
 
@@ -144,14 +214,14 @@ describe("ONLINE conversation list", () => {
   it("keeps local search and status and character filters", () => {
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "בר" },
     });
     expect(screen.getByText("בר")).toBeInTheDocument();
     expect(screen.queryByText("אייל")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "הכל" }));
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: "סגורות" }));
@@ -203,7 +273,7 @@ describe("ONLINE conversation list", () => {
 
     query.data = rows;
     view.rerender(<ConversationsPage />);
-    fireEvent.change(screen.getByPlaceholderText("חיפוש לפי שם לקוח..."), {
+    fireEvent.change(screen.getByPlaceholderText("שם, עיר או גיל"), {
       target: { value: "לא קיים" },
     });
     expect(screen.getByText("לא נמצאו שיחות תואמות")).toBeInTheDocument();

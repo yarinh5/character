@@ -38,7 +38,7 @@ const FUNNEL_LABELS: Record<string, string> = {
 
 function defaultStartDate() {
   const date = new Date();
-  date.setDate(date.getDate() - 29);
+  date.setUTCDate(date.getUTCDate() - 29);
   return date.toISOString().slice(0, 10);
 }
 
@@ -123,7 +123,13 @@ function AdminAnalyticsWorkspace({ adminId }: { adminId: string }) {
   const maxFunnel = Math.max(1, ...(data?.funnel.map((step) => step.count) ?? [0]));
 
   const applyRange = () => {
-    if (!isCalendarDate(draftStart) || !isCalendarDate(draftEnd) || draftStart > draftEnd) {
+    if (
+      !isCalendarDate(draftStart) ||
+      !isCalendarDate(draftEnd) ||
+      draftStart > draftEnd ||
+      Date.parse(`${draftEnd}T00:00:00Z`) - Date.parse(`${draftStart}T00:00:00Z`) >=
+        180 * 24 * 60 * 60 * 1000
+    ) {
       setRangeError(true);
       return;
     }
@@ -169,7 +175,7 @@ function AdminAnalyticsWorkspace({ adminId }: { adminId: string }) {
           aria-label="טווח תאריכים לא תקין"
           className="mb-4 rounded-md border border-destructive/40 p-3 text-sm text-destructive"
         >
-          יש לבחור תאריכי התחלה וסיום תקינים, כאשר ההתחלה אינה מאוחרת מהסיום.
+          יש לבחור טווח תאריכים תקין של עד 180 ימים.
         </div>
       )}
 
@@ -424,8 +430,7 @@ function AdminAnalyticsWorkspace({ adminId }: { adminId: string }) {
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        הכיסוי מבוסס על עד 10,000 רשומות לכל מקור, והשרת עשוי לקצר את הטווח המבוקש; הטווח שהוחזר
-        בפועל הוא הקובע. זהו חלון תפעולי ולא דוח מלא.
+        הדוח מחושב באגרגציה מלאה בצד השרת עבור הטווח שהוחזר, עד 180 ימים.
       </p>
     </div>
   );

@@ -14,6 +14,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  PortBindingContractError,
+  PortBindingEvidenceError,
+  captureDockerInspectForPortValidation,
+  validatePublishedPortBindings,
+} from "../local-docker-port-contract.mjs";
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const projectId = "qmgkmsarzfjnqltljkjl";
 const container = "supabase_db_qmgkmsarzfjnqltljkjl";
@@ -103,12 +110,31 @@ function assertDockerPort(info, name, internalPort, expectedPort, { requireHealt
     assert.equal(info.State?.Health?.Status, "healthy", `${name} must be healthy`);
   }
   assert.match(info.Id, /^[a-f0-9]{12,}$/i, `${name} must have a Docker ID`);
-  const published = info.NetworkSettings?.Ports?.[internalPort] ?? [];
-  assert.ok(
-    published.some((entry) => Number(entry.HostPort) === expectedPort),
-    `${name} ${internalPort} must match config.toml`,
-  );
+  try {
+    validatePublishedPortBindings(
+      info.NetworkSettings?.Ports?.[internalPort],
+      expectedPort,
+      `${name} ${internalPort}`,
+    );
+  } catch (error) {
+    if (!(error instanceof PortBindingContractError)) throw error;
+    assert.fail(`${name} ${internalPort} must match config.toml: ${error.message}`);
+  }
   return { id: info.Id, name };
+}
+
+function inspectPortContainer(name, targetKind, internalPort, expectedHostPort) {
+  return captureDockerInspectForPortValidation({
+    configPath: join(repoRoot, "supabase", "config.toml"),
+    cwd: repoRoot,
+    evidencePrefix: "upgrade-113-116",
+    evidenceRoot: process.env.RUN_EVIDENCE,
+    expectedHostPort,
+    internalPort,
+    name,
+    targetKind,
+    timeout: 180_000,
+  });
 }
 
 export function validateLocalTarget({ config, status, db, api }) {
@@ -134,13 +160,14 @@ function assertLocalTarget() {
   assert.match(configText, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
   const apiPort = configPort(configText, "api");
   const dbPort = configPort(configText, "db");
-  const [api] = JSON.parse(run("docker", ["inspect", apiContainer]));
+  const api = inspectPortContainer(apiContainer, "api", "8000/tcp", apiPort);
   const verifiedApi = assertDockerPort(api, apiContainer, "8000/tcp", apiPort);
 
   let db;
   try {
-    [db] = JSON.parse(run("docker", ["inspect", container]));
+    db = inspectPortContainer(container, "db", "5432/tcp", dbPort);
   } catch (error) {
+    if (error instanceof PortBindingEvidenceError) throw error;
     throw new ResetReadinessError("db_unavailable", `${container} is temporarily unavailable`, {
       cause: error,
     });
@@ -220,18 +247,14 @@ export function assertImmutableTargetSnapshot(target, { config, api }) {
 
 function assertImmutableLocalTarget(target) {
   const config = readFileSync(join(repoRoot, "supabase", "config.toml"));
-  const [api] = JSON.parse(run("docker", ["inspect", apiContainer]));
+  const apiPort = configPort(config.toString("utf8"), "api");
+  const api = inspectPortContainer(apiContainer, "api", "8000/tcp", apiPort);
   return assertImmutableTargetSnapshot(target, { config, api });
 }
 
 function assertExpectedDatabaseContainer(db, dbPort) {
   assert.equal(db.Name, `/${container}`, "local DB container name changed");
   assert.match(db.Id, /^[a-f0-9]{12,}$/i, `${container} must have a Docker ID`);
-  const published = db.NetworkSettings?.Ports?.["5432/tcp"] ?? [];
-  assert.ok(
-    published.some((entry) => Number(entry.HostPort) === dbPort),
-    `${container} 5432/tcp must match config.toml`,
-  );
   if (db.State?.Running !== true) {
     throw new ResetReadinessError("db_not_ready", `${container} is not running`);
   }
@@ -273,12 +296,14 @@ export function inspectReadyTargetSnapshot(
 
 function inspectReadyLocalTarget(target) {
   const config = readFileSync(join(repoRoot, "supabase", "config.toml"));
-  const [api] = JSON.parse(run("docker", ["inspect", apiContainer]));
+  const configText = config.toString("utf8");
+  const api = inspectPortContainer(apiContainer, "api", "8000/tcp", configPort(configText, "api"));
   const identity = assertImmutableTargetSnapshot(target, { config, api });
   let db;
   try {
-    [db] = JSON.parse(run("docker", ["inspect", container]));
+    db = inspectPortContainer(container, "db", "5432/tcp", identity.dbPort);
   } catch (error) {
+    if (error instanceof PortBindingEvidenceError) throw error;
     throw new ResetReadinessError("db_unavailable", `${container} is temporarily unavailable`, {
       cause: error,
     });
@@ -683,9 +708,188 @@ export function runResetWithVerifiedState({
     target: readyTarget,
   };
 }
+
+function parseCanonicalMigrationFileNames(contents, label) {
+  assert.equal(typeof contents, "string", `${label} must be text`);
+  const names = contents.split(/\r?\n/u).filter((line) => line.length > 0);
+  assert.ok(names.length > 0, `${label} must not be empty`);
+  assert.equal(new Set(names).size, names.length, `${label} contains duplicate filenames`);
+  assert.deepEqual(names, [...names].sort(), `${label} must use canonical filename order`);
+  const versions = new Set();
+  for (const name of names) {
+    const match = /^(\d{14})_([^/\\]+)\.sql$/u.exec(name);
+    assert.ok(match, `${label} contains an invalid migration filename: ${name}`);
+    assert.ok(!versions.has(match[1]), `${label} contains duplicate version: ${match[1]}`);
+    versions.add(match[1]);
+  }
+  return names;
+}
+
+function readRequiredRegularFile(path, label) {
+  assert.ok(lstatSync(path).isFile(), `${label} must be a regular file`);
+  return readFileSync(path);
+}
+
+export function assertApprovedRestoreMigrationContract({
+  beforeNames,
+  afterNames,
+  createdNames,
+  actualNames,
+  gateBytes,
+  approvedGateBytes,
+}) {
+  const before = parseCanonicalMigrationFileNames(beforeNames.join("\n"), "candidate migrations");
+  const after = parseCanonicalMigrationFileNames(afterNames.join("\n"), "approved migrations");
+  const actual = parseCanonicalMigrationFileNames(actualNames.join("\n"), "runtime migrations");
+  const created = parseCanonicalMigrationFileNames(createdNames.join("\n"), "created migrations");
+  assert.equal(created.length, 1, "exactly one runtime gate migration must be created");
+  assert.match(
+    created[0],
+    /^\d{14}_product_completion_read_access_gate\.sql$/u,
+    "runtime gate migration name is not approved",
+  );
+  assert.ok(!before.includes(created[0]), "runtime gate must not exist in the frozen candidate");
+  const expected = [...before, created[0]].sort();
+  assert.deepEqual(after, expected, "approved migration evidence differs from candidate plus gate");
+  assert.deepEqual(
+    actual,
+    expected,
+    "runtime migration files differ from approved migration evidence",
+  );
+  assert.deepEqual(
+    gateBytes,
+    approvedGateBytes,
+    "runtime gate bytes differ from the approved gate",
+  );
+  return after.map((name) => name.slice(0, 14));
+}
+
+export function loadApprovedRestoreMigrationVersions({
+  evidenceRoot = process.env.RUN_EVIDENCE,
+  migrationsDir = join(repoRoot, "supabase", "migrations"),
+  approvedGatePath = join(
+    repoRoot,
+    "integration",
+    "candidate-migrations",
+    "product_completion_read_access_gate.sql",
+  ),
+} = {}) {
+  assert.equal(typeof evidenceRoot, "string", "RUN_EVIDENCE is required");
+  assert.ok(evidenceRoot.length > 0, "RUN_EVIDENCE is required");
+  assert.equal(
+    readRequiredRegularFile(join(evidenceRoot, "continue.complete"), "continue marker").toString(
+      "utf8",
+    ),
+    "ready\n",
+    "continue marker is not valid",
+  );
+  const beforeNames = parseCanonicalMigrationFileNames(
+    readRequiredRegularFile(
+      join(evidenceRoot, "migrations.before.txt"),
+      "candidate migration evidence",
+    ).toString("utf8"),
+    "candidate migration evidence",
+  );
+  const afterNames = parseCanonicalMigrationFileNames(
+    readRequiredRegularFile(
+      join(evidenceRoot, "migrations.after.txt"),
+      "approved migration evidence",
+    ).toString("utf8"),
+    "approved migration evidence",
+  );
+  const createdNames = parseCanonicalMigrationFileNames(
+    readRequiredRegularFile(
+      join(evidenceRoot, "migration.created.txt"),
+      "runtime gate evidence",
+    ).toString("utf8"),
+    "runtime gate evidence",
+  );
+  const actualNames = readdirSync(migrationsDir).sort();
+  for (const name of actualNames) {
+    assert.ok(
+      lstatSync(join(migrationsDir, name)).isFile(),
+      `runtime migration must be a regular file: ${name}`,
+    );
+  }
+  assert.equal(createdNames.length, 1, "runtime gate evidence must name exactly one migration");
+  const gateBytes = readRequiredRegularFile(
+    join(migrationsDir, createdNames[0]),
+    "runtime gate migration",
+  );
+  const approvedGateBytes = readRequiredRegularFile(approvedGatePath, "approved gate migration");
+  return assertApprovedRestoreMigrationContract({
+    beforeNames,
+    afterNames,
+    createdNames,
+    actualNames,
+    gateBytes,
+    approvedGateBytes,
+  });
+}
+
+function normalizeMigrationVersions(versions, label) {
+  assert.ok(Array.isArray(versions), `${label} must be an array`);
+  assert.ok(versions.length > 0, `${label} must not be empty`);
+  for (const version of versions) {
+    assert.equal(typeof version, "string", `${label} entries must be strings`);
+    assert.match(version, /^\d{14}$/u, `${label} contains an invalid version: ${version}`);
+  }
+  assert.equal(new Set(versions).size, versions.length, `${label} contains duplicate versions`);
+  assert.deepEqual(versions, [...versions].sort(), `${label} must use canonical version order`);
+  return [...versions];
+}
+
+export function assertRestoredMigrationVersions(actualVersions, expectedVersions) {
+  const actual = normalizeMigrationVersions(actualVersions, "restored migration history");
+  const expected = normalizeMigrationVersions(expectedVersions, "approved migration history");
+  assert.deepEqual(actual, expected, "restored migration history differs from the approved list");
+}
+
+export function verifyResetStateResult(actual, expected) {
+  assert.equal(typeof actual, "object", "reset state query must return an object");
+  assert.notEqual(actual, null, "reset state query must not return null");
+  assert.equal(Array.isArray(actual), false, "reset state query must not return an array");
+  const { migration_versions: actualVersions, ...actualState } = actual;
+  const { migrationVersions: expectedVersions, ...expectedState } = expected;
+  const normalizedActual = normalizeMigrationVersions(actualVersions, "restored migration history");
+  assert.equal(
+    actualState.migrations,
+    normalizedActual.length,
+    "migration count differs from the full restored history",
+  );
+  assert.equal(
+    actualState.latest,
+    normalizedActual.at(-1),
+    "latest migration differs from the full restored history",
+  );
+  if (expectedVersions !== undefined) {
+    assertRestoredMigrationVersions(normalizedActual, expectedVersions);
+  }
+  assert.deepEqual(actualState, expectedState);
+}
+
+export function createExpectedRestoreState(migrationVersions) {
+  const versions = normalizeMigrationVersions(migrationVersions, "approved migration history");
+  return {
+    migrationVersions: versions,
+    migrations: versions.length,
+    latest: versions.at(-1),
+    m117: versions.includes("20261013113744"),
+    users: 0,
+    profiles: 0,
+    conversations: 0,
+    messages: 0,
+    cycles: 0,
+    work_items: 0,
+    ledger: 0,
+    notifications: 0,
+    analytics: 0,
+  };
+}
 const resetStateSql = `SELECT json_build_object(
   'migrations',(SELECT count(DISTINCT version) FROM supabase_migrations.schema_migrations),
   'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
+  'migration_versions',(SELECT coalesce(json_agg(version ORDER BY version), '[]'::json) FROM supabase_migrations.schema_migrations),
   'm117',(SELECT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='20261013113744')),
   'users',(SELECT count(*) FROM auth.users),
   'profiles',(SELECT count(*) FROM public.profiles),
@@ -699,7 +903,7 @@ const resetStateSql = `SELECT json_build_object(
 );`;
 
 function verifyResetState(_target, expected) {
-  assert.deepEqual(json(resetStateSql), expected);
+  verifyResetStateResult(json(resetStateSql), expected);
 }
 
 function resetLocal(target, version, expectedState) {
@@ -753,6 +957,7 @@ const postUpgradeStateSql = `SELECT json_build_object(
 );`;
 
 function main() {
+  const expectedRestoreMigrationVersions = loadApprovedRestoreMigrationVersions();
   let completed = false;
 
   runValidatedUpgrade({
@@ -862,22 +1067,11 @@ function main() {
       );
     },
     cleanup: (target) => {
-      console.log("Restoring a clean local 117-migration baseline");
+      console.log(
+        `Restoring the approved ${expectedRestoreMigrationVersions.length}-migration baseline`,
+      );
       assertLocalTargetIdentity(target);
-      resetLocal(target, undefined, {
-        migrations: 117,
-        latest: "20261013113744",
-        m117: true,
-        users: 0,
-        profiles: 0,
-        conversations: 0,
-        messages: 0,
-        cycles: 0,
-        work_items: 0,
-        ledger: 0,
-        notifications: 0,
-        analytics: 0,
-      });
+      resetLocal(target, undefined, createExpectedRestoreState(expectedRestoreMigrationVersions));
       if (!completed) console.error("WP01 upgrade rehearsal failed before clean-baseline restore");
     },
     reportCleanupFailure: (error) => {

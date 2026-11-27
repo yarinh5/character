@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -20,7 +21,11 @@ import { useAuth } from "@/lib/auth";
 import { useActiveConversation } from "@/lib/activeConversation";
 import { ChatAvatar } from "@/components/common/ChatAvatar";
 import { MessageAttachment, type ChatMessageAttachment } from "@/components/chat/MessageAttachment";
-import { MessageSticker, StickerHydrationPlaceholder, type ChatMessageSticker } from "@/components/chat/MessageSticker";
+import {
+  MessageSticker,
+  StickerHydrationPlaceholder,
+  type ChatMessageSticker,
+} from "@/components/chat/MessageSticker";
 import { StickerPicker } from "@/components/chat/StickerPicker";
 import { OperatorMediaPicker } from "@/components/operator/OperatorMediaPicker";
 import type { StickerSendResult } from "@/hooks/useStickerSend";
@@ -37,7 +42,24 @@ export const Route = createFileRoute("/admin/conversations/$conversationId")({
   component: ConvView,
 });
 
-function isActiveConversationLock(lock: any) {
+type ConversationLockState = {
+  expires_at: string;
+  released_at: string | null;
+};
+
+type AvailableOperator = {
+  availability_status: string | null;
+  full_name: string | null;
+  id: string;
+  is_active: boolean;
+};
+
+type CharacterOperatorAssignment = {
+  operator_id: string;
+  operators: AvailableOperator | null;
+};
+
+function isActiveConversationLock(lock: ConversationLockState | null | undefined) {
   return !!lock && !lock.released_at && new Date(lock.expires_at).getTime() > Date.now();
 }
 
@@ -69,7 +91,13 @@ function ConvView() {
   const [savingNote, setSavingNote] = useState(false);
   const [savingCustomerInfo, setSavingCustomerInfo] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [reassignReason, setReassignReason] = useState("");
+  const [deletionReason, setDeletionReason] = useState("");
+  const [requestingDeletion, setRequestingDeletion] = useState(false);
+  const deletionRequestInFlightRef = useRef(false);
+  const deletionIdempotencyKeyRef = useRef<string | null>(null);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const mediaPickerOpener = useRef<HTMLButtonElement>(null);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [adminOperatorUserIds, setAdminOperatorUserIds] = useState<string[]>([]);
@@ -81,7 +109,14 @@ function ConvView() {
   const messageRequestVersionRef = useRef(0);
   const attachmentIds = useMemo(
     () =>
-      [...new Set(messages.flatMap((message) => message.message_attachments ?? []).filter((attachment) => attachment.kind === "image").map((attachment) => attachment.id))].sort(),
+      [
+        ...new Set(
+          messages
+            .flatMap((message) => message.message_attachments ?? [])
+            .filter((attachment) => attachment.kind === "image")
+            .map((attachment) => attachment.id),
+        ),
+      ].sort(),
     [messages],
   );
   const attachmentAccess = useMessageAttachmentAccessMap(attachmentIds);
@@ -96,7 +131,9 @@ function ConvView() {
         .order("position", { ascending: true }),
       supabase
         .from("message_stickers")
-        .select("id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at")
+        .select(
+          "id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at",
+        )
         .eq("message_id", message.id),
     ]);
 
@@ -110,7 +147,9 @@ function ConvView() {
   const loadLatestMessages = async (requestVersion: number) => {
     const { data: msgs, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
+      .select(
+        "id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+      )
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -122,7 +161,11 @@ function ConvView() {
       ...new Set(latestMessages.map((message) => message.operators?.user_id).filter(Boolean)),
     ] as string[];
     const { data: adminRoles } = operatorUserIds.length
-      ? await supabase.from("user_roles").select("user_id").in("user_id", operatorUserIds).eq("role", "admin")
+      ? await supabase
+          .from("user_roles")
+          .select("user_id")
+          .in("user_id", operatorUserIds)
+          .eq("role", "admin")
       : { data: [] as { user_id: string }[] };
 
     if (requestVersion !== messageRequestVersionRef.current) return;
@@ -144,9 +187,13 @@ function ConvView() {
     const previousTop = container.scrollTop;
     const { data, error } = await supabase
       .from("messages")
-      .select("id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)")
+      .select(
+        "id, content, sender_type, sender_id, operator_id, created_at, is_read, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+      )
       .eq("conversation_id", conversationId)
-      .or(`created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`)
+      .or(
+        `created_at.lt.${before.created_at},and(created_at.eq.${before.created_at},id.lt.${before.id})`,
+      )
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(MESSAGE_PAGE_SIZE);
@@ -195,44 +242,54 @@ function ConvView() {
         { data: settings },
         { data: lock },
       ] = await Promise.all([
-          supabase.from("profiles").select("display_name, email, status, avatar_url").eq("user_id", conv.client_id).maybeSingle(),
-          supabase.from("client_profiles").select("age, gender, interests").eq("user_id", conv.client_id).maybeSingle(),
-          supabase
-            .from("internal_notes")
-            .select("id, note, created_at, operator_id, operators(full_name)")
-            .eq("conversation_id", conversationId)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("customer_info_entries")
-            .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
-            .eq("client_id", conv.client_id)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("reports")
-            .select("id, reason, status, created_at")
-            .eq("conversation_id", conversationId),
-          supabase
-            .from("character_operator_assignments")
-            .select("operator_id, operators(id, full_name, is_active, availability_status)")
-            .eq("character_id", conv.character_id),
-          user?.id
-            ? supabase
-                .from("operators")
-                .select("id, full_name, is_active")
-                .eq("user_id", user.id)
-                .maybeSingle()
-            : Promise.resolve({ data: null }),
-          supabase
-            .from("system_settings")
-            .select("key, value")
-            .in("key", ["concurrency_mode", "lock_timeout_minutes"]),
-          supabase
-            .from("conversation_locks")
-            .select("conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)")
-            .eq("conversation_id", conversationId)
-            .maybeSingle(),
-        ]);
-      const assignments = charOps ?? [];
+        supabase
+          .from("profiles")
+          .select("display_name, email, status, avatar_url")
+          .eq("user_id", conv.client_id)
+          .maybeSingle(),
+        supabase
+          .from("client_profiles")
+          .select("age, gender, interests")
+          .eq("user_id", conv.client_id)
+          .maybeSingle(),
+        supabase
+          .from("internal_notes")
+          .select("id, note, created_at, operator_id, operators(full_name)")
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("customer_info_entries")
+          .select("id, content, created_at, operator_id, created_by_user_id, operators(full_name)")
+          .eq("client_id", conv.client_id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("reports")
+          .select("id, reason, status, created_at")
+          .eq("conversation_id", conversationId),
+        supabase
+          .from("character_operator_assignments")
+          .select("operator_id, operators(id, full_name, is_active, availability_status)")
+          .eq("character_id", conv.character_id),
+        user?.id
+          ? supabase
+              .from("operators")
+              .select("id, full_name, is_active")
+              .eq("user_id", user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase
+          .from("system_settings")
+          .select("key, value")
+          .in("key", ["concurrency_mode", "lock_timeout_minutes"]),
+        supabase
+          .from("conversation_locks")
+          .select(
+            "conversation_id, locked_by_operator_id, locked_by_user_id, locked_at, last_activity_at, expires_at, released_at, release_reason, operators!conversation_locks_locked_by_operator_id_fkey(full_name)",
+          )
+          .eq("conversation_id", conversationId)
+          .maybeSingle(),
+      ]);
+      const assignments = (charOps ?? []) as CharacterOperatorAssignment[];
       const settingsMap = new Map((settings ?? []).map((setting) => [setting.key, setting.value]));
       const mode = settingsMap.get("concurrency_mode");
       const timeout = settingsMap.get("lock_timeout_minutes");
@@ -246,14 +303,17 @@ function ConvView() {
         currentOperator,
         currentOperatorAssigned: Boolean(
           currentOperator?.id &&
-            assignments.some((assignment: any) => assignment.operator_id === currentOperator.id && assignment.operators?.is_active),
+          assignments.some(
+            (assignment) =>
+              assignment.operator_id === currentOperator.id && assignment.operators?.is_active,
+          ),
         ),
         concurrencyMode: mode === "warning" || mode === "lock" ? mode : "open",
         lockTimeoutMinutes: typeof timeout === "number" ? timeout : 10,
         lock: lock ?? null,
-        availableOps: (charOps ?? [])
-          .map((a: any) => a.operators)
-          .filter((o: any) => o && o.is_active),
+        availableOps: assignments
+          .map((assignment) => assignment.operators)
+          .filter((operator): operator is AvailableOperator => Boolean(operator?.is_active)),
       };
     },
   });
@@ -268,7 +328,8 @@ function ConvView() {
     setHasOlderMessages(false);
     setLoadingOlderMessages(false);
     loadLatestMessages(requestVersion).catch((error) => {
-      if (requestVersion === messageRequestVersionRef.current) toast.error("טעינת הודעות נכשלה: " + error.message);
+      if (requestVersion === messageRequestVersionRef.current)
+        toast.error("טעינת הודעות נכשלה: " + error.message);
     });
     return () => {
       if (messageRequestVersionRef.current === requestVersion) {
@@ -290,14 +351,23 @@ function ConvView() {
       .channel(`admin-conv-${conversationId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         (payload) => {
           const requestVersion = messageRequestVersionRef.current;
           const nextMessage = payload.new as AdminMessage;
           shouldStickToBottomRef.current = isNearScrollBottom(scrollRef.current);
           if (payload.eventType === "UPDATE") {
             if (requestVersion !== messageRequestVersionRef.current) return;
-            setMessages((prev) => prev.map((message) => (message.id === nextMessage.id ? { ...message, ...nextMessage } : message)));
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === nextMessage.id ? { ...message, ...nextMessage } : message,
+              ),
+            );
             return;
           }
           if (payload.eventType === "INSERT" && nextMessage.sender_type === "client") {
@@ -358,12 +428,22 @@ function ConvView() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversation_locks", filter: `conversation_id=eq.${conversationId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_locks",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "internal_notes", filter: `conversation_id=eq.${conversationId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "internal_notes",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         () => qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] }),
       )
       .on(
@@ -395,15 +475,22 @@ function ConvView() {
   }, [messages.length]);
 
   const reassign = async (opId: string) => {
+    const reason = reassignReason.trim();
+    if (reason.length < 3) {
+      toast.error("יש להזין סיבה להעברת הטיפול.");
+      return;
+    }
     const { error } = await supabase.rpc("admin_reassign_conversation", {
       _conversation_id: conversationId,
       _operator_id: opId,
+      _reason: reason,
     });
     if (error) {
       toast.error("עדכון שיוך legacy נכשל: " + error.message);
       return;
     }
-    toast.success("שיוך legacy עודכן");
+    setReassignReason("");
+    toast.success("הטיפול הועבר ותועד");
     qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
   };
 
@@ -418,6 +505,61 @@ function ConvView() {
     }
     toast.success("סטטוס עודכן");
     qc.invalidateQueries({ queryKey: ["admin-conv", conversationId] });
+  };
+
+  const requestConversationDeletion = async () => {
+    const reason = deletionReason.trim();
+    if (reason.length < 3 || deletionRequestInFlightRef.current) {
+      if (reason.length < 3) toast.error("יש להזין סיבה למחיקת השיחה.");
+      return;
+    }
+
+    deletionRequestInFlightRef.current = true;
+    setRequestingDeletion(true);
+    deletionIdempotencyKeyRef.current ??= crypto.randomUUID();
+    try {
+      const { data: result, error } = await supabase.rpc("request_conversation_deletion", {
+        _conversation_id: conversationId,
+        _reason: reason,
+        _idempotency_key: deletionIdempotencyKeyRef.current,
+        _confirmed: true,
+      });
+
+      const request = result?.[0];
+      if (
+        error ||
+        !request ||
+        typeof request.id !== "string" ||
+        typeof request.requested_at !== "string" ||
+        ![
+          "access_blocked",
+          "blocked_retention",
+          "ready_for_deletion",
+          "processing",
+          "active_system_completed",
+          "completed",
+          "failed",
+        ].includes(request.status)
+      ) {
+        toast.error("יצירת בקשת המחיקה נכשלה. ניתן לנסות שוב בלי ליצור בקשה כפולה.");
+        return;
+      }
+
+      deletionIdempotencyKeyRef.current = null;
+      setDeletionReason("");
+      toast.success(
+        request.status === "access_blocked"
+          ? "הגישה הרגילה לשיחה נחסמה. המחיקה הפיזית עדיין תלויה בכל שלבי השרת."
+          : request.status === "blocked_retention"
+            ? "בקשת המחיקה תועדה וממתינה להכרעת שימור. תוכן לא נמחק."
+            : "בקשת המחיקה תועדה. השלמתה תלויה בכל שלבי השרת.",
+      );
+    } catch {
+      toast.error("יצירת בקשת המחיקה נכשלה. ניתן לנסות שוב בלי ליצור בקשה כפולה.");
+    } finally {
+      deletionRequestInFlightRef.current = false;
+      setRequestingDeletion(false);
+    }
   };
 
   const sendMessage = async () => {
@@ -456,7 +598,7 @@ function ConvView() {
       return;
     }
 
-    const message = (result as { message?: any } | null)?.message;
+    const message = (result as { message?: AdminMessage } | null)?.message;
     if (message) {
       shouldStickToBottomRef.current = true;
       setMessages((prev) =>
@@ -544,8 +686,11 @@ function ConvView() {
     activeLock &&
     data.currentOperator?.id &&
     activeLock.locked_by_operator_id !== data.currentOperator.id;
-  const canReply = Boolean(data.currentOperator?.id && data.currentOperator.is_active && data.currentOperatorAssigned);
-  const composerDisabled = sendingMessage || Boolean(lockHeldByOther) || data.conv.status === "closed";
+  const canReply = Boolean(
+    data.currentOperator?.id && data.currentOperator.is_active && data.currentOperatorAssigned,
+  );
+  const composerDisabled =
+    sendingMessage || Boolean(lockHeldByOther) || data.conv.status === "closed";
   const replyBlockedMessage = !data.currentOperator?.id
     ? "כדי לענות בשם הדמות, צריך ליצור לאדמין רשומת עובד פעילה ולשייך אותה לדמות הזו."
     : !data.currentOperator.is_active
@@ -569,7 +714,11 @@ function ConvView() {
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-muted overflow-hidden">
                   {data.conv.characters?.avatar_url ? (
-                    <img src={data.conv.characters.avatar_url} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={data.conv.characters.avatar_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="h-full w-full flex items-center justify-center font-semibold">
                       {data.conv.characters?.name?.[0]}
@@ -580,7 +729,9 @@ function ConvView() {
                   <CardTitle className="text-base">{data.conv.characters?.name}</CardTitle>
                   <div className="text-xs text-muted-foreground">
                     Shared Inbox לפי שיוך לדמות
-                    {data.conv.operators?.full_name ? ` · legacy: ${data.conv.operators.full_name}` : ""}
+                    {data.conv.operators?.full_name
+                      ? ` · legacy: ${data.conv.operators.full_name}`
+                      : ""}
                   </div>
                 </div>
               </div>
@@ -614,59 +765,68 @@ function ConvView() {
               {messages.length === 0 && (
                 <p className="text-sm text-center text-muted-foreground py-8">אין הודעות</p>
               )}
-              {messages.map((m: any) => {
+              {messages.map((m) => {
                 const isClientMessage = m.sender_type === "client";
                 const hasAttachments = (m.message_attachments?.length ?? 0) > 0;
                 const hasStickers = !!m.message_stickers;
-                const stickerHydrationPending = m.content === "[sticker]" && m.message_stickers === undefined;
+                const stickerHydrationPending =
+                  m.content === "[sticker]" && m.message_stickers === undefined;
                 const showContent =
                   (m.content !== "[image]" || !hasAttachments) &&
                   (m.content !== "[sticker]" || (!hasStickers && !stickerHydrationPending));
                 return (
-                <div
-                  key={m.id}
-                  className={`flex items-end gap-2 ${isClientMessage ? "justify-start" : "justify-end"}`}
-                >
-                  <ChatAvatar
-                    src={isClientMessage ? data.client?.avatar_url : data.conv.characters?.avatar_url}
-                    name={isClientMessage ? data.client?.display_name ?? data.client?.email : data.conv.characters?.name}
-                  />
                   <div
-                    className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                      isClientMessage
-                        ? "bg-muted"
-                        : m.sender_type === "operator"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-warning/20"
-                    }`}
+                    key={m.id}
+                    className={`flex items-end gap-2 ${isClientMessage ? "justify-start" : "justify-end"}`}
                   >
-                    <div className="text-[10px] opacity-70 mb-0.5">
-                      {m.sender_type === "client"
-                        ? "לקוח"
-                        : m.sender_type === "operator"
-                          ? `${adminOperatorUserIds.includes(m.operators?.user_id) ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
-                          : "אדמין"}
-                    </div>
-                    {showContent && <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>}
-                    {m.message_attachments?.map((attachment: MessageAttachmentData) => (
-                      <MessageAttachment
-                        key={attachment.id}
-                        attachment={attachment}
-                        access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
-                        accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
-                        refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
-                      />
-                    ))}
-                    {stickerHydrationPending && <StickerHydrationPlaceholder />}
-                    {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
-                    <div className="text-[10px] opacity-60 mt-1">
-                      {new Date(m.created_at).toLocaleTimeString("he-IL")}
-                      {m.sender_type !== "client" && (
-                        <span className="ms-2">{m.is_read ? "נראה" : "נשלח"}</span>
+                    <ChatAvatar
+                      src={
+                        isClientMessage ? data.client?.avatar_url : data.conv.characters?.avatar_url
+                      }
+                      name={
+                        isClientMessage
+                          ? (data.client?.display_name ?? data.client?.email)
+                          : data.conv.characters?.name
+                      }
+                    />
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-4 py-2 ${
+                        isClientMessage
+                          ? "bg-muted"
+                          : m.sender_type === "operator"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-warning/20"
+                      }`}
+                    >
+                      <div className="text-[10px] opacity-70 mb-0.5">
+                        {m.sender_type === "client"
+                          ? "לקוח"
+                          : m.sender_type === "operator"
+                            ? `${adminOperatorUserIds.includes(m.operators?.user_id ?? "") ? "מנהל" : "עובד"}: ${m.operators?.full_name ?? "לא ידוע"}${m.operator_id ? ` · ${String(m.operator_id).slice(0, 8)}` : ""}`
+                            : "אדמין"}
+                      </div>
+                      {showContent && (
+                        <div className="text-sm whitespace-pre-wrap break-words">{m.content}</div>
                       )}
+                      {m.message_attachments?.map((attachment: MessageAttachmentData) => (
+                        <MessageAttachment
+                          key={attachment.id}
+                          attachment={attachment}
+                          access={attachmentAccess.accessByAttachmentId[attachment.id] ?? null}
+                          accessStatus={attachmentAccess.getAccessStatus(attachment.id)}
+                          refreshAccess={() => attachmentAccess.refreshAttachment(attachment.id)}
+                        />
+                      ))}
+                      {stickerHydrationPending && <StickerHydrationPlaceholder />}
+                      {m.message_stickers && <MessageSticker sticker={m.message_stickers} />}
+                      <div className="text-[10px] opacity-60 mt-1">
+                        {new Date(m.created_at).toLocaleTimeString("he-IL")}
+                        {m.sender_type !== "client" && (
+                          <span className="ms-2">{m.is_read ? "נראה" : "נשלח"}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
                 );
               })}
             </div>
@@ -680,7 +840,8 @@ function ConvView() {
                   <div className="space-y-2">
                     {lockHeldByOther && (
                       <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                        השיחה נעולה כרגע ל{activeLock?.operators?.full_name ?? "עובד אחר"}. Lock Mode נאכף גם על אדמין.
+                        השיחה נעולה כרגע ל{activeLock?.operators?.full_name ?? "עובד אחר"}. Lock
+                        Mode נאכף גם על אדמין.
                       </div>
                     )}
                     <div className="flex items-end gap-2">
@@ -707,6 +868,7 @@ function ConvView() {
                         onClick={() => setMediaPickerOpen(true)}
                         disabled={composerDisabled}
                         title="בחירת מדיה"
+                        ref={mediaPickerOpener}
                         aria-label="בחירת מדיה"
                       >
                         <ImagePlus className="h-4 w-4" />
@@ -729,6 +891,7 @@ function ConvView() {
                         onClick={sendMessage}
                         disabled={composerDisabled || !messageInput.trim()}
                         title="שליחת הודעה"
+                        aria-label="שליחת הודעה"
                       >
                         <Send className="h-4 w-4" />
                       </Button>
@@ -753,20 +916,34 @@ function ConvView() {
 
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="text-sm">פעולות</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">פעולות</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
-                מקור האמת לשיחות עובדים הוא Shared Inbox לפי שיוך העובדים לדמות. השדה כאן נשמר כ־legacy metadata בלבד.
+                מקור האמת לשיחות עובדים הוא Shared Inbox לפי שיוך העובדים לדמות. השדה כאן נשמר
+                כ־legacy metadata בלבד.
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Legacy assignment / metadata</label>
+                <label className="text-xs text-muted-foreground">סיבת לקיחה או העברת טיפול</label>
+                <Input
+                  className="mb-2 mt-1"
+                  value={reassignReason}
+                  onChange={(event) => setReassignReason(event.target.value)}
+                  placeholder="לדוגמה: העברה לפי החלטת מנהל"
+                  maxLength={500}
+                />
                 <Select onValueChange={reassign}>
-                  <SelectTrigger><SelectValue placeholder="בחר עובד לשיוך legacy" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="בחר עובד לקבלת הטיפול" />
+                  </SelectTrigger>
                   <SelectContent>
                     {data.availableOps.length === 0 && (
-                      <div className="px-2 py-3 text-xs text-muted-foreground">אין עובדים משויכים לדמות</div>
+                      <div className="px-2 py-3 text-xs text-muted-foreground">
+                        אין עובדים משויכים לדמות
+                      </div>
                     )}
-                    {data.availableOps.map((o: any) => (
+                    {data.availableOps.map((o) => (
                       <SelectItem key={o.id} value={o.id}>
                         {o.full_name} ({o.availability_status})
                       </SelectItem>
@@ -777,7 +954,9 @@ function ConvView() {
               <div>
                 <label className="text-xs text-muted-foreground">שינוי סטטוס</label>
                 <Select value={data.conv.status} onValueChange={setStatus}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="open">פתוחה</SelectItem>
                     <SelectItem value="waiting">ממתינה</SelectItem>
@@ -786,20 +965,61 @@ function ConvView() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="rounded-lg border border-destructive/30 p-3">
+                <label className="text-xs font-medium text-destructive">בקשת מחיקת שיחה מלאה</label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  זו אינה סגירת שיחה. הבקשה מתועדת בלבד עד שמדיניות השימור וכל שלבי המחיקה מאושרים
+                  ומושלמים.
+                </p>
+                <Textarea
+                  className="mb-2 mt-2 min-h-20"
+                  value={deletionReason}
+                  onChange={(event) => setDeletionReason(event.target.value)}
+                  placeholder="סיבה מפורשת לבקשת המחיקה"
+                  maxLength={500}
+                  disabled={requestingDeletion}
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => void requestConversationDeletion()}
+                  disabled={requestingDeletion || deletionReason.trim().length < 3}
+                >
+                  {requestingDeletion ? "מתעד בקשה…" : "אישור ותיעוד בקשת מחיקה"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-sm">לקוח</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">לקוח</CardTitle>
+            </CardHeader>
             <CardContent className="text-sm space-y-1">
-              <div><span className="text-muted-foreground">שם:</span> {data.client?.display_name ?? "—"}</div>
-              <div className="truncate"><span className="text-muted-foreground">אימייל:</span> {data.client?.email ?? "—"}</div>
-              {data.cprof?.age && <div><span className="text-muted-foreground">גיל:</span> {data.cprof.age}</div>}
-              {data.cprof?.gender && <div><span className="text-muted-foreground">מגדר:</span> {data.cprof.gender}</div>}
+              <div>
+                <span className="text-muted-foreground">שם:</span>{" "}
+                {data.client?.display_name ?? "—"}
+              </div>
+              <div className="truncate">
+                <span className="text-muted-foreground">אימייל:</span> {data.client?.email ?? "—"}
+              </div>
+              {data.cprof?.age && (
+                <div>
+                  <span className="text-muted-foreground">גיל:</span> {data.cprof.age}
+                </div>
+              )}
+              {data.cprof?.gender && (
+                <div>
+                  <span className="text-muted-foreground">מגדר:</span> {data.cprof.gender}
+                </div>
+              )}
               {data.cprof?.interests && data.cprof.interests.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
                   {data.cprof.interests.map((i: string, idx: number) => (
-                    <span key={idx} className="text-xs px-2 py-0.5 rounded-full bg-muted">{i}</span>
+                    <span key={idx} className="text-xs px-2 py-0.5 rounded-full bg-muted">
+                      {i}
+                    </span>
                   ))}
                 </div>
               )}
@@ -825,7 +1045,12 @@ function ConvView() {
                   maxLength={2000}
                   className="resize-none text-sm"
                 />
-                <Button onClick={saveNote} disabled={savingNote || !noteInput.trim()} size="sm" className="w-full">
+                <Button
+                  onClick={saveNote}
+                  disabled={savingNote || !noteInput.trim()}
+                  size="sm"
+                  className="w-full"
+                >
                   {savingNote ? "שומר..." : "שמור הערה"}
                 </Button>
               </div>
@@ -833,10 +1058,11 @@ function ConvView() {
                 {data.notes.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-2">אין הערות</p>
                 )}
-                {data.notes.map((n: any) => (
+                {data.notes.map((n) => (
                   <div key={n.id} className="text-xs p-2 rounded bg-muted">
                     <div className="text-muted-foreground mb-1">
-                      {n.operators?.full_name ?? "מנהל"} · {new Date(n.created_at).toLocaleString("he-IL")}
+                      {n.operators?.full_name ?? "מנהל"} ·{" "}
+                      {new Date(n.created_at).toLocaleString("he-IL")}
                     </div>
                     <div className="whitespace-pre-wrap break-words">{n.note}</div>
                   </div>
@@ -872,12 +1098,15 @@ function ConvView() {
               </div>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {data.customerInfo.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-2">אין מידע פנימי עדיין</p>
+                  <p className="text-xs text-muted-foreground text-center py-2">
+                    אין מידע פנימי עדיין
+                  </p>
                 )}
-                {data.customerInfo.map((entry: any) => (
+                {data.customerInfo.map((entry) => (
                   <div key={entry.id} className="text-xs p-2 rounded bg-muted">
                     <div className="text-muted-foreground mb-1">
-                      {entry.operators?.full_name ?? "מנהל"} · {new Date(entry.created_at).toLocaleString("he-IL")}
+                      {entry.operators?.full_name ?? "מנהל"} ·{" "}
+                      {new Date(entry.created_at).toLocaleString("he-IL")}
                     </div>
                     <div className="whitespace-pre-wrap break-words">{entry.content}</div>
                   </div>
@@ -888,15 +1117,19 @@ function ConvView() {
 
           {data.reports.length > 0 && (
             <Card>
-              <CardHeader><CardTitle className="text-sm">דיווחים</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-sm">דיווחים</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-2">
-                {data.reports.map((r: any) => (
+                {data.reports.map((r) => (
                   <div key={r.id} className="text-xs p-2 rounded border">
                     <div className="flex justify-between mb-1">
                       <span className="font-medium">{r.reason}</span>
                       <StatusBadge status={r.status} />
                     </div>
-                    <div className="text-muted-foreground">{new Date(r.created_at).toLocaleString("he-IL")}</div>
+                    <div className="text-muted-foreground">
+                      {new Date(r.created_at).toLocaleString("he-IL")}
+                    </div>
                   </div>
                 ))}
               </CardContent>
@@ -909,6 +1142,7 @@ function ConvView() {
         conversationId={conversationId}
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+        returnFocusRef={mediaPickerOpener}
       />
       <StickerPicker
         conversationId={conversationId}

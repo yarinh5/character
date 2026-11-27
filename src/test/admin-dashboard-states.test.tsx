@@ -35,8 +35,31 @@ const snapshotRow = {
   active_media_tag_count: 3,
 };
 
+const waitSummaryRow = {
+  waiting_count: 3,
+  over_target_count: 1,
+  oldest_wait_seconds: 480,
+  target_seconds: 420,
+};
+
+const exceptionsRow = {
+  allocation_issue_count: 0,
+  gift_reward_failure_count: 0,
+  gift_unallocated_event_count: 0,
+  media_cleanup_failure_count: 0,
+  account_deletion_blocked_count: 0,
+  account_deletion_failure_count: 0,
+  conversation_deletion_blocked_count: 0,
+  conversation_deletion_failure_count: 0,
+};
+
 const dashboardAnalytics = {
-  days: [{ date: "2026-11-01", conversations: 0, users: 0, messages: 0 }],
+  days: Array.from({ length: 14 }, (_, i) => ({
+    date: `2026-11-${String(i + 1).padStart(2, "0")}`,
+    conversations: 0,
+    users: 0,
+    messages: 0,
+  })),
   avgResponseSec: 0,
   topOperators: [],
   topCharacters: [],
@@ -67,6 +90,8 @@ const io = vi.hoisted(() => ({
   readTable: vi.fn(),
   dashboardAnalytics: vi.fn(),
   snapshot: vi.fn(),
+  waitSummary: vi.fn(),
+  exceptions: vi.fn(),
   channels: [] as Array<{
     name: string;
     callbacks: Array<() => void>;
@@ -142,8 +167,10 @@ vi.mock("@/integrations/supabase/client", () => ({
       return query;
     },
     rpc: (name: string) => {
-      if (name !== "get_admin_operations_snapshot") throw new Error(`Unexpected RPC: ${name}`);
-      return io.snapshot();
+      if (name === "get_admin_operations_snapshot") return io.snapshot();
+      if (name === "get_admin_operational_wait_summary") return io.waitSummary();
+      if (name === "get_admin_completion_exceptions") return io.exceptions();
+      throw new Error(`Unexpected RPC: ${name}`);
     },
     channel: (name: string) => {
       const callbacks: Array<() => void> = [];
@@ -214,6 +241,8 @@ beforeEach(() => {
   io.readTable.mockReset().mockImplementation(defaultTableReply);
   io.dashboardAnalytics.mockReset().mockResolvedValue(dashboardAnalytics);
   io.snapshot.mockReset().mockResolvedValue({ data: [snapshotRow], error: null });
+  io.waitSummary.mockReset().mockResolvedValue({ data: [waitSummaryRow], error: null });
+  io.exceptions.mockReset().mockResolvedValue({ data: [exceptionsRow], error: null });
   io.channels.length = 0;
   io.removeChannel.mockReset().mockResolvedValue(undefined);
 });
@@ -573,5 +602,7 @@ describe("admin dashboard read states", () => {
     expect(screen.getByText("יתרות קרדיט היסטוריות לעובדים")).toBeInTheDocument();
     const zeroDay = screen.getByTitle("2026-11-01: 0 הודעות").firstElementChild;
     expect(zeroDay).toHaveStyle({ height: "0%" });
+    expect(screen.getAllByTitle(/^2026-11-\d{2}: 0 הודעות$/)).toHaveLength(14);
+    expect(screen.getByTitle("2026-11-14: 0 הודעות")).toBeInTheDocument();
   });
 });

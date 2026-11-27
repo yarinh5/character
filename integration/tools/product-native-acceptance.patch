@@ -1,0 +1,45 @@
+diff --git a/preparation.py b/preparation.py
+--- a/preparation.py
++++ b/preparation.py
+@@ -211,7 +211,10 @@ def finish_run(boundary, *, service_state, prior_quiescent, canary_attempted, primary,
+                 secondary.append(_fact(name, r))
+             elif b"PRODUCT_CANARY_FINAL_CLEANUP=1" not in r["stdout"].split(b"\n"):
+                 raise SequenceError(name, "unconfirmed cleanup: missing success marker")
+-        r = _user(b, "finalize-user", [*BASH, nb.ARTIFACT, "finalize-user", *args], 600000)
++        final_argv = [*BASH, nb.ARTIFACT, "finalize-user", *args]
++        if service_state == "NotDispatched" and primary is not None:
++            final_argv.extend(("--outer-primary", f"{primary['stage']}:{primary['exitCode']}"))
++        r = _user(b, "finalize-user", final_argv, 600000)
+         if r["timedOut"]:
+             raise SequenceError("finalize-user", "Finalize deadline; outcome unknown", exit_code=r["exitCode"], timed_out=True)
+         observed = _user(b, "finalize-result-observation", ["/usr/bin/cat", ev + "/finalize.result.txt"], 60000)
+diff --git a/continuous.py b/continuous.py
+--- a/continuous.py
++++ b/continuous.py
+@@ -14,2 +14,2 @@
+-SCRIPT_PIN="2d69bab62461d4743607ffd438c4a12622f9900be74c5af04ae78a745d86c70c"
++SCRIPT_PIN="318268236f509f0b7a42cce9c9bb19e282a0bddeb53f4de737af7231153c2807"
+ PERL_PIN="a5e940e7a776d4f80b6f98e0a11708568fe7468757b4e122c02775449273cb3f"
+diff --git a/service/service-lane.sh b/service/service-lane.sh
+--- a/service/service-lane.sh
++++ b/service/service-lane.sh
+@@ -350,14 +350,16 @@
+   supabase/tests/http/authorized_read_access_revocation.integration.test.ts \
+   supabase/tests/http/client_pii_archive.integration.test.ts \
+   supabase/tests/http/media_authorization.integration.test.ts \
+-  supabase/tests/http/paid_sticker.integration.test.ts
++  supabase/tests/http/paid_sticker.integration.test.ts \
++  supabase/tests/http/wp11_admin_status.integration.test.ts
+ product_run_service_gate http.2 900 npm run test:http -- \
+   supabase/tests/http/active_new_responsibility_send.integration.test.ts \
+   supabase/tests/http/admin_operations_snapshot.integration.test.ts \
+   supabase/tests/http/authorization_new.integration.test.ts \
+   supabase/tests/http/authorized_read_access_revocation.integration.test.ts \
+   supabase/tests/http/client_pii_archive.integration.test.ts \
+   supabase/tests/http/media_authorization.integration.test.ts \
+-  supabase/tests/http/paid_sticker.integration.test.ts
++  supabase/tests/http/paid_sticker.integration.test.ts \
++  supabase/tests/http/wp11_admin_status.integration.test.ts
+-
++
+ if test -n "${PRODUCT_EDGE_SERVE_PID-}" && kill -0 "$PRODUCT_EDGE_SERVE_PID" 2>/dev/null; then

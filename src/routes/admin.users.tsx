@@ -1,9 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Edit, KeyRound, Ban, CheckCircle2, Trash2, Search, UserCog, Mail } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  KeyRound,
+  Ban,
+  CheckCircle2,
+  Trash2,
+  Search,
+  UserCog,
+  Mail,
+} from "lucide-react";
 
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,6 +57,7 @@ import {
 import { adminImpersonate, adminSendPasswordReset } from "@/lib/impersonation.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { startImpersonation } from "@/components/common/ImpersonationBanner";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/admin/users")({
   component: UsersPage,
@@ -59,10 +70,12 @@ type Row = {
   avatar_url: string | null;
   status: string;
   created_at: string;
-  role: "admin" | "operator" | "client";
+  role: "admin" | "operator" | "client" | null;
 };
 
-const ROLE_LABEL: Record<Row["role"], string> = {
+type AppRole = NonNullable<Row["role"]>;
+
+const ROLE_LABEL: Record<AppRole, string> = {
   admin: "מנהל",
   operator: "עובד",
   client: "לקוח",
@@ -71,9 +84,11 @@ const ROLE_LABEL: Record<Row["role"], string> = {
 function UsersPage() {
   const qc = useQueryClient();
   const listFn = useServerFn(adminListUsers);
+  const { user } = useAuth();
 
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | Row["role"]>("all");
+  const [committedSearch, setCommittedSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | AppRole>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "blocked">("all");
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -81,23 +96,32 @@ function UsersPage() {
   const [resetting, setResetting] = useState<Row | null>(null);
   const [deleting, setDeleting] = useState<Row | null>(null);
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["admin-users"],
-    queryFn: () => listFn(),
-  });
+  useEffect(() => {
+    const timeout = setTimeout(() => setCommittedSearch(search.trim()), 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (data ?? []).filter((u) => {
-      if (roleFilter !== "all" && u.role !== roleFilter) return false;
-      if (statusFilter !== "all" && u.status !== statusFilter) return false;
-      if (!q) return true;
-      return (
-        (u.email ?? "").toLowerCase().includes(q) ||
-        (u.display_name ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [data, search, roleFilter, statusFilter]);
+  const listQuery = useInfiniteQuery({
+    queryKey: ["admin-users", user?.id, committedSearch, roleFilter, statusFilter],
+    initialPageParam: null as { created_at: string; user_id: string } | null,
+    queryFn: ({ pageParam }) =>
+      listFn({
+        data: {
+          search: committedSearch,
+          role: roleFilter,
+          status: statusFilter,
+          before_created_at: pageParam?.created_at ?? null,
+          before_user_id: pageParam?.user_id ?? null,
+          page_size: 101,
+        },
+      }),
+    getNextPageParam: (page) =>
+      page.length > 100
+        ? { created_at: page[99].created_at, user_id: page[99].user_id }
+        : undefined,
+  });
+  const rows = listQuery.data?.pages.flatMap((page) => page.slice(0, 100)) ?? [];
+  const searchPending = search.trim() !== committedSearch;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-users"] });
 
@@ -119,13 +143,17 @@ function UsersPage() {
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="חיפוש לפי שם או אימייל"
+              aria-label="חיפוש לפי שם או אימייל"
+              maxLength={120}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pr-9"
             />
           </div>
           <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as typeof roleFilter)}>
-            <SelectTrigger className="md:w-40"><SelectValue placeholder="תפקיד" /></SelectTrigger>
+            <SelectTrigger className="md:w-40">
+              <SelectValue placeholder="תפקיד" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">כל התפקידים</SelectItem>
               <SelectItem value="admin">מנהל</SelectItem>
@@ -133,8 +161,13 @@ function UsersPage() {
               <SelectItem value="client">לקוח</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-            <SelectTrigger className="md:w-40"><SelectValue placeholder="סטטוס" /></SelectTrigger>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          >
+            <SelectTrigger className="md:w-40">
+              <SelectValue placeholder="סטטוס" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">כל הסטטוסים</SelectItem>
               <SelectItem value="active">פעיל</SelectItem>
@@ -146,19 +179,45 @@ function UsersPage() {
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <div className="p-6 space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>}
-          {isError && (
-            <div className="p-6 text-center">
-              <p className="text-destructive mb-3">{(error as Error)?.message ?? "שגיאה בטעינה"}</p>
-              <Button variant="outline" onClick={() => refetch()}>נסה שוב</Button>
+          {listQuery.isPending && (
+            <div className="p-6 space-y-2">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
             </div>
           )}
-          {!isLoading && !isError && filtered.length === 0 && (
-            <p className="text-center text-muted-foreground py-12">לא נמצאו משתמשים</p>
+          {listQuery.isError && listQuery.data === undefined && (
+            <div className="p-6 text-center">
+              <p className="text-destructive mb-3">{listQuery.error?.message ?? "שגיאה בטעינה"}</p>
+              <Button variant="outline" onClick={() => void listQuery.refetch()}>
+                נסה שוב
+              </Button>
+            </div>
           )}
-          {!isLoading && !isError && filtered.length > 0 && (
+          {listQuery.isFetchNextPageError && (
+            <p className="p-4 text-sm text-destructive" role="alert">
+              טעינת משתמשים נוספים נכשלה. הרשימה שכבר נטענה נשמרה.
+            </p>
+          )}
+          {listQuery.isError && listQuery.data !== undefined && !listQuery.isFetchNextPageError && (
+            <p className="p-4 text-sm text-destructive" role="alert">
+              רענון הרשימה נכשל. מוצגים משתמשים שכבר נטענו.
+            </p>
+          )}
+          {searchPending && (
+            <p className="p-4 text-sm" role="status">
+              מעדכן חיפוש...
+            </p>
+          )}
+          {!searchPending &&
+            !listQuery.isPending &&
+            listQuery.data !== undefined &&
+            rows.length === 0 && (
+              <p className="text-center text-muted-foreground py-12">לא נמצאו משתמשים</p>
+            )}
+          {!searchPending && !listQuery.isPending && rows.length > 0 && (
             <div className="divide-y">
-              {filtered.map((u) => (
+              {rows.map((u) => (
                 <div key={u.user_id} className="flex flex-wrap items-center gap-3 p-4">
                   <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
                     {u.avatar_url ? (
@@ -171,30 +230,65 @@ function UsersPage() {
                   </div>
                   <div className="flex-1 min-w-[180px]">
                     <div className="font-medium">{u.display_name ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground" dir="ltr">{u.email ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground" dir="ltr">
+                      {u.email ?? "—"}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary">
-                      {ROLE_LABEL[u.role]}
+                      {u.role ? ROLE_LABEL[u.role] : "לא הוקצה"}
                     </span>
                     <StatusBadge status={u.status} />
                   </div>
                   <div className="flex gap-1 flex-wrap">
-                    <Button size="sm" variant="ghost" title="עריכה" onClick={() => setEditing(u)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="עריכה"
+                      aria-label={`עריכת ${u.display_name ?? u.email ?? "משתמש"}`}
+                      onClick={() => setEditing(u)}
+                    >
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" title="איפוס סיסמה" onClick={() => setResetting(u)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="איפוס סיסמה"
+                      aria-label={`איפוס סיסמה עבור ${u.display_name ?? u.email ?? "משתמש"}`}
+                      onClick={() => setResetting(u)}
+                    >
                       <KeyRound className="h-4 w-4" />
                     </Button>
                     <SendResetButton user={u} />
-                    <ImpersonateButton user={u} />
-                    <ToggleStatusButton user={u} onDone={invalidate} />
-                    <Button size="sm" variant="ghost" title="מחיקה" onClick={() => setDeleting(u)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {u.role !== "admin" && (
+                      <>
+                        <ImpersonateButton user={u} />
+                        <ToggleStatusButton user={u} onDone={invalidate} />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="מחיקה"
+                          aria-label={`מחיקת ${u.display_name ?? u.email ?? "משתמש"}`}
+                          onClick={() => setDeleting(u)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {!searchPending && listQuery.hasNextPage && (
+            <div className="p-4 text-center">
+              <Button
+                variant="outline"
+                disabled={listQuery.isFetchingNextPage}
+                onClick={() => void listQuery.fetchNextPage()}
+              >
+                {listQuery.isFetchingNextPage ? "טוען משתמשים..." : "טען משתמשים נוספים"}
+              </Button>
             </div>
           )}
         </CardContent>
@@ -203,14 +297,20 @@ function UsersPage() {
       {createOpen && (
         <CreateUserDialog
           onClose={() => setCreateOpen(false)}
-          onCreated={() => { setCreateOpen(false); invalidate(); }}
+          onCreated={() => {
+            setCreateOpen(false);
+            invalidate();
+          }}
         />
       )}
       {editing && (
         <EditUserDialog
           user={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); invalidate(); }}
+          onSaved={() => {
+            setEditing(null);
+            invalidate();
+          }}
         />
       )}
       {resetting && (
@@ -224,7 +324,10 @@ function UsersPage() {
         <DeleteConfirm
           user={deleting}
           onClose={() => setDeleting(null)}
-          onDone={() => { setDeleting(null); invalidate(); }}
+          onDone={() => {
+            setDeleting(null);
+            invalidate();
+          }}
         />
       )}
     </div>
@@ -248,8 +351,19 @@ function ToggleStatusButton({ user, onDone }: { user: Row; onDone: () => void })
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title={blocked ? "שחרור חסימה" : "חסימה"}>
-      {blocked ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Ban className="h-4 w-4 text-warning" />}
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title={blocked ? "שחרור חסימה" : "חסימה"}
+      aria-label={`${blocked ? "שחרור חסימה" : "חסימה"} עבור ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
+      {blocked ? (
+        <CheckCircle2 className="h-4 w-4 text-success" />
+      ) : (
+        <Ban className="h-4 w-4 text-warning" />
+      )}
     </Button>
   );
 }
@@ -262,7 +376,7 @@ function SendResetButton({ user }: { user: Row }) {
     try {
       const res = await send({ data: { user_id: user.user_id } });
       if (res.action_link) {
-        await navigator.clipboard.writeText(res.action_link).catch(() => {});
+        await navigator.clipboard.writeText(res.action_link);
         toast.success("קישור איפוס הועתק ללוח");
       } else {
         toast.success("נשלח אימייל איפוס סיסמה");
@@ -274,7 +388,14 @@ function SendResetButton({ user }: { user: Row }) {
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title="שלח קישור איפוס סיסמה">
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title="שלח קישור איפוס סיסמה"
+      aria-label={`שליחת קישור איפוס סיסמה עבור ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
       <Mail className="h-4 w-4" />
     </Button>
   );
@@ -308,7 +429,14 @@ function ImpersonateButton({ user }: { user: Row }) {
     }
   };
   return (
-    <Button size="sm" variant="ghost" onClick={click} disabled={busy} title="התחזה למשתמש">
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={click}
+      disabled={busy}
+      title="התחזה למשתמש"
+      aria-label={`התחזות אל ${user.display_name ?? user.email ?? "משתמש"}`}
+    >
       <UserCog className="h-4 w-4" />
     </Button>
   );
@@ -319,7 +447,7 @@ function CreateUserDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState<Row["role"]>("client");
+  const [role, setRole] = useState<AppRole>("client");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
@@ -346,21 +474,39 @@ function CreateUserDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם מלא</Label>
-            <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            <Label htmlFor="admin-user-create-full-name">שם מלא</Label>
+            <Input
+              id="admin-user-create-full-name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+            />
           </div>
           <div>
-            <Label>אימייל</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="admin-user-create-email">אימייל</Label>
+            <Input
+              id="admin-user-create-email"
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div>
-            <Label>סיסמה (לפחות 8 תווים)</Label>
-            <Input type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Label htmlFor="admin-user-create-password">סיסמה (לפחות 8 תווים)</Label>
+            <Input
+              id="admin-user-create-password"
+              type="password"
+              dir="ltr"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </div>
           <div>
-            <Label>תפקיד</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as Row["role"])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Label htmlFor="admin-user-create-role">תפקיד</Label>
+            <Select value={role} onValueChange={(v) => setRole(v as AppRole)}>
+              <SelectTrigger id="admin-user-create-role">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="client">לקוח</SelectItem>
                 <SelectItem value="operator">עובד</SelectItem>
@@ -370,8 +516,12 @@ function CreateUserDialog({ onClose, onCreated }: { onClose: () => void; onCreat
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>{busy ? "יוצר..." : "צור"}</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "יוצר..." : "צור"}
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -393,7 +543,7 @@ function EditUserDialog({
   const [status, setStatus] = useState<"active" | "blocked">(
     user.status === "blocked" ? "blocked" : "active",
   );
-  const [role, setRole] = useState<Row["role"]>(user.role);
+  const [role, setRole] = useState<AppRole | null>(user.role);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
@@ -404,13 +554,13 @@ function EditUserDialog({
         display_name?: string;
         email?: string;
         status?: "active" | "blocked";
-        role?: Row["role"];
+        role?: AppRole;
       } = { user_id: user.user_id };
       if (displayName.trim() && displayName !== user.display_name)
         payload.display_name = displayName.trim();
       if (email.trim() && email !== user.email) payload.email = email.trim();
       if (status !== user.status) payload.status = status;
-      if (role !== user.role) payload.role = role;
+      if (role !== user.role && role !== null) payload.role = role;
       await update({ data: payload });
       toast.success("עודכן");
       onSaved();
@@ -429,17 +579,29 @@ function EditUserDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם תצוגה</Label>
-            <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            <Label htmlFor="admin-user-edit-display-name">שם תצוגה</Label>
+            <Input
+              id="admin-user-edit-display-name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
           </div>
           <div>
-            <Label>אימייל</Label>
-            <Input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="admin-user-edit-email">אימייל</Label>
+            <Input
+              id="admin-user-edit-email"
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div>
-            <Label>תפקיד</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as Row["role"])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Label htmlFor="admin-user-edit-role">תפקיד</Label>
+            <Select value={role ?? undefined} onValueChange={(v) => setRole(v as AppRole)}>
+              <SelectTrigger id="admin-user-edit-role">
+                <SelectValue placeholder="בחר תפקיד" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="client">לקוח</SelectItem>
                 <SelectItem value="operator">עובד</SelectItem>
@@ -448,9 +610,11 @@ function EditUserDialog({
             </Select>
           </div>
           <div>
-            <Label>סטטוס</Label>
+            <Label htmlFor="admin-user-edit-status">סטטוס</Label>
             <Select value={status} onValueChange={(v) => setStatus(v as "active" | "blocked")}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="admin-user-edit-status">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">פעיל</SelectItem>
                 <SelectItem value="blocked">חסום</SelectItem>
@@ -459,8 +623,12 @@ function EditUserDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>שמור</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            שמור
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -502,12 +670,22 @@ function ResetPasswordDialog({
           <DialogDescription>{user.email}</DialogDescription>
         </DialogHeader>
         <div>
-          <Label>סיסמה חדשה</Label>
-          <Input type="password" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Label htmlFor="admin-user-reset-password">סיסמה חדשה</Label>
+          <Input
+            id="admin-user-reset-password"
+            type="password"
+            dir="ltr"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy}>אפס</Button>
-          <Button variant="outline" onClick={onClose}>ביטול</Button>
+          <Button onClick={submit} disabled={busy}>
+            אפס
+          </Button>
+          <Button variant="outline" onClick={onClose}>
+            ביטול
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -548,7 +726,11 @@ function DeleteConfirm({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>ביטול</AlertDialogCancel>
-          <AlertDialogAction onClick={submit} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction
+            onClick={submit}
+            disabled={busy}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             מחק
           </AlertDialogAction>
         </AlertDialogFooter>

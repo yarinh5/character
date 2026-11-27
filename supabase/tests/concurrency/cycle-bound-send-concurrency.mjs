@@ -1,76 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { assertConcurrencyMigrationVersions } from "./migration-inventory.mjs";
+import { discoverConcurrencyTarget, resolveConcurrencyBinding } from "./local-target.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const projectId = "qmgkmsarzfjnqltljkjl";
-const dbContainer = `supabase_db_${projectId}`;
-const apiContainer = `supabase_kong_${projectId}`;
+const binding = resolveConcurrencyBinding();
+let dbContainer;
 const run = `wp01_cycle_send_${randomUUID().replaceAll("-", "")}`;
 const sessions = [];
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
 
-function docker(args) {
-  return execFileSync("docker", args, {
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: 15000,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
-function configPort(config, section) {
-  const match = config.match(
-    new RegExp(`\\[${section.replaceAll(".", "\\.")}\\]([\\s\\S]*?)(?=\\n\\[|$)`),
-  );
-  assert.ok(match, `missing [${section}] local configuration`);
-  const port = match[1].match(/^\s*port\s*=\s*(\d+)\s*$/m);
-  assert.ok(port, `missing [${section}].port local configuration`);
-  return Number(port[1]);
-}
-function assertLoopbackUrl(value, expectedPort, label) {
-  const url = new URL(String(value));
-  assert.ok(
-    ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname),
-    `${label} must be loopback`,
-  );
-  assert.equal(Number(url.port), expectedPort, `${label} must match config.toml`);
-}
-function assertDockerPort(info, name, internalPort, expectedPort, healthy = false) {
-  assert.equal(info.Name, `/${name}`);
-  assert.equal(info.State?.Running, true, `${name} must be running`);
-  if (healthy) assert.equal(info.State?.Health?.Status, "healthy", `${name} must be healthy`);
-  assert.ok(
-    (info.NetworkSettings?.Ports?.[internalPort] ?? []).some(
-      (entry) => Number(entry.HostPort) === expectedPort,
-    ),
-    `${name} port mapping mismatch`,
-  );
-}
-function assertLocalTarget() {
-  const config = readFileSync(join(repoRoot, "supabase", "config.toml"), "utf8");
-  assert.match(config, new RegExp(`project_id\\s*=\\s*"${projectId}"`));
-  const apiPort = configPort(config, "api");
-  const dbPort = configPort(config, "db");
-  const status = JSON.parse(
-    execFileSync("supabase", ["status", "--output", "json"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 30000,
-    }),
-  );
-  assertLoopbackUrl(status.API_URL, apiPort, "local API URL");
-  assertLoopbackUrl(status.DB_URL, dbPort, "local DB URL");
-  const [db] = JSON.parse(docker(["inspect", dbContainer]));
-  const [api] = JSON.parse(docker(["inspect", apiContainer]));
-  assertDockerPort(db, dbContainer, "5432/tcp", dbPort, true);
-  assertDockerPort(api, apiContainer, "8000/tcp", apiPort);
-  return { apiPort, dbPort };
-}
 class Session {
   constructor(label) {
     this.name = `${run}_${label}`;
@@ -173,8 +113,7 @@ class Session {
   }
 }
 const baselineSql = `SELECT json_build_object(
-  'migrations',(SELECT count(*) FROM supabase_migrations.schema_migrations),
-  'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
+  'migrations',(SELECT json_agg(version ORDER BY version) FROM supabase_migrations.schema_migrations),
   'users',(SELECT count(*) FROM auth.users),
   'operators',(SELECT count(*) FROM public.operators),
   'characters',(SELECT count(*) FROM public.characters),
@@ -184,6 +123,9 @@ const baselineSql = `SELECT json_build_object(
   'cycles',(SELECT count(*) FROM public.conversation_handling_cycles),
   'evidence',(SELECT count(*) FROM private.handling_send_authority_evidence),
   'ledger',(SELECT count(*) FROM public.credit_transactions),
+  'score_events',(SELECT count(*) FROM public.operator_score_events),
+  'point_transactions',(SELECT count(*) FROM public.operator_point_transactions),
+  'point_wallets',(SELECT count(*) FROM public.operator_point_wallets),
   'notifications',(SELECT count(*) FROM public.notifications),
   'analytics',(SELECT count(*) FROM public.analytics_events),
   'audit',(SELECT count(*) FROM public.audit_logs),
@@ -317,17 +259,21 @@ async function scenario(observer, label, reverse) {
       evidence: 2,
       effects: ["client_request", "staff_response", "staff_response"],
     });
-    const payoutCount = await observer.json(
-      `SELECT to_json(count(*)) FROM public.credit_transactions WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}) AND type='operator_message_payout';`,
+    const scoreCount = await observer.json(
+      `SELECT to_json(count(*)) FROM public.operator_score_events WHERE conversation_id=${quote(ids.conversation)} AND operator_id=${quote(winnerOperator)} AND reason='operator_message';`,
     );
-    assert.equal(payoutCount, 2, "only the two authorized operator sends create payouts");
+    assert.equal(scoreCount, 2, "only the two authorized sends create score events");
+    const pointCount = await observer.json(
+      `SELECT to_json(count(*)) FROM public.operator_point_transactions transaction JOIN public.operator_score_events event ON event.id=transaction.source_score_event_id WHERE event.conversation_id=${quote(ids.conversation)} AND transaction.operator_id=${quote(winnerOperator)};`,
+    );
+    assert.equal(pointCount, 2, "only the two authorized sends create point transactions");
     assert.equal(
       await observer.json("SELECT to_json(count(*)) FROM public.credit_transactions;"),
-      ledgerBefore + 2,
-      "the rejected contender creates no extra ledger transaction",
+      ledgerBefore,
+      "operator sends do not create credit payouts",
     );
     console.log(
-      `${label}: winner=${reverse ? "B" : "A"}; loser=handling_cycle_token_invalid; active_cycles=1; evidence=2; ledger delta=0.`,
+      `${label}: winner=${reverse ? "B" : "A"}; loser=handling_cycle_token_invalid; active_cycles=1; evidence=2; score=2; points=2; credit delta=0.`,
     );
   } finally {
     await Promise.allSettled([a.close(), b.close()]);
@@ -338,30 +284,33 @@ async function scenario(observer, label, reverse) {
     );
     if (setupCommitted)
       await observer.ok(
-        `BEGIN; DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}) OR character_id=${quote(ids.character)}; DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)} OR user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR metadata->>'character_id'=${quote(ids.character)}; DELETE FROM public.audit_logs WHERE entity_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.operator_score_events WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_monthly_scores WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversations WHERE id=${quote(ids.conversation)}; DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)}; DELETE FROM public.characters WHERE id=${quote(ids.character)}; DELETE FROM public.operators WHERE id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); COMMIT;`,
+        `BEGIN; DELETE FROM public.analytics_events WHERE conversation_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}) OR character_id=${quote(ids.character)}; DELETE FROM public.notifications WHERE conversation_id=${quote(ids.conversation)} OR user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}) OR metadata->>'character_id'=${quote(ids.character)}; DELETE FROM public.audit_logs WHERE entity_id=${quote(ids.conversation)} OR actor_user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.operator_point_transactions WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_score_events WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operator_monthly_scores WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_transactions WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.messages WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_handling_cycles WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversation_work_items WHERE conversation_id=${quote(ids.conversation)}; DELETE FROM public.conversations WHERE id=${quote(ids.conversation)}; DELETE FROM public.character_operator_assignments WHERE character_id=${quote(ids.character)}; DELETE FROM public.characters WHERE id=${quote(ids.character)}; DELETE FROM public.operator_point_wallets WHERE operator_id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.operators WHERE id IN (${quote(ids.operatorA)},${quote(ids.operatorB)}); DELETE FROM public.credit_wallets WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.user_roles WHERE user_id IN (${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM public.profiles WHERE user_id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); DELETE FROM auth.users WHERE id IN (${quote(ids.client)},${quote(ids.userA)},${quote(ids.userB)}); COMMIT;`,
       );
   }
 }
 let observer;
 let baseline;
+function baselineCounts({ migrations, ...counts }) {
+  return JSON.stringify({ migrations: migrations.length, latest: migrations.at(-1), ...counts });
+}
 try {
-  const target = assertLocalTarget();
+  const target = discoverConcurrencyTarget(binding, { healthy: true });
+  dbContainer = target.dbId;
   observer = new Session("observer");
   await observer.initialize();
   baseline = await observer.json(baselineSql);
-  console.log(`Baseline counts: ${JSON.stringify(baseline)}`);
-  assert.equal(baseline.migrations, 117);
-  assert.equal(baseline.latest, "20261013113744");
+  assertConcurrencyMigrationVersions(baseline.migrations);
+  console.log(`Baseline counts: ${baselineCounts(baseline)}`);
   console.log(
-    `Local stack verified: API ${target.apiPort}, DB ${target.dbPort}, migrations 117/latest 20261013113744.`,
+    `Local stack verified: API ${target.apiPort}, DB ${target.dbPort}, migrations ${baseline.migrations.length}/latest ${baseline.migrations.at(-1)}.`,
   );
   await scenario(observer, "forward", false);
   const afterForward = await observer.json(baselineSql);
-  console.log(`forward: post-cleanup=${JSON.stringify(afterForward)}`);
+  console.log(`forward: post-cleanup=${baselineCounts(afterForward)}`);
   assert.deepEqual(afterForward, baseline, "forward scenario restores baseline");
   await scenario(observer, "reverse", true);
   const afterReverse = await observer.json(baselineSql);
-  console.log(`reverse: post-cleanup=${JSON.stringify(afterReverse)}`);
+  console.log(`reverse: post-cleanup=${baselineCounts(afterReverse)}`);
   assert.deepEqual(afterReverse, baseline, "reverse scenario restores baseline");
   console.log(
     "PASS: deterministic two-session atomic claim-and-send exclusivity in both actor orders.",

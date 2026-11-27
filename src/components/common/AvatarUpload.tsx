@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -37,6 +38,7 @@ export function AvatarUpload({
   cancelCompletionOnUnmount = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadButtonRef = useRef<HTMLButtonElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const alive = useRef(true);
   const [busy, setBusy] = useState(false);
@@ -169,6 +171,7 @@ export function AvatarUpload({
           />
           <div className="flex flex-wrap gap-2">
             <Button
+              ref={uploadButtonRef}
               type="button"
               variant="outline"
               size="sm"
@@ -204,7 +207,16 @@ export function AvatarUpload({
           else if (!busy) clearSelection();
         }}
       >
-        <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogContent
+          dir="rtl"
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            const opener = uploadButtonRef.current;
+            if (!opener || opener.disabled) return;
+            event.preventDefault();
+            opener.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>חיתוך תמונת פרופיל</DialogTitle>
           </DialogHeader>
@@ -227,6 +239,7 @@ export function AvatarUpload({
               </div>
               <input
                 type="range"
+                aria-label="זום"
                 min="1"
                 max="3"
                 step="0.05"
@@ -235,9 +248,9 @@ export function AvatarUpload({
                 className="w-full accent-primary"
               />
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">
+            <DialogDescription className="text-xs leading-5 text-muted-foreground">
               התמונה תישמר כ־avatar מרובע/עגול ותוצג בפרופיל ובצ׳אט לאחר שמירת הפרופיל.
-            </p>
+            </DialogDescription>
           </div>
           <DialogFooter className="gap-2 sm:justify-start">
             <Button type="button" variant="outline" onClick={clearSelection} disabled={busy}>

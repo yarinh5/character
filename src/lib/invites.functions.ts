@@ -125,7 +125,9 @@ export const acceptInvite = createServerFn({ method: "POST" })
     // Check existing user by email
     let userId: string | null = null;
     const { data: list } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-    const existing = list?.users?.find((u) => u.email?.toLowerCase() === invite.email.toLowerCase());
+    const existing = list?.users?.find(
+      (u) => u.email?.toLowerCase() === invite.email.toLowerCase(),
+    );
 
     if (existing) {
       userId = existing.id;
@@ -137,6 +139,7 @@ export const acceptInvite = createServerFn({ method: "POST" })
         password: data.password,
         email_confirm: true,
         user_metadata: { display_name: invite.full_name },
+        app_metadata: { registration_origin: "admin_provisioned" },
       });
       if (cErr || !created.user) throw new Error(cErr?.message ?? "יצירה נכשלה");
       userId = created.user.id;

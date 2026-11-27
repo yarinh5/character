@@ -1,18 +1,31 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import {
+  copyFileSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runResetWithVerifiedState } from "./wp01-shadow-113-to-116.mjs";
+import {
+  loadApprovedRestoreMigrationVersions,
+  runResetWithVerifiedState,
+} from "./wp01-shadow-113-to-116.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const projectId = "qmgkmsarzfjnqltljkjl";
 const dbContainerName = `supabase_db_${projectId}`;
 const apiContainerName = `supabase_kong_${projectId}`;
-const supabaseCli = "C:\\Users\\Yarin\\scoop\\shims\\supabase.exe";
+export const SUPABASE_CLI_EXECUTABLE = "supabase";
 const version116 = "20261006211102";
 const version117 = "20261013113744";
+const version118 = "20261019071718";
 const failureMetadata = new WeakMap();
 const approvedErrorCodes = new Set(["EACCES", "ENOENT", "EPERM", "ETIMEDOUT", "ERR_ASSERTION"]);
 const approvedResourceLabels = new Set([
@@ -23,6 +36,15 @@ const approvedResourceLabels = new Set([
   "writer",
 ]);
 const approvedCleanupStages = new Set(["cancel", "cleanup", "drain", "end", "kill", "verify"]);
+const approvedRehearsalStages = new Set([
+  "reset_m116",
+  "barrier",
+  "post_upgrade_catalog",
+  "post_upgrade_state",
+  "migration_transition",
+  "authority_evidence",
+  "business_contract",
+]);
 
 function reportableFailure(error, metadata) {
   if (error instanceof Error) failureMetadata.set(error, Object.freeze({ ...metadata }));
@@ -31,7 +53,7 @@ function reportableFailure(error, metadata) {
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
-    cwd: repoRoot,
+    cwd: options.cwd ?? repoRoot,
     encoding: "utf8",
     windowsHide: true,
     stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
@@ -304,7 +326,7 @@ export async function runStrictCleanupReset({
 }
 
 function supabase(args) {
-  return run(supabaseCli, args, { timeout: 300_000 });
+  return run(SUPABASE_CLI_EXECUTABLE, args, { timeout: 300_000 });
 }
 
 function sql(statement, { timeoutMs = 60_000 } = {}) {
@@ -658,6 +680,49 @@ export function validateStrictUpgradeTransition(before, after) {
 }
 
 const migrationDirectory = join(repoRoot, "supabase", "migrations");
+
+function createStrictUpgradeWorkdir() {
+  const workdir = mkdtempSync(join(tmpdir(), "wp01-strict-116-117-"));
+  const destinationSupabase = join(workdir, "supabase");
+  const destinationMigrations = join(destinationSupabase, "migrations");
+  try {
+    const names = readdirSync(migrationDirectory);
+    const manifest = names
+      .map((name) => {
+        const source = join(migrationDirectory, name);
+        assert.ok(lstatSync(source).isFile(), `migration source must be a regular file: ${name}`);
+        const match = /^(\d{14})_.+\.sql$/.exec(name);
+        assert.ok(match, `malformed migration filename: ${name}`);
+        return { name, source, version: match[1] };
+      })
+      .filter((entry) => entry.version <= version117)
+      .sort((left, right) => left.version.localeCompare(right.version));
+    assert.equal(manifest.length, 117, "strict rehearsal manifest must contain M001-M117 only");
+    assert.equal(
+      manifest.at(-1)?.version,
+      version117,
+      "strict rehearsal manifest must end at M117",
+    );
+    mkdirSync(destinationMigrations, { recursive: true });
+    const sourceConfig = join(repoRoot, "supabase", "config.toml");
+    const copiedConfig = join(destinationSupabase, "config.toml");
+    copyFileSync(sourceConfig, copiedConfig);
+    assert.deepEqual(readFileSync(copiedConfig), readFileSync(sourceConfig));
+    for (const entry of manifest) {
+      const destination = join(destinationMigrations, entry.name);
+      copyFileSync(entry.source, destination);
+      assert.equal(
+        createHash("sha256").update(readFileSync(destination)).digest("hex"),
+        createHash("sha256").update(readFileSync(entry.source)).digest("hex"),
+        `isolated migration hash mismatch: ${entry.name}`,
+      );
+    }
+    return { workdir, destroy: () => rmSync(workdir, { recursive: true, force: true }) };
+  } catch (error) {
+    rmSync(workdir, { recursive: true, force: true });
+    throw error;
+  }
+}
 const cleanResidueKeys = [
   "users",
   "profiles",
@@ -689,19 +754,21 @@ export function expectedMigrationVersionsFromSource() {
     const match = entry.name.match(/^(\d{14})_.+\.sql$/);
     assert.ok(match, `malformed migration filename: ${entry.name}`);
     const version = match[1];
-    assert.ok(version <= version117, `unexpected migration after M117: ${entry.name}`);
     assert.equal(seen.has(version), false, `duplicate migration version: ${version}`);
     seen.add(version);
     versions.push(version);
   }
 
   versions.sort();
-  assert.equal(versions.length, 117, "expected exactly 117 migrations through M117");
-  assert.equal(versions.at(-1), version117, "M117 must be the final source migration");
   assert.equal(
     versions.filter((version) => version === version117).length,
     1,
     "M117 must appear exactly once in the source manifest",
+  );
+  assert.equal(
+    versions.filter((version) => version === version118).length,
+    1,
+    "M118 must appear exactly once in the source manifest",
   );
   return versions;
 }
@@ -717,8 +784,13 @@ export function assertCurrentMigrationBaseline(migration, expectedVersions) {
     expectedVersions.length,
     "cleanup migration count must match the source manifest",
   );
-  assert.equal(migration.latest, version117, "cleanup latest migration must be M117");
+  assert.equal(
+    migration.latest,
+    expectedVersions.at(-1),
+    "cleanup latest migration must match the approved history",
+  );
   assert.equal(migration.includes117, true, "cleanup history must include M117");
+  assert.equal(migration.includes118, true, "cleanup history must include M118");
   assert.deepEqual(
     migration.versions,
     expectedVersions,
@@ -728,9 +800,10 @@ export function assertCurrentMigrationBaseline(migration, expectedVersions) {
     migration,
     {
       migrations: expectedVersions.length,
-      latest: version117,
+      latest: expectedVersions.at(-1),
       versions: expectedVersions,
       includes117: true,
+      includes118: true,
     },
     "cleanup migration state must not omit or add fields",
   );
@@ -757,6 +830,7 @@ function migrationState() {
     'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
     'versions',(SELECT coalesce(json_agg(version ORDER BY version), '[]'::json) FROM supabase_migrations.schema_migrations),
     'includes117',(SELECT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='${version117}'))
+    ,'includes118',(SELECT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='${version118}'))
   );`);
 }
 
@@ -868,10 +942,19 @@ function assertResetState(expectedState) {
   }
 }
 
+export function buildStrictResetArgs(version) {
+  const args = ["db", "reset", "--local", "--no-seed"];
+  if (version !== undefined && version !== null) {
+    assert.match(version, /^\d{14}$/u, "migration version must contain 14 digits");
+    args.push("--version", version);
+  }
+  return args;
+}
+
 function reset(target, version, expectedState) {
   const result = runStrictReset({
     target,
-    reset: () => supabase(["db", "reset", "--local", "--no-seed", "--version", version]),
+    reset: () => supabase(buildStrictResetArgs(version)),
     waitForReady: () => waitForHealthyTarget(target),
     expectedState,
     verifyState: (_readyTarget, expected) => assertResetState(expected),
@@ -1111,6 +1194,7 @@ async function cancelSession(resource, adapters) {
 
 async function proveUpgradeBarrier(cleanupState) {
   const resources = [];
+  const upgradeWorkdir = createStrictUpgradeWorkdir();
   const runToken = `wp01_strict_${process.pid}_${Date.now()}`;
   const adapters = createStrictBarrierCleanupAdapters();
   const addSession = (label) => {
@@ -1125,10 +1209,11 @@ async function proveUpgradeBarrier(cleanupState) {
     return resource;
   };
   let migrationResource;
-  return withStrictBarrierCleanup(
-    async () => {
-      const writer = addSession("writer");
-      writer.process.write(`SET application_name = ${quotedSqlString(writer.applicationName)};
+  try {
+    return await withStrictBarrierCleanup(
+      async () => {
+        const writer = addSession("writer");
+        writer.process.write(`SET application_name = ${quotedSqlString(writer.applicationName)};
 BEGIN;
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-4000-8000-0000000c0011","role":"authenticated"}';
@@ -1136,58 +1221,64 @@ SELECT 'WRITER_PID:' || pg_backend_pid();
 SELECT public.send_operator_message('00000000-0000-4000-8000-0000000c0103','pre-strict barrier writer');
 \\echo WRITER_READY
 `);
-      writer.pid = parsePid(await waitForOutput(writer.process, "WRITER_READY"), "WRITER_PID");
-      captureBackendIdentity(writer, true);
+        writer.pid = parsePid(await waitForOutput(writer.process, "WRITER_READY"), "WRITER_PID");
+        captureBackendIdentity(writer, true);
 
-      const tableBlocker = addSession("table-blocker");
-      tableBlocker.process
-        .write(`SET application_name = ${quotedSqlString(tableBlocker.applicationName)};
+        const tableBlocker = addSession("table-blocker");
+        tableBlocker.process
+          .write(`SET application_name = ${quotedSqlString(tableBlocker.applicationName)};
 BEGIN;
 SELECT 1 FROM private.handling_contract_runtime WHERE singleton;
 SELECT 'TABLE_BLOCKER_PID:' || pg_backend_pid();
 \\echo TABLE_BLOCKER_READY
 `);
-      tableBlocker.pid = parsePid(
-        await waitForOutput(tableBlocker.process, "TABLE_BLOCKER_READY"),
-        "TABLE_BLOCKER_PID",
-      );
-      captureBackendIdentity(tableBlocker, true);
+        tableBlocker.pid = parsePid(
+          await waitForOutput(tableBlocker.process, "TABLE_BLOCKER_READY"),
+          "TABLE_BLOCKER_PID",
+        );
+        captureBackendIdentity(tableBlocker, true);
 
-      migrationResource = {
-        kind: "migration",
-        label: "migration",
-        applicationName: `${runToken}_migration`,
-        process: startProcess(supabaseCli, ["migration", "up", "--local"], {
-          input: false,
-          env: { ...process.env, PGAPPNAME: `${runToken}_migration` },
-        }),
-      };
-      resources.push(migrationResource);
-      cleanupState.quiescent = false;
-      const waitingForWriter = await waitForStrictBarrierState({
-        readState: async ({ timeoutMs }) => cutoverBarrierState({ timeoutMs }),
-        accept: (state) =>
-          state?.granted === false &&
-          state?.strict_column === false &&
-          state?.blockers?.includes(writer.pid),
-      });
-      migrationResource.pid = waitingForWriter.pid;
-      captureBackendIdentity(migrationResource, false);
-      assert.equal(migrationState().latest, version116, "contract changed before writer drained");
+        migrationResource = {
+          kind: "migration",
+          label: "migration",
+          applicationName: `${runToken}_migration`,
+          process: startProcess(
+            SUPABASE_CLI_EXECUTABLE,
+            ["migration", "up", "--local", "--workdir", upgradeWorkdir.workdir],
+            {
+              cwd: upgradeWorkdir.workdir,
+              input: false,
+              env: { ...process.env, PGAPPNAME: `${runToken}_migration` },
+            },
+          ),
+        };
+        resources.push(migrationResource);
+        cleanupState.quiescent = false;
+        const waitingForWriter = await waitForStrictBarrierState({
+          readState: async ({ timeoutMs }) => cutoverBarrierState({ timeoutMs }),
+          accept: (state) =>
+            state?.granted === false &&
+            state?.strict_column === false &&
+            state?.blockers?.includes(writer.pid),
+        });
+        migrationResource.pid = waitingForWriter.pid;
+        captureBackendIdentity(migrationResource, false);
+        assert.equal(migrationState().latest, version116, "contract changed before writer drained");
 
-      await finishSession(writer, "COMMIT;");
-      const holdingExclusive = await waitForStrictBarrierState({
-        readState: async ({ timeoutMs }) => migrationHoldState(waitingForWriter.pid, { timeoutMs }),
-        accept: (state) =>
-          state.barrier_granted === true &&
-          state.waiting_lock === true &&
-          state.blockers.includes(tableBlocker.pid) &&
-          state.strict_column === false,
-      });
+        await finishSession(writer, "COMMIT;");
+        const holdingExclusive = await waitForStrictBarrierState({
+          readState: async ({ timeoutMs }) =>
+            migrationHoldState(waitingForWriter.pid, { timeoutMs }),
+          accept: (state) =>
+            state.barrier_granted === true &&
+            state.waiting_lock === true &&
+            state.blockers.includes(tableBlocker.pid) &&
+            state.strict_column === false,
+        });
 
-      const lateWriter = addSession("late-writer");
-      lateWriter.process
-        .write(`SET application_name = ${quotedSqlString(lateWriter.applicationName)};
+        const lateWriter = addSession("late-writer");
+        lateWriter.process
+          .write(`SET application_name = ${quotedSqlString(lateWriter.applicationName)};
 BEGIN;
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-4000-8000-0000000c0002","role":"authenticated"}';
@@ -1195,46 +1286,50 @@ SELECT 'LATE_WRITER_PID:' || pg_backend_pid();
 SELECT public.send_client_message('00000000-0000-4000-8000-0000000c0102','blocked by strict barrier');
 \\echo LATE_WRITER_DONE
 `);
-      lateWriter.pid = parsePid(
-        await waitForOutput(lateWriter.process, "LATE_WRITER_PID"),
-        "LATE_WRITER_PID",
-      );
-      captureBackendIdentity(lateWriter, true);
-      const blockedLateWriter = await waitForStrictBarrierState({
-        readState: async ({ timeoutMs }) => lateWriterState(lateWriter.pid, { timeoutMs }),
-        accept: (state) =>
-          state.waiting_shared_barrier === true && state.blockers.includes(waitingForWriter.pid),
-      });
-      await cancelSession(lateWriter, adapters);
+        lateWriter.pid = parsePid(
+          await waitForOutput(lateWriter.process, "LATE_WRITER_PID"),
+          "LATE_WRITER_PID",
+        );
+        captureBackendIdentity(lateWriter, true);
+        const blockedLateWriter = await waitForStrictBarrierState({
+          readState: async ({ timeoutMs }) => lateWriterState(lateWriter.pid, { timeoutMs }),
+          accept: (state) =>
+            state.waiting_shared_barrier === true && state.blockers.includes(waitingForWriter.pid),
+        });
+        await cancelSession(lateWriter, adapters);
 
-      await finishSession(tableBlocker, "COMMIT;");
-      await withDeadline(() => migrationResource.process.completion, {
-        label: "migration:finish",
-      });
-      return { blockedLateWriter, holdingExclusive, waitingForWriter };
-    },
-    async () => {
-      const cleanupResult = await cleanupStrictBarrierResources({ resources, adapters });
-      cleanupState.quiescent = cleanupResult.quiescent;
-      cleanupState.resources = resources.map(({ applicationName, label, pid }) => ({
-        applicationName,
-        label,
-        pid,
-      }));
-      return cleanupResult;
-    },
-  );
+        await finishSession(tableBlocker, "COMMIT;");
+        await withDeadline(() => migrationResource.process.completion, {
+          label: "migration:finish",
+        });
+        return { blockedLateWriter, holdingExclusive, waitingForWriter };
+      },
+      async () => {
+        const cleanupResult = await cleanupStrictBarrierResources({ resources, adapters });
+        cleanupState.quiescent = cleanupResult.quiescent;
+        cleanupState.resources = resources.map(({ applicationName, label, pid }) => ({
+          applicationName,
+          label,
+          pid,
+        }));
+        return cleanupResult;
+      },
+    );
+  } finally {
+    upgradeWorkdir.destroy();
+  }
 }
 
-function assertCleanBaseline() {
-  const expectedVersions = expectedMigrationVersionsFromSource();
+function assertCleanBaseline(expectedVersions) {
   assertCurrentMigrationBaseline(migrationState(), expectedVersions);
   assertCleanResidue(cleanResidueState());
 }
 async function main() {
+  const approvedMigrationVersions = loadApprovedRestoreMigrationVersions();
   const originalTarget = acquireStableLocalTarget({ discoverTarget: () => validateLocalTarget() });
   let resetStarted = false;
   let primaryFailure;
+  let rehearsalStage = "reset_m116";
   const barrierCleanupState = { quiescent: true, resources: [] };
   try {
     console.log(
@@ -1261,12 +1356,15 @@ async function main() {
 
     sql(fixtureSql);
     const beforeUpgrade = migrationState();
+    rehearsalStage = "barrier";
     const barrierTimeline = await proveUpgradeBarrier(barrierCleanupState);
     console.log(
       `Verified strict upgrade barrier: migration ${barrierTimeline.waitingForWriter.pid} waited for writer ${barrierTimeline.waitingForWriter.blockers[0]}; late writer waited for the exclusive barrier`,
     );
+    rehearsalStage = "post_upgrade_catalog";
     const postCatalog = m117ObjectCatalog();
     assertPostM117ObjectCatalog(postCatalog);
+    rehearsalStage = "post_upgrade_state";
     const upgraded = json(`SELECT json_build_object(
       'migrations',(SELECT count(DISTINCT version) FROM supabase_migrations.schema_migrations),
       'latest',(SELECT max(version) FROM supabase_migrations.schema_migrations),
@@ -1283,7 +1381,9 @@ async function main() {
       legacy_trigger: false,
       strict_overload: true,
     });
+    rehearsalStage = "migration_transition";
     validateStrictUpgradeTransition(beforeUpgrade, migrationState());
+    rehearsalStage = "authority_evidence";
     assert.deepEqual(
       json(`SELECT json_build_object(
         'old_message_before_strict',(
@@ -1307,6 +1407,7 @@ async function main() {
       { late_writer_messages: 0, old_message_before_strict: true, old_message_evidence: 0 },
     );
 
+    rehearsalStage = "business_contract";
     const activeConversation = "00000000-0000-4000-8000-0000000c0101";
     const activeCycle = "00000000-0000-4000-8000-0000000c0201";
     const atomicConversation = "00000000-0000-4000-8000-0000000c0102";
@@ -1362,7 +1463,10 @@ async function main() {
       "WP01.4 strict-send upgrade rehearsal passed: 116 -> 117; cycle token and atomic claim evidence verified",
     );
   } catch (error) {
-    primaryFailure = error;
+    primaryFailure = reportableFailure(error, {
+      category: "rehearsal_stage_failure",
+      stage: rehearsalStage,
+    });
   }
 
   let finalCleanupFailure;
@@ -1372,18 +1476,21 @@ async function main() {
       quiescent: barrierCleanupState.quiescent,
       resources: barrierCleanupState.resources,
       resetAction: async () => {
-        reset(originalTarget, version117, {
-          migrations: 117,
-          latest: version117,
+        reset(originalTarget, null, {
+          migrations: approvedMigrationVersions.length,
+          latest: approvedMigrationVersions.at(-1),
           includes117: true,
+          includes118: true,
           users: 0,
           conversations: 0,
           messages: 0,
           cycles: 0,
           evidence: 0,
         });
-        assertCleanBaseline();
-        console.log("Restored clean local 117-migration baseline");
+        assertCleanBaseline(approvedMigrationVersions);
+        console.log(
+          `Restored clean local ${approvedMigrationVersions.length}-migration approved baseline`,
+        );
       },
     });
   } catch (error) {
@@ -1454,6 +1561,10 @@ function safeFailureDescriptor(error) {
       parts.push("verify_owned_sessions_and_processes_absent_before_fresh_task_packet");
       break;
     }
+    case "rehearsal_stage_failure":
+      parts.push("rehearsal_stage_failure");
+      if (approvedRehearsalStages.has(metadata.stage)) parts.push(`stage=${metadata.stage}`);
+      break;
     case "subprocess_failure":
       parts.push("subprocess_failure");
       break;

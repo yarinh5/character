@@ -458,7 +458,7 @@ describe("responsibility refresh invalidates the product send scope", () => {
         error: null;
       }>();
       rpcMock.mockReturnValueOnce(refresh.promise);
-      let refreshing!: Promise<void>;
+      let refreshing!: ReturnType<typeof result.current.refreshResponsibility>;
       act(() => {
         refreshing = result.current.refreshResponsibility();
       });
@@ -496,7 +496,7 @@ describe("responsibility refresh invalidates the product send scope", () => {
       const completion = send.promise.then((payload) => completeSend(ticket, payload));
       const refresh = deferred<{ data: (typeof row)[]; error: null }>();
       rpcMock.mockReturnValueOnce(refresh.promise);
-      let refreshing!: Promise<void>;
+      let refreshing!: ReturnType<typeof result.current.refreshResponsibility>;
       act(() => {
         refreshing = result.current.refreshResponsibility();
       });
@@ -523,7 +523,7 @@ describe("responsibility refresh invalidates the product send scope", () => {
     });
     const refresh = deferred<{ data: { state: string; cycle_id: null }[]; error: null }>();
     rpcMock.mockReturnValueOnce(refresh.promise);
-    let refreshing!: Promise<void>;
+    let refreshing!: ReturnType<typeof result.current.refreshResponsibility>;
     act(() => {
       refreshing = result.current.refreshResponsibility();
     });
@@ -604,7 +604,7 @@ describe("ownership orchestration regression", () => {
     const ticket = result.current.sendScope.beginRequest(result.current.responsibilityCycleId);
     const failedRefresh = deferred<{ data: null; error: { message: string } }>();
     rpcMock.mockReturnValueOnce(failedRefresh.promise);
-    let refreshing!: Promise<void>;
+    let refreshing!: ReturnType<typeof result.current.refreshResponsibility>;
     act(() => {
       refreshing = result.current.refreshResponsibility();
     });

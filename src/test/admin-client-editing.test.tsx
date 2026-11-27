@@ -298,9 +298,10 @@ describe("admin client editing", () => {
     expect(
       await screen.findByRole("alert", { name: "שגיאת רענון רשימת הלקוחות" }),
     ).toBeInTheDocument();
-    expect(view.queryClient.getQueryState(["admin-clients", "admin-a", false])?.status).toBe(
-      "error",
-    );
+    expect(
+      view.queryClient.getQueryCache().findAll({ queryKey: ["admin-clients", "admin-a", false] })[0]
+        ?.state.status,
+    ).toBe("error");
   });
 
   it("prevents synchronous double-submit, rejects malformed success and keeps the draft", async () => {

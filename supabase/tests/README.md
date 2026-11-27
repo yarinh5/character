@@ -25,6 +25,20 @@ container only. Test files are copied to a run-scoped `/tmp` directory inside
 that container and removed in `finally`; validation failure happens before any
 copy, extension installation, or SQL. The runner never accepts `--linked`, a
 remote endpoint, or a database URL override.
+Published Docker ports use the port read from the active `config.toml` and the
+exact internal protocol key (`8000/tcp` for Kong and `5432/tcp` for Postgres).
+At least one binding is required. Every returned binding must use that same
+configured host port and one of the existing authorized Docker address forms:
+`127.0.0.1`, `::1`, `0.0.0.0`, or `::`; an unauthorized address or port beside
+an otherwise valid binding rejects the target. Exact duplicate bindings are
+also rejected. Before applying this contract, the DB and supported WP01 upgrade
+runners preserve only the container ID, config source, expected port, filtered
+`HostIp`/`HostPort` entries, and the Docker query result under
+`$RUN_EVIDENCE/port-bindings`; full inspect data and container environment are
+not written. Each runner process generates one invocation UUID and includes it
+in every evidence filename and record from that process. The local sequence is
+retained after that UUID, so planned `db.1` and `db.2` processes cannot reuse a
+filename; exclusive `wx` creation still rejects an actual collision.
 The current batch covers RLS ownership, the canonical NEW queue and sequential
 claim behavior, Admin-only operations snapshots, and paid-sticker idempotency.
 Sequential pgTAP claim coverage is not a true two-session concurrency test.
@@ -79,6 +93,25 @@ shared barrier. A final race runs backfill while a live RPC holds the
 conversation lock and verifies that both historical and live messages retain
 complete metadata and state. The exclusive session rolls back without changing
 `legacy_shadow`; the test does not perform cutover.
+
+## AC33 legacy timed media upgrade
+
+Use a fresh, local-only `ac33-legacy-*` project with the non-QA project and
+Engine pins. Start from the exact migration inventory through
+`20261105130000`. Keep a randomly generated 48-character lowercase hex
+`AC33_SYNTHETIC_PASSWORD` in the rehearsal process environment, not in a file.
+
+1. Run `node supabase/tests/upgrades/wp12-legacy-timed-media.mjs seed`.
+2. Restore the remaining migration files to the isolated copy, apply them with
+   `supabase migration up --local`, and verify the exact ordered inventory.
+3. Run `node supabase/tests/upgrades/wp12-legacy-timed-media.mjs verify` on the
+   same project with the same synthetic password.
+
+The verification tests authenticated HTTP signing and Storage, including the
+legacy seven-second cap, denial before opening and after completion, exactly
+one debit/payout after paid-open replay, and rejection of new paid rows
+without a Gift. The historical rows must predate the active Gift trigger;
+do not seed them by bypassing it in the ordinary HTTP suite.
 
 ## WP01 113-to-116 upgrade rehearsal
 

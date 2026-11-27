@@ -1,7 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CreditCard, Edit, Plus, RefreshCw, Save, Search } from "lucide-react";
+import {
+  CheckCircle2,
+  CreditCard,
+  Edit,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -92,6 +101,17 @@ type CreditTransaction = {
   created_at: string;
 };
 
+type CreditRequestRow = {
+  id: string;
+  client_id: string;
+  client_name: string;
+  package_name_snapshot: string;
+  credits_snapshot: number;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  requested_at: string;
+  resolved_at: string | null;
+};
+
 const CREDIT_SETTINGS = [
   { key: "credits_enabled", label: "מערכת קרדיטים פעילה", type: "bool", default: true },
   { key: "free_credits_on_signup", label: "קרדיטים בהרשמה", type: "number", default: 10 },
@@ -130,6 +150,7 @@ function AdminCreditsPage() {
         <TabsList className="mb-4">
           <TabsTrigger value="packages">חבילות</TabsTrigger>
           <TabsTrigger value="clients">יתרות לקוחות</TabsTrigger>
+          <TabsTrigger value="requests">בקשות קרדיטים</TabsTrigger>
           <TabsTrigger value="settings">הגדרות</TabsTrigger>
         </TabsList>
         <TabsContent value="packages">
@@ -138,11 +159,171 @@ function AdminCreditsPage() {
         <TabsContent value="clients">
           <ClientCreditsTab focusedClientId={clientId} />
         </TabsContent>
+        <TabsContent value="requests">
+          <CreditRequestsTab />
+        </TabsContent>
         <TabsContent value="settings">
           <CreditSettingsTab />
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export function CreditRequestsTab() {
+  const queryClient = useQueryClient();
+  const writeInFlight = useRef(false);
+  const [view, setView] = useState<"pending" | "history">("pending");
+  const pending = view === "pending";
+  const requests = useQuery({
+    queryKey: ["admin-credit-requests", view],
+    queryFn: async () => {
+      const query = supabase
+        .from("credit_requests")
+        .select(
+          "id, client_id, package_name_snapshot, credits_snapshot, status, requested_at, resolved_at",
+        );
+      const { data, error } = await (
+        pending
+          ? query.eq("status", "pending").order("requested_at", { ascending: true })
+          : query.neq("status", "pending").order("resolved_at", { ascending: false })
+      )
+        .order("id", { ascending: pending })
+        .limit(100);
+      if (error) throw error;
+      const rows = data ?? [];
+      const ids = [...new Set(rows.map((row) => row.client_id))];
+      const profiles = ids.length
+        ? await supabase.from("profiles").select("user_id, display_name").in("user_id", ids)
+        : { data: [], error: null };
+      if (profiles.error) throw profiles.error;
+      const names = new Map(
+        (profiles.data ?? []).map((profile) => [profile.user_id, profile.display_name ?? "לקוח"]),
+      );
+      return rows.map((row) => ({
+        ...row,
+        client_name: names.get(row.client_id) ?? "לקוח",
+      })) as CreditRequestRow[];
+    },
+  });
+  const resolveRequest = useMutation({
+    mutationFn: async ({ id, decision }: { id: string; decision: "approved" | "rejected" }) => {
+      const { data, error } = await supabase.rpc("resolve_credit_request", {
+        _request_id: id,
+        _decision: decision,
+        _note:
+          decision === "approved"
+            ? "Approved in admin credit requests"
+            : "Rejected in admin credit requests",
+      });
+      const row = Array.isArray(data) ? data[0] : null;
+      if (
+        error ||
+        !row ||
+        typeof row !== "object" ||
+        (row as { id?: unknown }).id !== id ||
+        (row as { status?: unknown }).status !== decision
+      ) {
+        throw new Error("credit_request_resolution_failed");
+      }
+      return { id, decision };
+    },
+    onSuccess: ({ id, decision }) => {
+      queryClient.setQueryData<CreditRequestRow[]>(
+        ["admin-credit-requests", "pending"],
+        (current) => current?.filter((request) => request.id !== id),
+      );
+      toast.success(decision === "approved" ? "בקשת הקרדיטים אושרה" : "בקשת הקרדיטים נדחתה");
+    },
+    onError: () => toast.error("לא ניתן לאמת את תוצאת הטיפול בבקשת הקרדיטים."),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-credit-requests"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-client-credit-rows"] });
+    },
+  });
+  const submit = (id: string, decision: "approved" | "rejected") => {
+    if (writeInFlight.current) return;
+    writeInFlight.current = true;
+    resolveRequest.mutate({ id, decision }, { onSettled: () => (writeInFlight.current = false) });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">בקשות קרדיטים</CardTitle>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void requests.refetch()}
+          disabled={requests.isFetching}
+        >
+          <RefreshCw className={requests.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+          רענון
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <Tabs
+          value={view}
+          onValueChange={(value) => setView(value === "history" ? "history" : "pending")}
+        >
+          <TabsList aria-label="סינון בקשות קרדיטים">
+            <TabsTrigger value="pending">ממתינות</TabsTrigger>
+            <TabsTrigger value="history">היסטוריה</TabsTrigger>
+          </TabsList>
+          <TabsContent value={view}>
+            {requests.isLoading && <Skeleton className="h-32" />}
+            {requests.isError && (
+              <p role="alert" className="text-sm text-destructive">
+                טעינת בקשות הקרדיטים נכשלה.
+              </p>
+            )}
+            {requests.isSuccess && requests.data.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {pending ? "אין בקשות קרדיטים ממתינות." : "אין בקשות קרדיטים שטופלו."}
+              </p>
+            )}
+            {requests.data && requests.data.length > 0 && (
+              <div className="divide-y rounded-md border" aria-busy={requests.isFetching}>
+                {requests.data.map((request) => (
+                  <div key={request.id} className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="min-w-52 flex-1">
+                      <p className="font-medium">{request.client_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {request.package_name_snapshot} ·{" "}
+                        {request.credits_snapshot.toLocaleString("he-IL")} קרדיטים
+                      </p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                    {request.status === "pending" && (
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => submit(request.id, "approved")}
+                          disabled={resolveRequest.isPending}
+                        >
+                          <CheckCircle2 className="h-4 w-4" /> אשר
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => submit(request.id, "rejected")}
+                          disabled={resolveRequest.isPending}
+                        >
+                          <XCircle className="h-4 w-4" /> דחה
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -710,8 +891,9 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
                   <Stat label="נוצל" value={selectedClient.lifetime_spent} />
                 </div>
                 <div>
-                  <Label>כמות לשינוי</Label>
+                  <Label htmlFor="credit-adjustment-amount">כמות לשינוי</Label>
                   <Input
+                    id="credit-adjustment-amount"
                     type="number"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
@@ -720,8 +902,9 @@ function ClientCreditsTab({ focusedClientId }: { focusedClientId?: string }) {
                   />
                 </div>
                 <div>
-                  <Label>סיבה לפעולה</Label>
+                  <Label htmlFor="credit-adjustment-reason">סיבה לפעולה</Label>
                   <Textarea
+                    id="credit-adjustment-reason"
                     rows={3}
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
@@ -849,9 +1032,15 @@ function CreditSettingsTab() {
               key={setting.key}
               className={setting.type === "bool" ? "flex items-center justify-between" : ""}
             >
-              <Label className={setting.type === "bool" ? "" : "block mb-1"}>{setting.label}</Label>
+              <Label
+                htmlFor={`credit-setting-${setting.key}`}
+                className={setting.type === "bool" ? "" : "block mb-1"}
+              >
+                {setting.label}
+              </Label>
               {setting.type === "bool" ? (
                 <Switch
+                  id={`credit-setting-${setting.key}`}
                   checked={!!form[setting.key]}
                   onCheckedChange={(value) => setForm({ ...form, [setting.key]: value })}
                 />
@@ -860,7 +1049,7 @@ function CreditSettingsTab() {
                   value={String(form[setting.key] ?? setting.default)}
                   onValueChange={(value) => setForm({ ...form, [setting.key]: value })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id={`credit-setting-${setting.key}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -871,6 +1060,7 @@ function CreditSettingsTab() {
                 </Select>
               ) : (
                 <Input
+                  id={`credit-setting-${setting.key}`}
                   type="number"
                   min={0}
                   value={String(form[setting.key] ?? "")}

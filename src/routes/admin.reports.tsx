@@ -1,5 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useLayoutEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,6 +14,7 @@ import { PageHeader, StatusBadge } from "@/components/admin/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -36,17 +42,35 @@ const statuses: Record<Status, string> = {
   resolved: "טופל",
   dismissed: "נדחה",
 };
-async function readReports() {
-  const { data, error } = await supabase
+const PAGE_SIZE = 100;
+type ReportCursor = { created_at: string; id: string } | null;
+async function readReports(cursor: ReportCursor) {
+  let query = supabase
     .from("reports")
     .select(
       "id, reason, details, status, created_at, conversation_id, reporter_id, conversations(characters(name))",
     )
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (cursor) {
+    query = query.or(
+      `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
+    );
+  }
+  const { data, error } = await query.range(0, PAGE_SIZE);
   if (error) throw error;
   return data ?? [];
 }
 type Report = Awaited<ReturnType<typeof readReports>>[number];
+type WorkerReport =
+  Database["public"]["Functions"]["get_admin_operator_client_reports"]["Returns"][number];
+type WorkerStatus = "open" | "in_progress" | "decided" | "closed";
+const workerStatuses: Record<WorkerStatus, string> = {
+  open: "פתוח",
+  in_progress: "בטיפול",
+  decided: "הוכרע",
+  closed: "נסגר",
+};
 
 function ReportsPage() {
   const { session, user, role, loading } = useAuth();
@@ -81,6 +105,31 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
   const locks = useRef(new Set<string>());
   const [, redraw] = useState(0);
   const [actionError, setActionError] = useState("");
+  const [workerSelection, setWorkerSelection] = useState<{
+    report: WorkerReport;
+    instance: number;
+  } | null>(null);
+  const currentWorker = useRef<typeof workerSelection>(null);
+  const workerTrigger = useRef<HTMLButtonElement | null>(null);
+  const workerSerial = useRef(0);
+  const workerLocks = useRef(new Set<string>());
+  const [workerDraftStatus, setWorkerDraftStatus] = useState<WorkerStatus>("open");
+  const [resolutionNote, setResolutionNote] = useState("");
+  const [globalActionNote, setGlobalActionNote] = useState("");
+  const [workerActionError, setWorkerActionError] = useState("");
+  const [workerActionSuccess, setWorkerActionSuccess] = useState("");
+  const chooseWorker = (report: WorkerReport | null) => {
+    const next = report ? { report, instance: ++workerSerial.current } : null;
+    currentWorker.current = next;
+    setWorkerSelection(next);
+    setWorkerDraftStatus(
+      report && report.status in workerStatuses ? (report.status as WorkerStatus) : "open",
+    );
+    setResolutionNote(report?.resolution_note ?? "");
+    setGlobalActionNote(report?.global_action_note ?? "");
+    setWorkerActionError("");
+    setWorkerActionSuccess("");
+  };
   const choose = (report: Report | null) => {
     const next = report ? { report, instance: ++serial.current } : null;
     selection.current = next;
@@ -89,29 +138,52 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     setConfirmBlock(false);
     setActionError("");
   };
-  const reports = useQuery({ queryKey: ["admin-reports", adminId], queryFn: readReports });
-  const ids = Array.from(new Set((reports.data ?? []).map((r) => r.reporter_id))).sort();
+  const reports = useInfiniteQuery({
+    queryKey: ["admin-reports", adminId],
+    initialPageParam: null as ReportCursor,
+    queryFn: ({ pageParam }) => readReports(pageParam),
+    getNextPageParam: (page) =>
+      page.length > PAGE_SIZE
+        ? { created_at: page[PAGE_SIZE - 1].created_at, id: page[PAGE_SIZE - 1].id }
+        : undefined,
+  });
+  const reportRows = reports.data?.pages.flatMap((page) => page.slice(0, PAGE_SIZE));
+  const ids = Array.from(new Set((reportRows ?? []).map((r) => r.reporter_id))).sort();
   const profiles = useQuery({
     queryKey: ["admin-report-profiles", adminId, ids],
     enabled: reports.data !== undefined,
     queryFn: async () => {
       if (!ids.length) return [];
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("user_id, display_name, email")
-        .in("user_id", ids);
-      if (error) throw error;
-      return data ?? [];
+      const batches = await Promise.all(
+        Array.from({ length: Math.ceil(ids.length / PAGE_SIZE) }, (_, index) =>
+          supabase
+            .from("profiles")
+            .select("user_id, display_name, email")
+            .in("user_id", ids.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE)),
+        ),
+      );
+      for (const batch of batches) if (batch.error) throw batch.error;
+      return batches.flatMap((batch) => batch.data ?? []);
     },
   });
-  const workers = useQuery({
+  const workers = useInfiniteQuery({
     queryKey: ["admin-operator-client-reports", adminId],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_admin_operator_client_reports");
+    initialPageParam: null as ReportCursor,
+    queryFn: async ({ pageParam }) => {
+      const { data, error } = await supabase.rpc("get_admin_operator_client_reports_page", {
+        _before_created_at: pageParam?.created_at ?? null,
+        _before_id: pageParam?.id ?? null,
+        _page_size: PAGE_SIZE + 1,
+      });
       if (error) throw error;
       return data ?? [];
     },
+    getNextPageParam: (page) =>
+      page.length > PAGE_SIZE
+        ? { created_at: page[PAGE_SIZE - 1].created_at, id: page[PAGE_SIZE - 1].id }
+        : undefined,
   });
+  const workerRows = workers.data?.pages.flatMap((page) => page.slice(0, PAGE_SIZE));
   const reporter = (id: string) => {
     const profile = profiles.data?.find((p) => p.user_id === id);
     if (profile) return profile.display_name ?? profile.email ?? id;
@@ -119,14 +191,14 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     if (profiles.isPending) return "טוען פרטי מדווח";
     return "פרופיל המדווח אינו קיים";
   };
-  const filtered = (reports.data ?? []).filter(
+  const filtered = (reportRows ?? []).filter(
     (r) =>
       (filter === "all" || r.status === filter) &&
       [r.id, r.reason, r.details, reporter(r.reporter_id), r.conversations?.characters?.name].some(
         (v) => v?.toLowerCase().includes(search.trim().toLowerCase()),
       ),
   );
-  const filteredWorkers = (workers.data ?? []).filter(
+  const filteredWorkers = (workerRows ?? []).filter(
     (r) =>
       (source === "all" || r.source === source) &&
       [r.reason, r.notes, r.operator_name, r.client_display_name, r.client_id].some((v) =>
@@ -212,6 +284,80 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
     (locks.current.has(selected.report.id) ||
       locks.current.has("client:" + selected.report.reporter_id)),
   );
+  const workerBusy = Boolean(workerSelection && workerLocks.current.has(workerSelection.report.id));
+  const saveWorker = async () => {
+    const current = currentWorker.current;
+    if (!alive.current || !current || workerLocks.current.has(current.report.id)) return;
+    const { report, instance } = current;
+    const status = workerDraftStatus;
+    const note = resolutionNote.trim();
+    const globalAction = globalActionNote.trim() || null;
+    if ((status === "decided" || status === "closed") && !note) {
+      setWorkerActionError("יש להזין נימוק לפני הכרעה או סגירה.");
+      return;
+    }
+    workerLocks.current.add(report.id);
+    redraw((n) => n + 1);
+    setWorkerActionError("");
+    setWorkerActionSuccess("");
+    const sameDialog = () => alive.current && currentWorker.current?.instance === instance;
+    try {
+      const { data, error } = await supabase.rpc("admin_update_operator_client_report", {
+        _report_id: report.id,
+        _expected_version: report.version,
+        _status: status,
+        _resolution_note: note,
+        _global_action_note: globalAction,
+      });
+      if (
+        error ||
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        data.report_id !== report.id ||
+        data.status !== status ||
+        data.version !== report.version + 1
+      )
+        throw new Error("unverified");
+      if (!alive.current) return;
+      const updated = {
+        ...report,
+        status,
+        resolution_note: note || null,
+        global_action_note: globalAction,
+        version: report.version + 1,
+      };
+      qc.setQueryData<InfiniteData<WorkerReport[], ReportCursor>>(
+        ["admin-operator-client-reports", adminId],
+        (previous) =>
+          previous && {
+            ...previous,
+            pages: previous.pages.map((page) =>
+              page.map((item) => (item.id === report.id ? updated : item)),
+            ),
+          },
+      );
+      void qc.invalidateQueries({ queryKey: ["admin-operator-client-reports", adminId] });
+      void qc.invalidateQueries({ queryKey: ["admin-operations-snapshot"] });
+      void qc.invalidateQueries({ queryKey: ["audit-logs", adminId] });
+      if (sameDialog()) {
+        const next = { report: updated, instance };
+        currentWorker.current = next;
+        setWorkerSelection(next);
+        setWorkerActionSuccess("הטיפול בדיווח נשמר");
+        toast.success("הטיפול בדיווח נשמר");
+      }
+    } catch {
+      if (sameDialog()) {
+        const message = "לא ניתן לאמת את עדכון הדיווח. רעננו ובדקו את מצבו לפני ניסיון נוסף.";
+        setWorkerActionError(message);
+        toast.error(message);
+      }
+    } finally {
+      workerLocks.current.delete(report.id);
+      if (alive.current) redraw((n) => n + 1);
+    }
+  };
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-4" dir="rtl">
       <PageHeader title="דיווחים" description="טיפול בדיווחים מלקוחות" />
@@ -251,7 +397,7 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               איפוס מסנני לקוחות
             </Button>
             <ReadState label="דיווחי לקוחות" query={reports} retry={refreshReports} />
-            {reports.data !== undefined && (
+            {reportRows !== undefined && (
               <>
                 <ReadState
                   label="פרטי מדווחים"
@@ -259,9 +405,9 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                   retry={() => void profiles.refetch()}
                 />
                 <p className="text-sm text-muted-foreground">
-                  {filtered.length} מתוך {reports.data.length} דיווחי לקוחות שנטענו
+                  {filtered.length} מתוך {reportRows.length} דיווחי לקוחות שנטענו
                 </p>
-                {!reports.data.length ? (
+                {!reportRows.length ? (
                   <p>אין דיווחי לקוחות</p>
                 ) : !filtered.length ? (
                   <p>אין תוצאות במסנני הלקוחות</p>
@@ -297,6 +443,15 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                     ))}
                   </div>
                 )}
+                {reports.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    disabled={reports.isFetchingNextPage}
+                    onClick={() => void reports.fetchNextPage()}
+                  >
+                    {reports.isFetchingNextPage ? "טוען דיווחי לקוחות…" : "טען עוד דיווחי לקוחות"}
+                  </Button>
+                )}
               </>
             )}
           </CardContent>
@@ -318,7 +473,7 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">כל המקורות</SelectItem>
-                {Array.from(new Set((workers.data ?? []).map((r) => r.source)))
+                {Array.from(new Set((workerRows ?? []).map((r) => r.source)))
                   .filter(Boolean)
                   .map((value) => (
                     <SelectItem key={value} value={value}>
@@ -337,12 +492,12 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
               איפוס מסנני עובדים
             </Button>
             <ReadState label="דיווחי עובדים" query={workers} retry={() => void workers.refetch()} />
-            {workers.data !== undefined && (
+            {workerRows !== undefined && (
               <>
                 <p className="text-sm">
-                  {filteredWorkers.length} מתוך {workers.data.length} דיווחי עובדים שנטענו
+                  {filteredWorkers.length} מתוך {workerRows.length} דיווחי עובדים שנטענו
                 </p>
-                {!workers.data.length ? (
+                {!workerRows.length ? (
                   <p>אין דיווחי עובדים</p>
                 ) : !filteredWorkers.length ? (
                   <p>אין תוצאות במסנני העובדים</p>
@@ -350,22 +505,115 @@ function ReportsWorkspace({ adminId }: { adminId: string }) {
                   <div className="divide-y">
                     {filteredWorkers.map((r) => (
                       <article key={r.id} className="py-4 text-sm space-y-2 break-words">
-                        <h3 className="font-medium">{r.reason}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium">{r.reason}</h3>
+                          <span className="text-xs text-muted-foreground">
+                            {workerStatuses[r.status as WorkerStatus] ?? r.status}
+                          </span>
+                        </div>
                         <p>
                           עובד: {r.operator_name} · לקוח: {r.client_display_name ?? r.client_id}
                         </p>
                         <p className="text-xs">{new Date(r.created_at).toLocaleString("he-IL")}</p>
                         {r.notes && <p className="whitespace-pre-wrap">{r.notes}</p>}
                         <ConversationLink id={r.conversation_id} />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={"טיפול ב" + r.reason}
+                          onClick={(event) => {
+                            workerTrigger.current = event.currentTarget;
+                            chooseWorker(r);
+                          }}
+                        >
+                          טיפול
+                        </Button>
                       </article>
                     ))}
                   </div>
+                )}
+                {workers.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    disabled={workers.isFetchingNextPage}
+                    onClick={() => void workers.fetchNextPage()}
+                  >
+                    {workers.isFetchingNextPage ? "טוען דיווחי עובדים…" : "טען עוד דיווחי עובדים"}
+                  </Button>
                 )}
               </>
             )}
           </CardContent>
         </Card>
       </section>
+      {workerSelection && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !workerBusy) chooseWorker(null);
+          }}
+        >
+          <DialogContent
+            dir="rtl"
+            className="max-w-lg max-h-[85vh] overflow-y-auto"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (alive.current) workerTrigger.current?.focus();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>טיפול בדיווח עובד</DialogTitle>
+              <DialogDescription>עדכון מצב הדיווח ותיעוד ההחלטה.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p>סיבה: {workerSelection.report.reason}</p>
+              <p>עובד: {workerSelection.report.operator_name}</p>
+              <Select
+                dir="rtl"
+                disabled={workerBusy}
+                value={workerDraftStatus}
+                onValueChange={(value) => {
+                  if (value in workerStatuses) setWorkerDraftStatus(value as WorkerStatus);
+                }}
+              >
+                <SelectTrigger aria-label="סטטוס דיווח עובד">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(workerStatuses).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Textarea
+                aria-label="נימוק החלטה"
+                placeholder="נימוק החלטה"
+                maxLength={2000}
+                disabled={workerBusy}
+                value={resolutionNote}
+                onChange={(event) => setResolutionNote(event.target.value)}
+              />
+              <Textarea
+                aria-label="פעולה גלובלית שבוצעה"
+                placeholder="פעולה גלובלית שבוצעה, אם הייתה"
+                maxLength={2000}
+                disabled={workerBusy}
+                value={globalActionNote}
+                onChange={(event) => setGlobalActionNote(event.target.value)}
+              />
+              {workerActionError && <p role="alert">{workerActionError}</p>}
+              {workerActionSuccess && <p role="status">{workerActionSuccess}</p>}
+            </div>
+            <DialogFooter>
+              <Button disabled={workerBusy} onClick={() => void saveWorker()}>
+                שמירת טיפול
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {selected && (
         <Dialog
           open

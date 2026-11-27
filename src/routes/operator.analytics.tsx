@@ -66,20 +66,10 @@ function OperatorAnalyticsPage() {
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
-          table: "credit_wallets",
-          filter: `user_id=eq.${operator.user_id}`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "credit_transactions",
-          filter: `user_id=eq.${operator.user_id}`,
+          table: "operator_point_wallets",
+          filter: `operator_id=eq.${operator.id}`,
         },
         () => qc.invalidateQueries({ queryKey: ["operator-performance", operator.id] }),
       )
@@ -95,7 +85,7 @@ function OperatorAnalyticsPage() {
       <header>
         <h1 className="text-2xl md:text-3xl font-bold">ביצועים</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          סיכום פעילות וקרדיטים על בסיס החודש והיסטוריה חודשית.
+          סיכום פעילות ו-Operator Points פנימיות על בסיס החודש והיסטוריה חודשית.
         </p>
       </header>
 
@@ -188,7 +178,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricCard label="קרדיטים זמינים" value={data.availablePoints} icon={Award} />
+        <MetricCard label="נקודות זמינות" value={data.availablePoints} icon={Award} />
         <MetricCard label="פעולות מזכות" value={data.currentScoredMessages} icon={Sparkles} />
         <MetricCard label="דמויות משויכות" value={data.assignedCharacters.length} icon={Users} />
         <MetricCard
@@ -205,7 +195,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
         <CardContent>
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">קרדיטים מול חודש קודם</div>
+              <div className="text-xs text-muted-foreground">נקודות מול חודש קודם</div>
               <div className="mt-1 text-2xl font-bold">{formatChange(data.monthlyPointChange)}</div>
             </div>
             <div className="rounded-lg border border-border p-4">
@@ -220,14 +210,14 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">קרדיטים לפי חודשים</CardTitle>
+          <CardTitle className="text-base">נקודות לפי חודשים</CardTitle>
         </CardHeader>
         <CardContent>
           {!hasHistory && <EmptyPerformanceState />}
           {hasHistory && (
             <ChartContainer
               config={{
-                points: { label: "קרדיטים", color: "var(--primary)" },
+                points: { label: "נקודות", color: "var(--primary)" },
               }}
               className="h-64 w-full"
             >
@@ -256,7 +246,7 @@ export function AnalyticsContent({ data }: { data: OperatorPerformanceSummary })
                   <TableHeader>
                     <TableRow>
                       <TableHead className="text-right">חודש</TableHead>
-                      <TableHead className="text-right">סה״כ קרדיטים</TableHead>
+                      <TableHead className="text-right">סה״כ נקודות</TableHead>
                       <TableHead className="text-right">פעולות מזכות</TableHead>
                     </TableRow>
                   </TableHeader>

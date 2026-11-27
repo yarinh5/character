@@ -19,9 +19,10 @@ type NotificationRow = {
   link: string | null;
   is_read: boolean;
   created_at: string;
+  metadata: Record<string, unknown> | null;
 };
 
-type Reply<T> = { data: T; error: unknown };
+type Reply<T> = { data: T; error: unknown; count?: number | null };
 
 type TestChannel = {
   name: string;
@@ -38,6 +39,7 @@ const io = vi.hoisted(() => ({
     role: "client" as "client" | "operator" | "admin" | null,
   },
   readNotifications: vi.fn(),
+  readUnreadCount: vi.fn(),
   updateNotifications: vi.fn(),
   channels: [] as TestChannel[],
   removeChannel: vi.fn(),
@@ -67,20 +69,35 @@ vi.mock("@/integrations/supabase/client", () => ({
       let operation: "read" | "update" = "read";
       let payload: Record<string, unknown> = {};
       const filters: Array<[string, unknown]> = [];
+      let headCount = false;
       let executed: Promise<Reply<NotificationRow[] | null>> | null = null;
       const execute = () => {
         if (!executed) {
           const userId = filters.find(([column]) => column === "user_id")?.[1];
-          executed = Promise.resolve().then(() =>
-            operation === "read"
-              ? io.readNotifications(userId)
-              : io.updateNotifications({ payload, filters }),
-          );
+          executed = Promise.resolve()
+            .then(() =>
+              operation === "read"
+                ? headCount
+                  ? io.readUnreadCount(userId)
+                  : io.readNotifications(userId)
+                : io.updateNotifications({ payload, filters }),
+            )
+            .then((reply) =>
+              !headCount && operation === "read" && reply.count === undefined
+                ? {
+                    ...reply,
+                    count: Array.isArray(reply.data) ? reply.data.length : null,
+                  }
+                : reply,
+            );
         }
         return executed;
       };
       const query = {
-        select: vi.fn(() => query),
+        select: vi.fn((_columns?: string, options?: { head?: boolean }) => {
+          headCount = options?.head === true;
+          return query;
+        }),
         update: vi.fn((values: Record<string, unknown>) => {
           operation = "update";
           payload = values;
@@ -130,6 +147,7 @@ const unreadA: NotificationRow = {
   link: "/app/conversations/a",
   is_read: false,
   created_at: "2026-11-01T10:00:00Z",
+  metadata: null,
 };
 
 const readB: NotificationRow = {
@@ -161,12 +179,46 @@ beforeEach(() => {
   io.auth.sessionUserId = "user-a";
   io.auth.role = "client";
   io.readNotifications.mockReset().mockResolvedValue({ data: [unreadA], error: null });
+  io.readUnreadCount.mockReset().mockResolvedValue({ data: null, error: null, count: 1 });
   io.updateNotifications.mockReset().mockResolvedValue({ data: [unreadA], error: null });
   io.channels.length = 0;
   io.removeChannel.mockReset().mockResolvedValue(undefined);
 });
 
 describe("NotificationBell", () => {
+  it("shows seven-minute wait alerts as active or resolved without forcing read state", async () => {
+    io.readNotifications.mockResolvedValue({
+      data: [
+        {
+          ...unreadA,
+          id: "wait-active",
+          type: "operational_wait_alert",
+          title: "שיחה ממתינה למענה",
+          metadata: { state: "active", wait_seconds_at_alert: 421 },
+        },
+        {
+          ...unreadA,
+          id: "wait-resolved",
+          type: "operational_wait_alert",
+          title: "שיחה שנענתה",
+          is_read: false,
+          metadata: { state: "resolved", wait_seconds_at_alert: 425 },
+        },
+      ],
+      error: null,
+      count: 2,
+    });
+    io.readUnreadCount.mockResolvedValue({ data: null, error: null, count: 2 });
+
+    render(<NotificationBell />);
+    await waitFor(() => expect(io.readNotifications).toHaveBeenCalled());
+    openBell();
+    expect(await screen.findByText("פעילה")).toBeInTheDocument();
+    expect(screen.getByText("נפתרה")).toBeInTheDocument();
+    expect(screen.getAllByText("המתנה בעת ההתראה: 7 דק׳")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "סמן הכל כנקרא" })).toBeEnabled();
+    expect(io.updateNotifications).not.toHaveBeenCalled();
+  });
   it("waits for an initialized matching identity before reading or subscribing", async () => {
     io.auth.loading = true;
     const view = render(<NotificationBell />);
@@ -183,6 +235,34 @@ describe("NotificationBell", () => {
     await waitFor(() => expect(io.readNotifications).toHaveBeenCalledWith("user-a"));
     expect(io.channels).toHaveLength(1);
     expect(io.channels[0].name).toContain("user-a");
+  });
+
+  it("uses exact server counts instead of presenting the latest 20 as the full unread history", async () => {
+    const latest = Array.from({ length: 20 }, (_, index) => ({
+      ...readB,
+      id: `notification-${index}`,
+      title: `עדכון ${index + 1}`,
+    }));
+    io.readNotifications.mockResolvedValue({ data: latest, error: null, count: 42 });
+    io.readUnreadCount.mockResolvedValue({ data: null, error: null, count: 27 });
+
+    render(<NotificationBell />);
+    await waitFor(() => expect(io.readUnreadCount).toHaveBeenCalledWith("user-a"));
+    expect(screen.getByText("9+")).toBeInTheDocument();
+
+    openBell();
+    expect(await screen.findByText("מוצגות 20 ההתראות האחרונות מתוך 42.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "סמן הכל כנקרא" })).toBeEnabled();
+  });
+
+  it("rejects a non-finite exact count instead of rendering it as verified state", async () => {
+    io.readUnreadCount.mockResolvedValue({ data: null, error: null, count: Number.NaN });
+    render(<NotificationBell />);
+    openBell();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת ההתראות נכשלה");
+    expect(screen.queryByText(unreadA.title)).not.toBeInTheDocument();
+    expect(screen.queryByText("NaN")).not.toBeInTheDocument();
   });
 
   it("distinguishes an initial failure from a confirmed empty list and retries", async () => {
@@ -217,6 +297,30 @@ describe("NotificationBell", () => {
     expect(await screen.findByText(readB.title)).toBeInTheDocument();
     expect(screen.queryByText(unreadA.title)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the verified list and unread count when the count refresh fails", async () => {
+    io.readNotifications
+      .mockResolvedValueOnce({ data: [unreadA], error: null, count: 1 })
+      .mockResolvedValueOnce({ data: [readB], error: null, count: 1 })
+      .mockResolvedValueOnce({ data: [readB], error: null, count: 1 });
+    io.readUnreadCount
+      .mockResolvedValueOnce({ data: null, error: null, count: 1 })
+      .mockResolvedValueOnce({ data: null, error: { message: "count failed" }, count: null })
+      .mockResolvedValueOnce({ data: null, error: null, count: 0 });
+    render(<NotificationBell />);
+    openBell();
+    expect(await screen.findByText(unreadA.title)).toBeInTheDocument();
+
+    await act(async () => io.channels[0].handlers.UPDATE());
+    expect(await screen.findByRole("alert")).toHaveTextContent("רענון ההתראות נכשל");
+    expect(screen.getByText(unreadA.title)).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "נסה שוב" }));
+    expect(await screen.findByText(readB.title)).toBeInTheDocument();
+    expect(screen.queryByText(unreadA.title)).not.toBeInTheDocument();
+    expect(screen.queryByText("1")).not.toBeInTheDocument();
   });
 
   it("ignores an older same-identity response when Realtime starts a newer read", async () => {
@@ -313,6 +417,9 @@ describe("NotificationBell", () => {
 
   it("treats zero updated rows as a no-op and uses the verification read as the source of truth", async () => {
     io.updateNotifications.mockResolvedValue({ data: [], error: null });
+    io.readUnreadCount
+      .mockResolvedValueOnce({ data: null, error: null, count: 1 })
+      .mockResolvedValueOnce({ data: null, error: null, count: 0 });
     io.readNotifications
       .mockResolvedValueOnce({ data: [unreadA], error: null })
       .mockResolvedValueOnce({ data: [{ ...unreadA, is_read: true }], error: null });

@@ -26,6 +26,10 @@ vector_port = 60428
 [edge_runtime]
 inspector_port = 60430
 
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/before_user_created_hook"
+
 [functions.media-view-url]
 enabled = true
 verify_jwt = true

@@ -1,10 +1,19 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const projectId = "qmgkmsarzfjnqltljkjl";
+import {
+  assertValidatedTargetIdentity,
+  discoverLocalDbTarget,
+  resolveLocalTestBinding,
+} from "../run-db-local.mjs";
+import { isProductHttp, runProductHttp } from "./paid-sticker-window.mjs";
+
+const binding = resolveLocalTestBinding(process.env);
+const projectId = binding.projectId;
 const dbContainer = `supabase_db_${projectId}`;
 const apiContainer = `supabase_kong_${projectId}`;
+const vitestConfig = resolve("vitest.http.config.ts");
 
 function fail(message) {
   console.error(message);
@@ -52,6 +61,7 @@ function assertDockerPort(name, internalPort, expectedPort) {
   ) {
     fail(`Refusing HTTP tests: ${name} does not match the configured local port mapping.`);
   }
+  return info.Id;
 }
 
 function readEventBaseline(label) {
@@ -89,74 +99,144 @@ function readEventBaseline(label) {
   }
 }
 
-const status = spawnSync("supabase", ["status", "--output", "json"], {
-  encoding: "utf8",
-  windowsHide: true,
-});
-
-if (status.status !== 0) {
-  fail("Local Supabase status could not be read; no HTTP tests were run.");
-}
-
-let local;
-try {
-  local = JSON.parse(status.stdout);
-} catch {
-  fail("Local Supabase status was not valid JSON; no HTTP tests were run.");
-}
-
-const apiUrl = String(local.API_URL ?? "");
-const dbUrl = String(local.DB_URL ?? "");
-const config = readFileSync(resolve("supabase", "config.toml"), "utf8");
-if (!new RegExp(`project_id\\s*=\\s*"${projectId}"`).test(config)) {
-  fail("Refusing HTTP tests: config.toml is not the expected local project.");
-}
-const apiPort = configPort(config, "api");
-const dbPort = configPort(config, "db");
-assertLoopbackUrl(apiUrl, apiPort, "local API URL");
-assertLoopbackUrl(dbUrl, dbPort, "local DB URL");
-assertDockerPort(dbContainer, "5432/tcp", dbPort);
-assertDockerPort(apiContainer, "8000/tcp", apiPort);
-console.log(`Verified isolated local stack: API ${apiPort}, DB ${dbPort}`);
-const eventBaselineBefore = readEventBaseline("before");
-
-let stickersEnabled = "unknown";
-try {
-  const settingsResponse = await fetch(
-    `${apiUrl}/rest/v1/system_settings?select=key,value&key=eq.stickers_enabled`,
-    {
-      headers: {
-        apikey: String(local.SERVICE_ROLE_KEY ?? ""),
-        Authorization: `Bearer ${String(local.SERVICE_ROLE_KEY ?? "")}`,
+function runPaidHttpChild(paths, env, signal) {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(
+      process.execPath,
+      [resolve("node_modules/vitest/vitest.mjs"), "run", "--config", vitestConfig, ...paths],
+      {
+        env,
+        stdio: "inherit",
+        windowsHide: true,
       },
+    );
+    const terminate = () => child.kill("SIGTERM");
+    signal.addEventListener("abort", terminate, { once: true });
+    if (signal.aborted) terminate();
+    child.once("error", () => reject(new Error("Paid-sticker HTTP: Vitest could not start.")));
+    child.once("close", (code) => {
+      signal.removeEventListener("abort", terminate);
+      resolveResult(code ?? 1);
+    });
+  });
+}
+
+async function main() {
+  if (!isProductHttp(process.env)) {
+    await runLegacy();
+    return;
+  }
+
+  const controller = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.once(signal, () => {
+      process.exitCode = 1;
+      controller.abort();
+    });
+  }
+  try {
+    const result = await runProductHttp({
+      args: process.argv.slice(2),
+      env: process.env,
+      cwd: process.cwd(),
+      config: readFileSync(resolve("supabase", "config.toml"), "utf8"),
+      signal: controller.signal,
+      runVitest: (paths, env) => runPaidHttpChild(paths, env, controller.signal),
+    });
+    if (!controller.signal.aborted) process.exitCode = result;
+  } catch (error) {
+    console.error(
+      error.message.startsWith("Paid-sticker HTTP:")
+        ? error.message
+        : "Paid-sticker HTTP: local setup or journal operation failed.",
+    );
+    process.exitCode = 1;
+  }
+}
+
+async function runLegacy() {
+  const frozenTarget = binding.engineId === null ? null : discoverLocalDbTarget();
+  const status = spawnSync("supabase", ["status", "--output", "json"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (status.status !== 0) {
+    fail("Local Supabase status could not be read; no HTTP tests were run.");
+  }
+
+  let local;
+  try {
+    local = JSON.parse(status.stdout);
+  } catch {
+    fail("Local Supabase status was not valid JSON; no HTTP tests were run.");
+  }
+
+  const apiUrl = String(local.API_URL ?? "");
+  const dbUrl = String(local.DB_URL ?? "");
+  const config = readFileSync(resolve("supabase", "config.toml"), "utf8");
+  if (!new RegExp(`project_id\\s*=\\s*"${projectId}"`).test(config)) {
+    fail("Refusing HTTP tests: config.toml is not the expected local project.");
+  }
+  const apiPort = configPort(config, "api");
+  const dbPort = configPort(config, "db");
+  assertLoopbackUrl(apiUrl, apiPort, "local API URL");
+  assertLoopbackUrl(dbUrl, dbPort, "local DB URL");
+  const dbId = assertDockerPort(dbContainer, "5432/tcp", dbPort);
+  assertDockerPort(apiContainer, "8000/tcp", apiPort);
+  console.log(`Verified isolated local stack: API ${apiPort}, DB ${dbPort}`);
+  const eventBaselineBefore = readEventBaseline("before");
+
+  let stickersEnabled = "unknown";
+  try {
+    const settingsResponse = await fetch(
+      `${apiUrl}/rest/v1/system_settings?select=key,value&key=eq.stickers_enabled`,
+      {
+        headers: {
+          apikey: String(local.SERVICE_ROLE_KEY ?? ""),
+          Authorization: `Bearer ${String(local.SERVICE_ROLE_KEY ?? "")}`,
+        },
+      },
+    );
+    if (settingsResponse.ok) {
+      const settings = await settingsResponse.json();
+      stickersEnabled =
+        String(settings?.[0]?.value ?? "").replaceAll('"', "") === "true" ? "true" : "false";
+    }
+  } catch {
+    stickersEnabled = "unknown";
+  }
+
+  const vitestBin = resolve("node_modules/vitest/vitest.mjs");
+  const args = process.argv.slice(2);
+  if (frozenTarget) assertValidatedTargetIdentity(frozenTarget, discoverLocalDbTarget());
+  const result = spawnSync(
+    process.execPath,
+    [vitestBin, "run", "--config", vitestConfig, ...args],
+    {
+      env: {
+        ...process.env,
+        SUPABASE_LOCAL_URL: apiUrl,
+        SUPABASE_LOCAL_API_PORT: String(apiPort),
+        SUPABASE_LOCAL_DB_CONTAINER: frozenTarget?.db.id ?? dbId,
+        SUPABASE_LOCAL_PROJECT_ID: projectId,
+        SUPABASE_LOCAL_ANON_KEY: String(local.ANON_KEY ?? ""),
+        SUPABASE_LOCAL_SERVICE_ROLE_KEY: String(local.SERVICE_ROLE_KEY ?? ""),
+        SUPABASE_LOCAL_STICKERS_ENABLED: stickersEnabled,
+        SUPABASE_LOCAL_PAID_STICKER_REQUIRED: "0",
+      },
+      stdio: "inherit",
+      windowsHide: true,
     },
   );
-  if (settingsResponse.ok) {
-    const settings = await settingsResponse.json();
-    stickersEnabled =
-      String(settings?.[0]?.value ?? "").replaceAll('"', "") === "true" ? "true" : "false";
+
+  if (frozenTarget) assertValidatedTargetIdentity(frozenTarget, discoverLocalDbTarget());
+  const eventBaselineAfter = readEventBaseline("after");
+  if (JSON.stringify(eventBaselineAfter) !== JSON.stringify(eventBaselineBefore)) {
+    fail("HTTP fixture event residue changed the verified pre-suite baseline.");
   }
-} catch {
-  stickersEnabled = "unknown";
+
+  process.exit(result.status ?? 1);
 }
 
-const vitestBin = resolve("node_modules/vitest/vitest.mjs");
-const args = process.argv.slice(2);
-const result = spawnSync(process.execPath, [vitestBin, "run", ...args], {
-  env: {
-    ...process.env,
-    SUPABASE_LOCAL_URL: apiUrl,
-    SUPABASE_LOCAL_ANON_KEY: String(local.ANON_KEY ?? ""),
-    SUPABASE_LOCAL_SERVICE_ROLE_KEY: String(local.SERVICE_ROLE_KEY ?? ""),
-    SUPABASE_LOCAL_STICKERS_ENABLED: stickersEnabled,
-  },
-  stdio: "inherit",
-  windowsHide: true,
-});
-
-const eventBaselineAfter = readEventBaseline("after");
-if (JSON.stringify(eventBaselineAfter) !== JSON.stringify(eventBaselineBefore)) {
-  fail("HTTP fixture event residue changed the verified pre-suite baseline.");
-}
-
-process.exit(result.status ?? 1);
+await main();

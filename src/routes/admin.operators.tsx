@@ -252,18 +252,16 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
   }, [qc, refresh]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel(`admin-operators-wallets-${adminId}`)
+    const walletChannel = supabase
+      .channel(`admin-operator-points-${adminId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "credit_wallets" },
+        { event: "UPDATE", schema: "public", table: "operator_point_wallets" },
         refreshCreditData,
       )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "credit_transactions" },
-        refreshCreditData,
-      )
+      .subscribe();
+    const monitoringChannel = supabase
+      .channel(`admin-operator-monitoring-${adminId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "operators" },
@@ -282,7 +280,8 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(walletChannel);
+      void supabase.removeChannel(monitoringChannel);
     };
   }, [adminId, refreshCreditData, refreshMonitoring]);
 
@@ -581,7 +580,7 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                           <OperatorActiveToggle operator={operator} onDone={refresh} />
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 whitespace-nowrap">
+                      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
                         <Button
                           size="icon"
                           variant="ghost"
@@ -605,15 +604,16 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                           variant="outline"
                           className="shrink-0 whitespace-nowrap"
                           onClick={() => setCreditsOp(operator)}
+                          aria-label={`ניהול נקודות עבור ${operator.full_name}`}
                         >
-                          <Coins className="h-4 w-4 ml-1" /> ניהול קרדיטים
+                          <Coins className="h-4 w-4 ml-1" /> ניהול נקודות
                         </Button>
                         <Button
                           size="icon"
                           variant="ghost"
                           onClick={() => setAssignOp(operator)}
                           title="שיוך דמויות"
-                          aria-label="שיוך דמויות"
+                          aria-label={`שיוך דמויות עבור ${operator.full_name}`}
                         >
                           <LinkIcon className="h-4 w-4" />
                         </Button>
@@ -622,7 +622,7 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                           variant="ghost"
                           onClick={() => setEditing(operator)}
                           title="עריכת עובד"
-                          aria-label="עריכת עובד"
+                          aria-label={`עריכת ${operator.full_name}`}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -631,7 +631,7 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                           variant="ghost"
                           onClick={() => setResetOp(operator)}
                           title="שליחת איפוס סיסמה"
-                          aria-label="שליחת איפוס סיסמה"
+                          aria-label={`שליחת איפוס סיסמה עבור ${operator.full_name}`}
                         >
                           <RotateCcw className="h-4 w-4" />
                         </Button>
@@ -641,7 +641,7 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                             variant="ghost"
                             onClick={() => setRestoreOp(operator)}
                             title="שחזר עובד"
-                            aria-label="שחזר עובד"
+                            aria-label={`שחזור ${operator.full_name}`}
                           >
                             <Undo2 className="h-4 w-4" />
                           </Button>
@@ -652,9 +652,9 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                           onClick={() => setArchiveOp(operator)}
                           disabled={Boolean(operator.deleted_at) || operator.role === "admin"}
                           title={operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"}
-                          aria-label={
-                            operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת עובד"
-                          }
+                          aria-label={`${
+                            operator.role === "admin" ? "לא ניתן לארכב מנהל" : "השבתת"
+                          } ${operator.full_name}`}
                         >
                           <UserX className="h-4 w-4" />
                         </Button>
@@ -664,7 +664,7 @@ function OperatorWorkspace({ adminId }: { adminId: string }) {
                             variant="ghost"
                             onClick={() => setConvertOp(operator)}
                             title="הפוך ללקוח"
-                            aria-label="הפוך ללקוח"
+                            aria-label={`הפיכת ${operator.full_name} ללקוח`}
                           >
                             <UserPlus className="h-4 w-4" />
                           </Button>
@@ -894,10 +894,9 @@ type OperatorCreditTransaction = {
   id: string;
   amount: number;
   balance_after: number;
-  type: string;
+  event_type: string;
   reason: string | null;
   created_at: string;
-  message_id: string | null;
   metadata: unknown | null;
 };
 
@@ -1058,20 +1057,14 @@ function OperatorCreditsDialog({
     queryFn: async () => {
       const [walletResult, transactionsResult] = await Promise.all([
         supabase
-          .from("credit_wallets")
-          .select("balance, lifetime_earned, lifetime_spent")
-          .eq("user_id", operator.user_id)
+          .from("operator_point_wallets")
+          .select("balance, lifetime_earned, lifetime_adjusted")
+          .eq("operator_id", operator.id)
           .maybeSingle(),
         supabase
-          .from("credit_transactions")
-          .select("id, amount, balance_after, type, reason, created_at, message_id, metadata")
-          .eq("user_id", operator.user_id)
-          .in("type", [
-            "operator_message_payout",
-            "message_payout",
-            "sticker_payout",
-            "admin_adjustment",
-          ])
+          .from("operator_point_transactions")
+          .select("id, amount, balance_after, event_type, reason, created_at, metadata")
+          .eq("operator_id", operator.id)
           .order("created_at", { ascending: false })
           .limit(30),
       ]);
@@ -1080,7 +1073,7 @@ function OperatorCreditsDialog({
       if (transactionsResult.error) throw transactionsResult.error;
 
       return {
-        wallet: walletResult.data ?? { balance: 0, lifetime_earned: 0, lifetime_spent: 0 },
+        wallet: walletResult.data ?? { balance: 0, lifetime_earned: 0, lifetime_adjusted: 0 },
         transactions: (transactionsResult.data ?? []) as OperatorCreditTransaction[],
       };
     },
@@ -1088,8 +1081,8 @@ function OperatorCreditsDialog({
 
   const adjust = async () => {
     const parsedAmount = Number(amount);
-    if (!Number.isInteger(parsedAmount) || parsedAmount === 0) {
-      toast.error("יש להזין כמות שלמה ושונה מאפס");
+    if (!Number.isFinite(parsedAmount) || parsedAmount === 0) {
+      toast.error("יש להזין כמות נקודות תקינה ושונה מאפס");
       return;
     }
     if (reason.trim().length < 3) {
@@ -1099,21 +1092,21 @@ function OperatorCreditsDialog({
 
     setBusy(true);
     try {
-      const { error } = await supabase.rpc("adjust_operator_credits", {
+      const { error } = await supabase.rpc("admin_adjust_operator_points", {
         _operator_id: operator.id,
         _amount: parsedAmount,
         _reason: reason.trim(),
       });
       if (error) {
-        if (error.message.includes("insufficient_credits_for_adjustment")) {
-          toast.error("לא ניתן להפחית קרדיטים מתחת לאפס");
+        if (error.message.includes("insufficient_operator_points")) {
+          toast.error("לא ניתן להפחית נקודות מתחת לאפס");
         } else {
-          toast.error("עדכון קרדיטי העובד נכשל: " + error.message);
+          toast.error("עדכון נקודות העובד נכשל: " + error.message);
         }
         return;
       }
 
-      toast.success(parsedAmount > 0 ? "קרדיטים נוספו לעובד" : "קרדיטים הופחתו מהעובד");
+      toast.success(parsedAmount > 0 ? "נקודות נוספו לעובד" : "נקודות הופחתו מהעובד");
       setAmount("");
       setReason("");
       onChanged();
@@ -1127,20 +1120,22 @@ function OperatorCreditsDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
-          <DialogTitle>ניהול קרדיטים - {operator.full_name}</DialogTitle>
-          <DialogDescription>התאמות נרשמות בארנק העובד, ב־ledger וביומן הביקורת.</DialogDescription>
+          <DialogTitle>ניהול נקודות - {operator.full_name}</DialogTitle>
+          <DialogDescription>
+            התאמות נרשמות ב־Operator Points וביומן הביקורת, ללא יחס כספי.
+          </DialogDescription>
         </DialogHeader>
 
         {isLoading && <Skeleton className="h-72" />}
         {!isLoading && error && (
-          <p className="text-sm text-destructive text-center py-8">טעינת קרדיטי העובד נכשלה.</p>
+          <p className="text-sm text-destructive text-center py-8">טעינת נקודות העובד נכשלה.</p>
         )}
         {!isLoading && data && (
           <div className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-              <CreditStat label="קרדיטים זמינים" value={data.wallet.balance} />
+              <CreditStat label="נקודות זמינות" value={data.wallet.balance} />
               <CreditStat label="סך הכל נצברו" value={data.wallet.lifetime_earned} />
-              <CreditStat label="סך הכל הופחתו" value={data.wallet.lifetime_spent} />
+              <CreditStat label="התאמות מנהל" value={data.wallet.lifetime_adjusted} />
             </div>
 
             <div className="grid gap-3 rounded-md border p-4">
@@ -1166,14 +1161,14 @@ function OperatorCreditsDialog({
               </div>
               <Button onClick={adjust} disabled={busy}>
                 <Coins className="h-4 w-4 ml-1" />
-                {busy ? "מעדכן..." : "עדכן קרדיטים"}
+                {busy ? "מעדכן..." : "עדכן נקודות"}
               </Button>
             </div>
 
             <div>
-              <h3 className="text-sm font-medium mb-2">פעולות קרדיטים אחרונות</h3>
+              <h3 className="text-sm font-medium mb-2">פעולות נקודות אחרונות</h3>
               {data.transactions.length === 0 && (
-                <p className="text-sm text-muted-foreground py-4">אין פעולות קרדיטים להצגה.</p>
+                <p className="text-sm text-muted-foreground py-4">אין פעולות נקודות להצגה.</p>
               )}
               {data.transactions.length > 0 && (
                 <div className="space-y-2">
@@ -1195,10 +1190,7 @@ function OperatorCreditsDialog({
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {transaction.type} · יתרה אחרי: {transaction.balance_after}
-                        {transaction.message_id && (
-                          <> · הודעה: {transaction.message_id.slice(0, 8)}</>
-                        )}
+                        {transaction.event_type} · יתרה אחרי: {transaction.balance_after}
                       </div>
                       {transaction.reason && <p className="mt-1">{transaction.reason}</p>}
                       {getTransactionSource(transaction.metadata) && (
@@ -1483,12 +1475,17 @@ function CreateOperatorDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם מלא</Label>
-            <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Label htmlFor="operator-create-full-name">שם מלא</Label>
+            <Input
+              id="operator-create-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
-            <Label>אימייל</Label>
+            <Label htmlFor="operator-create-email">אימייל</Label>
             <Input
+              id="operator-create-email"
               type="email"
               dir="ltr"
               value={email}
@@ -1496,8 +1493,9 @@ function CreateOperatorDialog({
             />
           </div>
           <div>
-            <Label>סיסמה זמנית</Label>
+            <Label htmlFor="operator-create-password">סיסמה זמנית</Label>
             <Input
+              id="operator-create-password"
               type="password"
               dir="ltr"
               value={password}
@@ -1505,11 +1503,13 @@ function CreateOperatorDialog({
             />
           </div>
           <div className="flex items-center justify-between">
-            <Label>חשבון פעיל</Label>
-            <Switch checked={isActive} onCheckedChange={setIsActive} />
+            <Label htmlFor="operator-create-active">חשבון פעיל</Label>
+            <Switch id="operator-create-active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
-          <div>
-            <Label>שיוך לדמויות</Label>
+          <div role="group" aria-labelledby="operator-create-characters-label">
+            <p id="operator-create-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1591,8 +1591,9 @@ function PromoteClientDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>אימייל של לקוח קיים</Label>
+            <Label htmlFor="operator-convert-email">אימייל של לקוח קיים</Label>
             <Input
+              id="operator-convert-email"
               type="email"
               dir="ltr"
               value={email}
@@ -1600,15 +1601,21 @@ function PromoteClientDialog({
             />
           </div>
           <div>
-            <Label>שם עובד</Label>
-            <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Label htmlFor="operator-convert-full-name">שם עובד</Label>
+            <Input
+              id="operator-convert-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div className="flex items-center justify-between">
-            <Label>חשבון עובד פעיל</Label>
-            <Switch checked={isActive} onCheckedChange={setIsActive} />
+            <Label htmlFor="operator-convert-active">חשבון עובד פעיל</Label>
+            <Switch id="operator-convert-active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
-          <div>
-            <Label>שיוך לדמויות</Label>
+          <div role="group" aria-labelledby="operator-convert-characters-label">
+            <p id="operator-convert-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1686,20 +1693,27 @@ function CreateInviteDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם מלא</Label>
-            <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Label htmlFor="operator-assign-full-name">שם מלא</Label>
+            <Input
+              id="operator-assign-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
-            <Label>אימייל</Label>
+            <Label htmlFor="operator-assign-email">אימייל</Label>
             <Input
+              id="operator-assign-email"
               dir="ltr"
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
           </div>
-          <div>
-            <Label>שיוך לדמויות</Label>
+          <div role="group" aria-labelledby="operator-assign-characters-label">
+            <p id="operator-assign-characters-label" className="text-sm font-medium leading-none">
+              שיוך לדמויות
+            </p>
             {isLoading ? (
               <Skeleton className="h-32 mt-2" />
             ) : (
@@ -1814,20 +1828,30 @@ function EditOperatorDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>שם מלא</Label>
-            <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <Label htmlFor="operator-edit-full-name">שם מלא</Label>
+            <Input
+              id="operator-edit-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </div>
           <div>
-            <Label>אימייל</Label>
-            <Input value={operator.email ?? ""} readOnly dir="ltr" className="bg-muted" />
+            <Label htmlFor="operator-edit-email">אימייל</Label>
+            <Input
+              id="operator-edit-email"
+              value={operator.email ?? ""}
+              readOnly
+              dir="ltr"
+              className="bg-muted"
+            />
           </div>
           <div>
-            <Label>סטטוס זמינות</Label>
+            <Label htmlFor="operator-edit-availability">סטטוס זמינות</Label>
             <Select
               value={status}
               onValueChange={(value) => setStatus(value as Operator["availability_status"])}
             >
-              <SelectTrigger>
+              <SelectTrigger id="operator-edit-availability">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1838,8 +1862,9 @@ function EditOperatorDialog({
             </Select>
           </div>
           <div className="flex items-center justify-between">
-            <Label>חשבון עובד פעיל</Label>
+            <Label htmlFor="operator-edit-active">חשבון עובד פעיל</Label>
             <Switch
+              id="operator-edit-active"
               checked={isProtectedAdmin ? true : isActive}
               onCheckedChange={setIsActive}
               disabled={isProtectedAdmin}

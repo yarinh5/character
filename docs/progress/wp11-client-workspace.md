@@ -48,3 +48,10 @@
 - Backend, schema, migrations, RLS, RPCs, dependencies, lockfile and route tree: unchanged. Local/QA/Production application and deploy: not executed.
 - Dependency installation reported 42 vulnerabilities (2 low, 20 moderate, 14 high, 6 critical); remediation is outside this allowlist.
 - WP11 as a whole is not complete and no product-delivery claim is made. Browser and authorized live integration evidence remain separate gates.
+
+## Directory pagination follow-up (2026-11-26)
+
+- Cause: the list read every role/client candidate into server memory, then fetched profiles and enrichment through unpaged PostgREST calls. API row caps could omit older clients and truncate wallet/activity facts; the UI filtered only the returned subset. The detail view also capped client messages at 1,000 and treated a missing wallet as zero.
+- Change: a forward-only, admin-gated `admin_list_clients_page` RPC filters and keyset-pages before joining wallet and full conversation aggregates. The server passes the authenticated JWT to the RPC; the UI searches and filters server-side, loads 100 visible rows with one lookahead row, retains previous rows after a later-page failure, and shows an unavailable wallet as unavailable. Detail activity uses exact counts, and missing wallet data no longer becomes zero. Existing limited conversation, transaction and timeline lists remain intentionally recent windows.
+- Checks on the final revision: focused admin suites, full Vitest, typecheck, changed-file lint/format, 103 existing SQL Offline contracts and client/SSR build. The new pgTAP fixture covers admin/anon access, filtering, cursor ties, literal search, missing wallet and more than 1,000 conversations; **it has not run against PostgreSQL**.
+- Remaining acceptance: apply the new migration in an authorized isolated DB, execute the pgTAP fixture and verify the admin route with a live authenticated session. This follow-up does not establish Product PASS or close WP11/WP12 integration gates.

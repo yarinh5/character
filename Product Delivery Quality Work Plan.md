@@ -18,19 +18,19 @@
 
 ## 2. סיכום התאמה ל־V2/V3
 
-| חבילת מקור | סיווג V4 | התאמה למצב הנוכחי |
-| --- | --- | --- |
-| A. אפיון מוצר ותהליכים | החלטת בעל מוצר / נדרש לפני Production | יש חוזי V2/V3 סגורים, אך חסרים מקור אמת מוצרי מאושר, מסעות קבלה ומילון מדדים. כללי מחיר, payout ופתיחת תמונה יופנו לחוזים הקיימים בלבד. |
-| B. ממשק, עיצוב ונגישות | שיפור איכות / חלקו נדרש לפני Production | V3 השלים ליטוש RTL, עברית ונגישות ממוקדת. נשארו QA ידני למקלדת, קורא מסך, Admin/Operator ויעד WCAG מאושר. |
-| C. Frontend וחוזי נתונים | שיפור איכות | V3 הקשיח SLA fail-closed, שגיאות Client ו־Admin snapshot. נשארים מיפוי מלא של חוזים, Realtime/offline ובדיקות אינטגרציה למסלולים רגישים. |
-| D1, D3–D5. DB, התאוששות ועומס | נדרש לפני Production / שיפור איכות | Manifest המיגרציות הושלם ב־V3, אך rehearsal למסד ריק, שחזור מגיבוי ויעדי עומס/שירות נשארו פתוחים. |
-| D2. כללי migration baseline | הושלם ב־V3 | [Migration Baseline Manifest](./Migration%20Baseline%20Manifest.md) הוא מקור הכללים; אין `migration repair` לשם יישור שמות או זמנים. |
-| E. הרשאות ואבטחה | נדרש לפני Production | V3 הקשיח role/private helpers וסיווג advisories. עדיין נדרשת מטריצת פעולה × נתון × תפקיד עם בדיקות API חיוביות ושליליות. |
-| F. בדיקות אוטומטיות ו־CI | נדרש לפני Production | אין עדיין test runner, סקריפט `test`, suite או GitHub workflow. זהו מסלול V4 הראשון. |
-| G. משפט, פרטיות וכללי שירות | נדרש לפני השקה ציבורית | תנאי השימוש והפרטיות הם placeholders ומחייבים אישור בעלים/ייעוץ מתאים. |
-| H. תמיכה, תפעול וניטור | נדרש לפני Production | Runbook קיים, אך בעלות על ניטור, ערוץ תמיכה, alert routing ותרגילי אירוע נשארו פתוחים. |
-| I. מדדי מוצר | שיפור איכות מומלץ | קיימת תשתית analytics ו־Admin snapshot; חסרים מילון מדדים, cadence ובעלים. |
-| J. סליקה עצמית | יוזמת מוצר אופציונלית | רכישת קרדיטים נשארת ידנית. Payments/top-ups אינם נכללים ב־V4 בלי החלטת מוצר מפורשת. |
+| חבילת מקור                    | סיווג V4                                | התאמה למצב הנוכחי                                                                                                                        |
+| ----------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| A. אפיון מוצר ותהליכים        | החלטת בעל מוצר / נדרש לפני Production   | יש חוזי V2/V3 סגורים, אך חסרים מקור אמת מוצרי מאושר, מסעות קבלה ומילון מדדים. כללי מחיר, payout ופתיחת תמונה יופנו לחוזים הקיימים בלבד.  |
+| B. ממשק, עיצוב ונגישות        | שיפור איכות / חלקו נדרש לפני Production | V3 השלים ליטוש RTL, עברית ונגישות ממוקדת. נשארו QA ידני למקלדת, קורא מסך, Admin/Operator ויעד WCAG מאושר.                                |
+| C. Frontend וחוזי נתונים      | שיפור איכות                             | V3 הקשיח SLA fail-closed, שגיאות Client ו־Admin snapshot. נשארים מיפוי מלא של חוזים, Realtime/offline ובדיקות אינטגרציה למסלולים רגישים. |
+| D1, D3–D5. DB, התאוששות ועומס | נדרש לפני Production / שיפור איכות      | Manifest המיגרציות הושלם ב־V3, אך rehearsal למסד ריק, שחזור מגיבוי ויעדי עומס/שירות נשארו פתוחים.                                        |
+| D2. כללי migration baseline   | הושלם ב־V3                              | [Migration Baseline Manifest](./Migration%20Baseline%20Manifest.md) הוא מקור הכללים; אין `migration repair` לשם יישור שמות או זמנים.     |
+| E. הרשאות ואבטחה              | נדרש לפני Production                    | V3 הקשיח role/private helpers וסיווג advisories. עדיין נדרשת מטריצת פעולה × נתון × תפקיד עם בדיקות API חיוביות ושליליות.                 |
+| F. בדיקות אוטומטיות ו־CI      | נדרש לפני Production                    | אין עדיין test runner, סקריפט `test`, suite או GitHub workflow. זהו מסלול V4 הראשון.                                                     |
+| G. משפט, פרטיות וכללי שירות   | נדרש לפני השקה ציבורית                  | תנאי השימוש והפרטיות הם placeholders ומחייבים אישור בעלים/ייעוץ מתאים.                                                                   |
+| H. תמיכה, תפעול וניטור        | נדרש לפני Production                    | Runbook קיים, אך בעלות על ניטור, ערוץ תמיכה, alert routing ותרגילי אירוע נשארו פתוחים.                                                   |
+| I. מדדי מוצר                  | שיפור איכות מומלץ                       | קיימת תשתית analytics ו־Admin snapshot; חסרים מילון מדדים, cadence ובעלים.                                                               |
+| J. סליקה עצמית                | יוזמת מוצר אופציונלית                   | רכישת קרדיטים נשארת ידנית. Payments/top-ups אינם נכללים ב־V4 בלי החלטת מוצר מפורשת.                                                      |
 
 ## 3. חוזי מוצר סגורים
 
@@ -42,18 +42,18 @@
 
 ## 4. החלטות בעלים לפני תכנון ספרינטים
 
-| החלטה | בעל החלטה מוצע | תוצאה נדרשת |
-| --- | --- | --- |
-| מהו היקף ההשקה הראשונה: QA בלבד, פיילוט מוגבל או Production? | בעל המוצר | קהל יעד, יכולות פעילות ותאריך יעד מוסכמים |
-| האם onboarding חובה ותמונות נעולות נכללים בהשקה? | בעל המוצר + QA | ערכי feature flags מאושרים ותנאי הפעלה |
-| האם רכישת קרדיטים נשארת ידנית או נדרשת סליקה עצמית? | בעל המוצר + גורם כספים | החלטה שמגדירה אם מסלול התשלומים נכנס לתוכנית |
-| מי אחראי על תוכן משפטי, תמיכה, טיפול בדיווחים ותגובה לתקלות? | בעל המוצר | בעלים וערוץ הסלמה לכל תחום |
-| מהן מטרות השירות: זמני מענה, זמינות, נפח משתמשים ואובדן מידע נסבל? | בעל המוצר + ראש צוות | יעדים מדידים לבדיקות עומס, ניטור והתאוששות |
-| מי מאשר RPO/RTO, בעלות גיבוי ושחזור והרשאת rollback? | בעל מוצר + Database/Operations Owner | יעדי התאוששות, בעלים ותרגיל שחזור מתועדים |
-| מי מחזיק בבעלות על ניטור, alert routing ותגובה לאירוע? | Operations Owner | ערוץ אירוע, סף התראה ו־escalation מאושרים |
-| האם להפעיל leaked-password protection? | Auth Owner + בעל המוצר | החלטה והפעלת QA מבוקרת, ללא שינוי עד אישור |
-| האם scheduler ב־Production מאושר? | בעל מוצר + Operations Owner | אישור נפרד לאחר QA בשני sessions וסידור בעלות תפעולית |
-| מי מוסמך לפרוש את Legacy Gift Edge Functions ב־QA? | Project Owner | הרשאה או החלטה לקבלת החריג ללא שחזור Gifts |
+| החלטה                                                              | בעל החלטה מוצע                       | תוצאה נדרשת                                           |
+| ------------------------------------------------------------------ | ------------------------------------ | ----------------------------------------------------- |
+| מהו היקף ההשקה הראשונה: QA בלבד, פיילוט מוגבל או Production?       | בעל המוצר                            | קהל יעד, יכולות פעילות ותאריך יעד מוסכמים             |
+| האם onboarding חובה ותמונות נעולות נכללים בהשקה?                   | בעל המוצר + QA                       | ערכי feature flags מאושרים ותנאי הפעלה                |
+| האם רכישת קרדיטים נשארת ידנית או נדרשת סליקה עצמית?                | בעל המוצר + גורם כספים               | החלטה שמגדירה אם מסלול התשלומים נכנס לתוכנית          |
+| מי אחראי על תוכן משפטי, תמיכה, טיפול בדיווחים ותגובה לתקלות?       | בעל המוצר                            | בעלים וערוץ הסלמה לכל תחום                            |
+| מהן מטרות השירות: זמני מענה, זמינות, נפח משתמשים ואובדן מידע נסבל? | בעל המוצר + ראש צוות                 | יעדים מדידים לבדיקות עומס, ניטור והתאוששות            |
+| מי מאשר RPO/RTO, בעלות גיבוי ושחזור והרשאת rollback?               | בעל מוצר + Database/Operations Owner | יעדי התאוששות, בעלים ותרגיל שחזור מתועדים             |
+| מי מחזיק בבעלות על ניטור, alert routing ותגובה לאירוע?             | Operations Owner                     | ערוץ אירוע, סף התראה ו־escalation מאושרים             |
+| האם להפעיל leaked-password protection?                             | Auth Owner + בעל המוצר               | החלטה והפעלת QA מבוקרת, ללא שינוי עד אישור            |
+| האם scheduler ב־Production מאושר?                                  | בעל מוצר + Operations Owner          | אישור נפרד לאחר QA בשני sessions וסידור בעלות תפעולית |
+| מי מוסמך לפרוש את Legacy Gift Edge Functions ב־QA?                 | Project Owner                        | הרשאה או החלטה לקבלת החריג ללא שחזור Gifts            |
 
 ## 5. חבילות העבודה המקוריות
 
@@ -108,7 +108,7 @@
 **אחריות מוצעת:** Backend/DB, אבטחת מידע ו־QA.
 
 1. לבנות מטריצת הרשאות לפי **פעולה × נתון × תפקיד**: לקוח בעל הנתון, לקוח אחר, עובד משויך, עובד לא משויך, עובד שחסם לקוח, אדמין ו־service role.
-2. לכל שורה במטריצה ליצור בדיקת *מותר* ובדיקת *אסור* דרך API/RPC אמיתי; לכלול RLS, `SECURITY DEFINER`, grants, Storage וקישורי מדיה חתומים. בדיקת חסימת מסך UI לבדה אינה הוכחת הרשאה.
+2. לכל שורה במטריצה ליצור בדיקת _מותר_ ובדיקת _אסור_ דרך API/RPC אמיתי; לכלול RLS, `SECURITY DEFINER`, grants, Storage וקישורי מדיה חתומים. בדיקת חסימת מסך UI לבדה אינה הוכחת הרשאה.
 3. לבצע סקירה ממוקדת של פעולות אדמין, התחזות, חיובים, הפעלת פונקציות פרטיות ושימוש ב־service role. להשתמש ב־OWASP ASVS כרשימת בדיקה; לסווג advisories לפי סיכון מוכח לפני שינוי מדיניות קיימת.
 4. לתעד ממצא, חומרה, בעל תיקון, בדיקת רגרסיה והחלטת קבלה לכל חריגה.
 
@@ -164,16 +164,16 @@
 
 ## 6. מפת הדרכים המאושרת ל־V4
 
-| שלב | מטרה והיקף מדויק | תלויות וסיכונים | תנאי יציאה | החלטת בעלים/סביבה | לולאות יישום משוערות |
-| --- | --- | --- | --- | --- | --- |
-| V4-1-A Automated Test And CI Foundation Audit | Audit read-only של scripts, lint/build, תשתיות בדיקה, GitHub workflows, מסלולי V2/V3 קריטיים וסביבת נתוני test. אין בחירת framework או התקנה בשלב זה. | אין test runner או CI קיימים; בחירה מוקדמת עלולה ליצור תשתית שאינה מתאימה ל־Supabase/RLS. | מסמך design מאושר ל־V4-2: שכבות בדיקה, מסלולים ראשונים, isolation ו־secret policy. | אין. | 0 |
-| V4-2 Test Runner And CI Foundation | הוספת runner/config, סקריפטי test, workflow מינימלי ל־lint, TypeScript, build ובדיקות שנבחרו. | אישור dependencies וגישה להגדרות GitHub; אין secrets ב־CI. | pipeline שחזורי עובר על branch/PR ומדווח כשל ללא שינוי סביבת מוצר. | GitHub Owner. | 2 |
-| V4-3 Multi-role Authorization And Sensitive-flow Regressions | בדיקות DB/RLS/RPC ו־integration ל־Client owner, client אחר, Operator משויך/לא משויך/חסום, Admin ו־service role; NEW, media, archive, Admin ו־idempotency פיננסית. | זהויות QA/test מבודדות ומסד disposable; כיסוי לא נכון עלול להיראות כ־RLS proof בלי API אמיתי. | מטריצת מותר/אסור עוברת וכל חריגה מקבלת owner ורגרסיה. | Database/QA Owner. | 2–3 |
-| V4-4 Fresh Migration And Backup/Restore Rehearsal | הקמת מסד ריק disposable משרשרת migrations, אימות contracts מרכזיים, ותרגיל backup/restore עם RPO/RTO מדודים. | פרויקט disposable, יכולת backup ואישור Database Owner. | rehearsal מתועד, זמני שחזור ואובדן מידע נמדדים, ללא history repair. | Database/Operations Owner. | 2 |
-| V4-5 Accessibility And Remaining Manual QA | QA רב־תפקידי ב־RTL/mobile/desktop, keyboard, screen reader, profile failure, Admin/Operator, ומיון ממצאים לתיקונים צרים בלבד. | חשבונות QA ויעד WCAG; שינויים רחבים עלולים לפתוח חוזים סגורים. | ממצאים חוסמים נסגרים או מתקבלת החלטת קבלה מתועדת. | QA/Product Owner. | 1–3 |
-| V4-6 Legal, Privacy, Support And Monitoring Readiness | הטמעת תוכן משפטי מאושר בלבד, מסלול תמיכה והסלמה, ownership לניטור ו־incident route, retention והדרכות תפעוליות. | אישור משפטי, Support/Operations Owner, מדיניות פרטיות ושירות. | תוכן מאושר, ערוץ תמיכה, alert routing ותרגיל אירוע מתועדים. | Product, Legal, Support, Operations Owners. | 1–2 engineering loops לאחר אישורים |
-| V4-7 Optional Production Activation Gate | חבילת GO/NO-GO נפרדת: target, baseline, owners, secrets, flags, Edge parity, smoke identities, observability ו־rollback. | כל V4-2 עד V4-6 והחלטת בעל מוצר; scheduler דורש QA אמיתי בשני sessions. | Deploy loop מפורש ו־Production GO מאושר. | Product/Production Owners. | 2–5 |
-| V4-8 Optional Analytics Governance Or Payments Discovery | מילון מדדים/owners/cadence, או discovery מופרד לתשלומים ותאימות פיננסית. אין implementation של payments בלי החלטה. | החלטת מוצר, ובתשלומים גם Finance/Legal/Compliance. | scope מאושר ונפרד, ללא שינוי בחוזי Credits/Payout קיימים. | Product Owner. | Planning first |
+| שלב                                                          | מטרה והיקף מדויק                                                                                                                                                  | תלויות וסיכונים                                                                               | תנאי יציאה                                                                         | החלטת בעלים/סביבה                           | לולאות יישום משוערות               |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------- |
+| V4-1-A Automated Test And CI Foundation Audit                | Audit read-only של scripts, lint/build, תשתיות בדיקה, GitHub workflows, מסלולי V2/V3 קריטיים וסביבת נתוני test. אין בחירת framework או התקנה בשלב זה.             | אין test runner או CI קיימים; בחירה מוקדמת עלולה ליצור תשתית שאינה מתאימה ל־Supabase/RLS.     | מסמך design מאושר ל־V4-2: שכבות בדיקה, מסלולים ראשונים, isolation ו־secret policy. | אין.                                        | 0                                  |
+| V4-2 Test Runner And CI Foundation                           | הוספת runner/config, סקריפטי test, workflow מינימלי ל־lint, TypeScript, build ובדיקות שנבחרו.                                                                     | אישור dependencies וגישה להגדרות GitHub; אין secrets ב־CI.                                    | pipeline שחזורי עובר על branch/PR ומדווח כשל ללא שינוי סביבת מוצר.                 | GitHub Owner.                               | 2                                  |
+| V4-3 Multi-role Authorization And Sensitive-flow Regressions | בדיקות DB/RLS/RPC ו־integration ל־Client owner, client אחר, Operator משויך/לא משויך/חסום, Admin ו־service role; NEW, media, archive, Admin ו־idempotency פיננסית. | זהויות QA/test מבודדות ומסד disposable; כיסוי לא נכון עלול להיראות כ־RLS proof בלי API אמיתי. | מטריצת מותר/אסור עוברת וכל חריגה מקבלת owner ורגרסיה.                              | Database/QA Owner.                          | 2–3                                |
+| V4-4 Fresh Migration And Backup/Restore Rehearsal            | הקמת מסד ריק disposable משרשרת migrations, אימות contracts מרכזיים, ותרגיל backup/restore עם RPO/RTO מדודים.                                                      | פרויקט disposable, יכולת backup ואישור Database Owner.                                        | rehearsal מתועד, זמני שחזור ואובדן מידע נמדדים, ללא history repair.                | Database/Operations Owner.                  | 2                                  |
+| V4-5 Accessibility And Remaining Manual QA                   | QA רב־תפקידי ב־RTL/mobile/desktop, keyboard, screen reader, profile failure, Admin/Operator, ומיון ממצאים לתיקונים צרים בלבד.                                     | חשבונות QA ויעד WCAG; שינויים רחבים עלולים לפתוח חוזים סגורים.                                | ממצאים חוסמים נסגרים או מתקבלת החלטת קבלה מתועדת.                                  | QA/Product Owner.                           | 1–3                                |
+| V4-6 Legal, Privacy, Support And Monitoring Readiness        | הטמעת תוכן משפטי מאושר בלבד, מסלול תמיכה והסלמה, ownership לניטור ו־incident route, retention והדרכות תפעוליות.                                                   | אישור משפטי, Support/Operations Owner, מדיניות פרטיות ושירות.                                 | תוכן מאושר, ערוץ תמיכה, alert routing ותרגיל אירוע מתועדים.                        | Product, Legal, Support, Operations Owners. | 1–2 engineering loops לאחר אישורים |
+| V4-7 Optional Production Activation Gate                     | חבילת GO/NO-GO נפרדת: target, baseline, owners, secrets, flags, Edge parity, smoke identities, observability ו־rollback.                                          | כל V4-2 עד V4-6 והחלטת בעל מוצר; scheduler דורש QA אמיתי בשני sessions.                       | Deploy loop מפורש ו־Production GO מאושר.                                           | Product/Production Owners.                  | 2–5                                |
+| V4-8 Optional Analytics Governance Or Payments Discovery     | מילון מדדים/owners/cadence, או discovery מופרד לתשלומים ותאימות פיננסית. אין implementation של payments בלי החלטה.                                                | החלטת מוצר, ובתשלומים גם Finance/Legal/Compliance.                                            | scope מאושר ונפרד, ללא שינוי בחוזי Credits/Payout קיימים.                          | Product Owner.                              | Planning first                     |
 
 ### שלב ראשון מומלץ
 
@@ -197,6 +197,8 @@
 אפשר לבצע עבודה משפטית, עיצוב והקמת CI במקביל לאחר שהיקף ההשקה הוגדר. ראש הצוות יתמחר ויתזמן כל חבילה לאחר אפיון קצר של התלויות והסיכונים.
 
 ## 9. הגדרת Done למסירת הגרסה
+
+[החלטת Product Owner — Definition of Done](./docs/definition-of-done.md) היא ההגדרה המחייבת להשלמת הפיתוח, קבלת המוצר, מוכנות להשקה ומסירה חוזית. יש לקרוא אותה לצד האפיון ותוכנית העבודה.
 
 - מסמך מוצר, זרימות ומטריצת הרשאות מאושרים ומתאימים למימוש.
 - בדיקות אוטומטיות ושערי CI קריטיים עוברים על commit שחרור נקי.

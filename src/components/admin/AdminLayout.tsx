@@ -1,11 +1,15 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
+  AlertTriangle,
   BarChart3,
   Coins,
   Flag,
+  LifeBuoy,
+  HeartHandshake,
   LayoutDashboard,
   LogOut,
+  Menu,
   MessageCircle,
   ScrollText,
   Settings,
@@ -19,6 +23,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { ImpersonationBanner } from "@/components/common/ImpersonationBanner";
+import { SkipLink } from "@/components/common/SkipLink";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 type NavTo =
   | "/admin"
@@ -27,9 +40,12 @@ type NavTo =
   | "/admin/operators"
   | "/admin/characters"
   | "/admin/conversations"
+  | "/admin/leads"
   | "/admin/credits"
   | "/admin/analytics"
   | "/admin/reports"
+  | "/admin/exceptions"
+  | "/admin/support"
   | "/admin/audit-logs"
   | "/admin/settings"
   | "/admin/stickers";
@@ -42,12 +58,18 @@ const NAV: { to: NavTo; label: string; icon: typeof Users; exact?: boolean }[] =
   { to: "/admin/characters", label: "דמויות", icon: Sparkles },
   { to: "/admin/stickers", label: "Stickers", icon: Sticker },
   { to: "/admin/conversations", label: "שיחות", icon: MessageCircle },
+  { to: "/admin/leads", label: "Leads", icon: HeartHandshake },
   { to: "/admin/credits", label: "קרדיטים", icon: Coins },
   { to: "/admin/reports", label: "דיווחים", icon: Flag },
+  { to: "/admin/exceptions", label: "חריגים", icon: AlertTriangle },
+  { to: "/admin/support", label: "תמיכה ואירועים", icon: LifeBuoy },
   { to: "/admin/audit-logs", label: "יומן פעולות", icon: ScrollText },
   { to: "/admin/settings", label: "הגדרות", icon: Settings },
   { to: "/admin/analytics", label: "אנליטיקות", icon: BarChart3 },
 ];
+
+const PRIMARY_MOBILE_NAV = NAV.slice(0, 4);
+const MORE_MOBILE_NAV = NAV.slice(4);
 
 function Spinner() {
   return (
@@ -96,9 +118,11 @@ function AdminShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const isActive = (to: string, exact?: boolean) =>
     exact ? pathname === to : pathname.startsWith(to);
+  const selectedMore = MORE_MOBILE_NAV.find(({ to, exact }) => isActive(to, exact));
 
   const handleLogout = async () => {
     await signOut();
@@ -107,6 +131,7 @@ function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col" dir="rtl">
+      <SkipLink />
       <ImpersonationBanner />
       <div className="flex flex-1 min-h-0">
         <aside className="hidden md:flex w-64 shrink-0 flex-col border-l border-border bg-card">
@@ -138,7 +163,11 @@ function AdminShell({ children }: { children: ReactNode }) {
           </nav>
         </aside>
 
-        <main className="flex-1 min-w-0 pb-24 md:pb-0 flex flex-col">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-w-0 pb-24 md:pb-0 flex flex-col"
+        >
           <header className="h-14 border-b border-border bg-card flex items-center justify-end px-4 gap-2 shrink-0">
             <NotificationBell />
           </header>
@@ -155,23 +184,68 @@ function AdminShell({ children }: { children: ReactNode }) {
           יציאה
         </Button>
 
-        <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40 overflow-x-auto">
-          <div className="flex min-w-max">
-            {NAV.map(({ to, label, icon: Icon, exact }) => (
-              <Link
-                key={to}
-                to={to}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 py-2.5 px-4 text-[11px] min-w-[68px]",
-                  isActive(to, exact) ? "text-primary" : "text-muted-foreground",
-                )}
-              >
-                <Icon className="h-5 w-5" />
-                {label}
-              </Link>
-            ))}
-          </div>
-        </nav>
+        <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+          <nav
+            aria-label="ניווט ניהול במובייל"
+            className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t border-border z-40"
+          >
+            <div className="grid grid-cols-5">
+              {PRIMARY_MOBILE_NAV.map(({ to, label, icon: Icon, exact }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  aria-current={isActive(to, exact) ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px]",
+                    isActive(to, exact) ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
+                  {label}
+                </Link>
+              ))}
+              <SheetTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={selectedMore ? `עוד יעדים, נבחר ${selectedMore.label}` : "עוד יעדים"}
+                  data-active={Boolean(selectedMore)}
+                  className={cn(
+                    "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px]",
+                    selectedMore ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Menu className="h-5 w-5" />
+                  <span aria-hidden="true">עוד</span>
+                </button>
+              </SheetTrigger>
+            </div>
+          </nav>
+          <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto" dir="rtl">
+            <SheetHeader>
+              <SheetTitle>מסכי ניהול</SheetTitle>
+              <SheetDescription className="sr-only">יעדי ניווט נוספים</SheetDescription>
+            </SheetHeader>
+            <nav aria-label="יעדי ניהול נוספים" className="mt-5 grid gap-1 pb-3">
+              {MORE_MOBILE_NAV.map(({ to, label, icon: Icon, exact }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  onClick={() => setMoreOpen(false)}
+                  aria-current={isActive(to, exact) ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-11 items-center gap-3 rounded-sm px-3 text-sm font-medium",
+                    isActive(to, exact)
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-accent",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Link>
+              ))}
+            </nav>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );
@@ -198,7 +272,9 @@ export function StatusBadge({ status }: { status: string }) {
   };
   const current = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
   return (
-    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", current.cls)}>
+    <span
+      className={cn("text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap", current.cls)}
+    >
       {current.label}
     </span>
   );

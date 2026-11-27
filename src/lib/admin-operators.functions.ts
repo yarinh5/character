@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Database } from "@/integrations/supabase/types";
 import { logAudit } from "@/lib/audit.server";
 
 type AppRole = "admin" | "operator" | "client";
@@ -17,10 +19,13 @@ async function ensureAdmin(userId: string) {
   if (!data) throw new Error("אין הרשאת מנהל");
 }
 
-async function setSingleRole(userId: string, role: AppRole) {
-  await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
-  const { error } = await supabaseAdmin.from("user_roles").insert({ user_id: userId, role });
+async function setSingleRole(supabase: SupabaseClient<Database>, userId: string, role: AppRole) {
+  const { data, error } = await supabase.rpc("admin_set_user_role", {
+    _user_id: userId,
+    _new_role: role,
+  });
   if (error) throw new Error(error.message);
+  if (data !== true) throw new Error("role_change_not_confirmed");
 }
 
 async function syncAssignments(operatorId: string, characterIds: string[]) {
@@ -55,7 +60,7 @@ async function syncAssignments(operatorId: string, characterIds: string[]) {
 async function getOperatorAdminContext(operatorId: string) {
   const { data: operator, error } = await supabaseAdmin
     .from("operators")
-    .select("id, user_id")
+    .select("id, user_id, deleted_at")
     .eq("id", operatorId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -103,23 +108,51 @@ export const adminListOperators = createServerFn({ method: "GET" })
     const ids = opsList.map((operator) => operator.id);
     const userIds = opsList.map((operator) => operator.user_id);
 
-    const [{ data: roles }, { data: assigns }, { data: convs }, { data: profs }, { data: wallets }] = await Promise.all([
-      userIds.length
-        ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[] }),
-      ids.length
-        ? supabaseAdmin.from("character_operator_assignments").select("operator_id").in("operator_id", ids)
-        : Promise.resolve({ data: [] as { operator_id: string }[] }),
-      ids.length
-        ? supabaseAdmin.from("conversations").select("assigned_operator_id, status").in("assigned_operator_id", ids)
-        : Promise.resolve({ data: [] as { assigned_operator_id: string | null; status: string }[] }),
-      userIds.length
-        ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; email: string | null }[] }),
-      userIds.length
-        ? supabaseAdmin.from("credit_wallets").select("user_id, balance").in("user_id", userIds)
-        : Promise.resolve({ data: [] as { user_id: string; balance: number }[] }),
-    ]);
+    const [rolesResult, assignsResult, convsResult, profsResult, walletsResult] = await Promise.all(
+      [
+        userIds.length
+          ? supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", userIds)
+          : Promise.resolve({ data: [] as { user_id: string; role: AppRole }[], error: null }),
+        ids.length
+          ? supabaseAdmin
+              .from("character_operator_assignments")
+              .select("operator_id")
+              .in("operator_id", ids)
+          : Promise.resolve({ data: [] as { operator_id: string }[], error: null }),
+        ids.length
+          ? supabaseAdmin
+              .from("conversations")
+              .select("assigned_operator_id, status")
+              .in("assigned_operator_id", ids)
+          : Promise.resolve({
+              data: [] as { assigned_operator_id: string | null; status: string }[],
+              error: null,
+            }),
+        userIds.length
+          ? supabaseAdmin.from("profiles").select("user_id, email").in("user_id", userIds)
+          : Promise.resolve({
+              data: [] as { user_id: string; email: string | null }[],
+              error: null,
+            }),
+        ids.length
+          ? supabaseAdmin
+              .from("operator_point_wallets")
+              .select("operator_id, balance")
+              .in("operator_id", ids)
+          : Promise.resolve({
+              data: [] as { operator_id: string; balance: number }[],
+              error: null,
+            }),
+      ],
+    );
+    for (const result of [rolesResult, assignsResult, convsResult, profsResult, walletsResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+    const roles = rolesResult.data;
+    const assigns = assignsResult.data;
+    const convs = convsResult.data;
+    const profs = profsResult.data;
+    const wallets = walletsResult.data;
 
     const rolesByUser = new Map<string, Set<AppRole>>();
     (roles ?? []).forEach((row) => {
@@ -129,19 +162,24 @@ export const adminListOperators = createServerFn({ method: "GET" })
     });
 
     const charsCount = new Map<string, number>();
-    (assigns ?? []).forEach((row) => charsCount.set(row.operator_id, (charsCount.get(row.operator_id) ?? 0) + 1));
+    (assigns ?? []).forEach((row) =>
+      charsCount.set(row.operator_id, (charsCount.get(row.operator_id) ?? 0) + 1),
+    );
 
     const activeCount = new Map<string, number>();
     (convs ?? []).forEach((row) => {
       if (row.status !== "closed" && row.assigned_operator_id) {
-        activeCount.set(row.assigned_operator_id, (activeCount.get(row.assigned_operator_id) ?? 0) + 1);
+        activeCount.set(
+          row.assigned_operator_id,
+          (activeCount.get(row.assigned_operator_id) ?? 0) + 1,
+        );
       }
     });
 
     const emailMap = new Map<string, string | null>();
     (profs ?? []).forEach((row) => emailMap.set(row.user_id, row.email));
     const walletMap = new Map<string, number>();
-    (wallets ?? []).forEach((row) => walletMap.set(row.user_id, row.balance));
+    (wallets ?? []).forEach((row) => walletMap.set(row.operator_id, row.balance));
 
     return opsList
       .filter((operator) => {
@@ -154,7 +192,7 @@ export const adminListOperators = createServerFn({ method: "GET" })
         role: rolesByUser.get(operator.user_id)?.has("admin") ? "admin" : "operator",
         chars: charsCount.get(operator.id) ?? 0,
         active: activeCount.get(operator.id) ?? 0,
-        credit_balance: walletMap.get(operator.user_id) ?? 0,
+        credit_balance: walletMap.get(operator.id) ?? 0,
       }));
   });
 
@@ -179,24 +217,29 @@ export const adminCreateOperatorUser = createServerFn({ method: "POST" })
       password: data.password,
       email_confirm: true,
       user_metadata: { display_name: data.full_name },
+      app_metadata: { registration_origin: "admin_provisioned" },
     });
     if (error || !created.user) throw new Error(error?.message ?? "יצירת משתמש נכשלה");
 
     const userId = created.user.id;
-    await supabaseAdmin.from("profiles").update({ display_name: data.full_name }).eq("user_id", userId);
-    await setSingleRole(userId, "operator");
+    const { error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .update({ display_name: data.full_name })
+      .eq("user_id", userId);
+    if (profileError) throw new Error(profileError.message);
+    await setSingleRole(context.supabase, userId, "operator");
 
     const { data: operator, error: opError } = await supabaseAdmin
       .from("operators")
-      .insert({
-        user_id: userId,
+      .update({
         full_name: data.full_name,
         is_active: data.is_active,
         availability_status: data.is_active ? "available" : "offline",
       })
+      .eq("user_id", userId)
       .select("id")
       .single();
-    if (opError) throw new Error(opError.message);
+    if (opError || !operator) throw new Error(opError?.message ?? "רשומת עובד לא נמצאה");
 
     await syncAssignments(operator.id, data.character_ids);
     await logAudit(context.userId, "operator.created", "operator", operator.id, {
@@ -232,43 +275,42 @@ export const adminPromoteClientToOperator = createServerFn({ method: "POST" })
     if (!profile) throw new Error("לא נמצא משתמש רשום עם האימייל הזה");
     if (profile.user_id === context.userId) throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
 
-    await supabaseAdmin.from("profiles").update({ display_name: data.full_name }).eq("user_id", profile.user_id);
-    await setSingleRole(profile.user_id, "operator");
+    const { data: roles, error: rolesError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", profile.user_id);
+    if (rolesError) throw new Error(rolesError.message);
+    if (roles?.length !== 1 || roles[0].role !== "client") {
+      throw new Error("client_role_required");
+    }
 
-    const { data: existing } = await supabaseAdmin
+    await setSingleRole(context.supabase, profile.user_id, "operator");
+    const { error: displayNameError } = await supabaseAdmin
+      .from("profiles")
+      .update({ display_name: data.full_name })
+      .eq("user_id", profile.user_id);
+    if (displayNameError) throw new Error(displayNameError.message);
+
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from("operators")
       .select("id")
       .eq("user_id", profile.user_id)
       .maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (!existing) throw new Error("רשומת עובד לא נמצאה");
 
-    let operatorId = existing?.id;
-    if (operatorId) {
-      const { error } = await supabaseAdmin
-        .from("operators")
-        .update({
-          full_name: data.full_name,
-          is_active: data.is_active,
-          availability_status: data.is_active ? "available" : "offline",
-          deleted_at: null,
-        })
-        .eq("id", operatorId);
-      if (error) throw new Error(error.message);
-    } else {
-      const { data: created, error } = await supabaseAdmin
-        .from("operators")
-        .insert({
-          user_id: profile.user_id,
-          full_name: data.full_name,
-          is_active: data.is_active,
-          availability_status: data.is_active ? "available" : "offline",
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      operatorId = created.id;
-    }
+    const operatorId = existing.id;
+    const { error: updateError } = await supabaseAdmin
+      .from("operators")
+      .update({
+        full_name: data.full_name,
+        is_active: data.is_active,
+        availability_status: data.is_active ? "available" : "offline",
+      })
+      .eq("id", operatorId);
+    if (updateError) throw new Error(updateError.message);
 
-    await syncAssignments(operatorId!, data.character_ids);
+    await syncAssignments(operatorId, data.character_ids);
     await logAudit(context.userId, "user.promoted_to_operator", "user", profile.user_id, {
       operator_id: operatorId,
       email: data.email,
@@ -295,6 +337,7 @@ export const adminUpdateOperator = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
+    if (operator.deleted_at) throw new Error("archived_operator_update_forbidden");
     if (!data.is_active && (operator.user_id === context.userId || isAdminUser)) {
       throw new Error("לא ניתן להשבית חשבון אדמין");
     }
@@ -329,23 +372,11 @@ export const adminConvertOperatorToClient = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
-    if (operator.user_id === context.userId) throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
+    if (operator.user_id === context.userId)
+      throw new Error("לא ניתן לשנות את התפקיד של עצמך מכאן");
     if (isAdminUser) throw new Error("לא ניתן להפוך אדמין ללקוח מעמוד העובדים");
 
-    await setSingleRole(operator.user_id, "client");
-    await supabaseAdmin
-      .from("operators")
-      .update({ is_active: false, availability_status: "offline" })
-      .eq("id", operator.id);
-
-    const { data: clientProfile } = await supabaseAdmin
-      .from("client_profiles")
-      .select("id")
-      .eq("user_id", operator.user_id)
-      .maybeSingle();
-    if (!clientProfile) {
-      await supabaseAdmin.from("client_profiles").insert({ user_id: operator.user_id });
-    }
+    await setSingleRole(context.supabase, operator.user_id, "client");
 
     await logAudit(context.userId, "user.converted_to_client", "user", operator.user_id, {
       operator_id: operator.id,
@@ -361,7 +392,8 @@ export const adminArchiveOperator = createServerFn({ method: "POST" })
     await ensureAdmin(context.userId);
 
     const { operator, isAdminUser } = await getOperatorAdminContext(data.operator_id);
-    if (operator.user_id === context.userId) throw new Error("לא ניתן למחוק את רשומת העובד של עצמך מכאן");
+    if (operator.user_id === context.userId)
+      throw new Error("לא ניתן למחוק את רשומת העובד של עצמך מכאן");
     if (isAdminUser) throw new Error("לא ניתן למחוק או לארכב חשבון אדמין");
 
     const { error } = await supabaseAdmin

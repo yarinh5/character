@@ -225,6 +225,7 @@ export function useOperatorSendOwnership(
   const [cycleContinuity, setCycleContinuity] = useState(() =>
     createOperatorCycleContinuity(conversationId),
   );
+  const [pendingRefresh, setPendingRefresh] = useState<OperatorCycleRefreshTicket | null>(null);
   const sendScope = useOperatorSendScope(conversationId);
   const { invalidate } = sendScope;
   const responsibilityRef = useRef(responsibilitySnapshot);
@@ -248,29 +249,36 @@ export function useOperatorSendOwnership(
     }
   }, [conversationId, setResponsibilitySnapshot, updateCycleContinuity]);
 
-  const refreshResponsibility = useCallback(async () => {
+  const refreshResponsibility = useCallback(async (): Promise<{
+    state: ConversationResponsibility;
+    cycleId: string | null;
+  } | null> => {
     if (isAdmin || !operatorId) {
       setResponsibilitySnapshot({ conversationId, state: null });
       const current = switchOperatorCycleConversation(cycleContinuityRef.current, conversationId);
       updateCycleContinuity({ ...current, cycleId: null, version: current.version + 1 });
-      return;
+      return null;
     }
     const refresh = beginOperatorCycleRefresh(cycleContinuityRef.current, conversationId);
     updateCycleContinuity(refresh.state);
-    const { data, error } = await supabase.rpc("get_operator_conversation_responsibility", {
-      _conversation_id: conversationId,
-    });
-    const state = data?.[0]?.state;
-    if (
-      !error &&
-      (state === "mine" || state === "available" || state === "other" || state === "closed")
-    ) {
+    setPendingRefresh(refresh.ticket);
+    try {
+      const { data, error } = await supabase.rpc("get_operator_conversation_responsibility", {
+        _conversation_id: conversationId,
+      });
+      const state = data?.[0]?.state;
+      if (
+        error ||
+        (state !== "mine" && state !== "available" && state !== "other" && state !== "closed")
+      ) {
+        return null;
+      }
       const current = switchOperatorCycleConversation(
         cycleContinuityRef.current,
         activeConversationIdRef.current,
       );
       const next = applyOperatorCycleRefresh(current, refresh.ticket, data?.[0] ?? {});
-      if (next === current) return;
+      if (next === current) return null;
       const knownResponsibility =
         responsibilityRef.current.conversationId === conversationId
           ? responsibilityRef.current.state
@@ -289,6 +297,9 @@ export function useOperatorSendOwnership(
       }
       updateCycleContinuity(next);
       setResponsibilitySnapshot({ conversationId, state });
+      return { state, cycleId: next.cycleId };
+    } finally {
+      setPendingRefresh((pending) => (pending === refresh.ticket ? null : pending));
     }
   }, [
     conversationId,
@@ -350,6 +361,7 @@ export function useOperatorSendOwnership(
         ? responsibilitySnapshot.state
         : null,
     responsibilityCycleId: selectOperatorCycleId(cycleContinuity, conversationId),
+    checkingResponsibility: !isAdmin && pendingRefresh?.conversationId === conversationId,
     refreshResponsibility,
     applySuccessfulSendCycle,
     releaseOwnership,

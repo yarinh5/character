@@ -162,13 +162,30 @@ describe("admin analytics read states", () => {
     });
     mount();
     await screen.findByText("2026-10-01 - 2026-10-31");
-    setRange("2026-01-01", "2026-10-20");
+    setRange("2026-05-01", "2026-10-20");
     expect(io.analytics).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "החל טווח" }));
 
     expect(await screen.findByText("2026-04-20 - 2026-10-20")).toBeInTheDocument();
     expect(io.analytics).toHaveBeenLastCalledWith({
-      data: { startDate: "2026-01-01", endDate: "2026-10-20" },
+      data: { startDate: "2026-05-01", endDate: "2026-10-20" },
+    });
+  });
+
+  it("rejects 181 inclusive days before calling the server", async () => {
+    mount();
+    await screen.findByText("2026-10-01 - 2026-10-31");
+    setRange("2026-01-01", "2026-06-30");
+    fireEvent.click(screen.getByRole("button", { name: "החל טווח" }));
+
+    expect(screen.getByRole("alert", { name: "טווח תאריכים לא תקין" })).toBeInTheDocument();
+    expect(io.analytics).toHaveBeenCalledTimes(1);
+
+    setRange("2026-01-01", "2026-06-29");
+    fireEvent.click(screen.getByRole("button", { name: "החל טווח" }));
+    await waitFor(() => expect(io.analytics).toHaveBeenCalledTimes(2));
+    expect(io.analytics).toHaveBeenLastCalledWith({
+      data: { startDate: "2026-01-01", endDate: "2026-06-29" },
     });
   });
 
@@ -249,7 +266,7 @@ describe("admin analytics read states", () => {
     const bar = await screen.findByTitle("2026-10-01: 0 פעולות");
     expect(bar).toHaveStyle({ height: "0%" });
     expect(screen.getAllByText("קרדיטים שנצרכו").length).toBeGreaterThan(0);
-    expect(screen.getByText(/עד 10,000 רשומות לכל מקור/)).toBeInTheDocument();
+    expect(screen.getByText(/אגרגציה מלאה בצד השרת/)).toBeInTheDocument();
   });
 
   it("isolates cached and late data across admin replacement and logout", async () => {

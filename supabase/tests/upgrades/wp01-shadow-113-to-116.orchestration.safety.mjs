@@ -33,6 +33,7 @@ import {
   waitForValidatedTargetAfterReset,
   validateLocalTarget,
 } from "./wp01-shadow-113-to-116.mjs";
+import * as shadowUpgrade from "./wp01-shadow-113-to-116.mjs";
 
 const projectId = "qmgkmsarzfjnqltljkjl";
 
@@ -41,6 +42,8 @@ function targetFixture({
   apiPort = 61421,
   dbPort = 61422,
   dbHostPort = dbPort,
+  apiBindings = [{ HostIp: "127.0.0.1", HostPort: String(apiPort) }],
+  dbBindings = [{ HostIp: "127.0.0.1", HostPort: String(dbHostPort) }],
   project = projectId,
 } = {}) {
   return {
@@ -53,13 +56,13 @@ function targetFixture({
       Id: "a".repeat(64),
       Name: `/supabase_db_${projectId}`,
       State: { Running: true, Health: { Status: "healthy" } },
-      NetworkSettings: { Ports: { "5432/tcp": [{ HostPort: String(dbHostPort) }] } },
+      NetworkSettings: { Ports: { "5432/tcp": dbBindings } },
     },
     api: {
       Id: "b".repeat(64),
       Name: `/supabase_kong_${projectId}`,
       State: { Running: true, Health: { Status: "healthy" } },
-      NetworkSettings: { Ports: { "8000/tcp": [{ HostPort: String(apiPort) }] } },
+      NetworkSettings: { Ports: { "8000/tcp": apiBindings } },
     },
   };
 }
@@ -72,6 +75,10 @@ test("validates only matching loopback project mappings", () => {
   assert.equal(target.dbContainer.id, "a".repeat(64));
   assert.equal(target.apiContainer.id, "b".repeat(64));
   assert.match(target.configHash, /^[a-f0-9]{64}$/);
+  assert.equal(
+    validateLocalTarget(targetFixture({ apiPort: 61521, dbPort: 61522 })).apiPort,
+    61521,
+  );
 
   const rebound = {
     ...target,
@@ -85,6 +92,36 @@ test("validates only matching loopback project mappings", () => {
   assert.throws(() => validateLocalTarget(targetFixture({ project: "other_project" })));
   assert.throws(() => validateLocalTarget(targetFixture({ apiHost: "example.invalid" })));
   assert.throws(() => validateLocalTarget(targetFixture({ dbHostPort: 61423 })));
+  assert.doesNotThrow(() =>
+    validateLocalTarget(
+      targetFixture({
+        apiBindings: [
+          { HostIp: "0.0.0.0", HostPort: "61421" },
+          { HostIp: "::", HostPort: "61421" },
+        ],
+      }),
+    ),
+  );
+  assert.throws(() =>
+    validateLocalTarget(
+      targetFixture({
+        apiBindings: [
+          { HostIp: "127.0.0.1", HostPort: "61421" },
+          { HostIp: "192.0.2.10", HostPort: "61421" },
+        ],
+      }),
+    ),
+  );
+  assert.throws(() =>
+    validateLocalTarget(
+      targetFixture({
+        apiBindings: [
+          { HostIp: "127.0.0.1", HostPort: "61421" },
+          { HostIp: "::1", HostPort: "61422" },
+        ],
+      }),
+    ),
+  );
 });
 
 test("does not mutate or clean up when target validation fails", () => {
@@ -707,4 +744,245 @@ test("requires an explicit boolean M117-absence result encoded as JSON", () => {
   assert.throws(() => assertMigrationAbsenceResult(JSON.parse("f")));
   assert.throws(() => JSON.parse(""));
   assert.throws(() => JSON.parse("not-json"));
+});
+
+function createApprovedRestoreFixture({
+  gateName = "20991231235959_product_completion_read_access_gate.sql",
+  gateBytes = "select 'approved gate';\n",
+} = {}) {
+  const root = mkdtempSync(join(tmpdir(), "wp01-restore-contract-"));
+  const evidenceRoot = join(root, "evidence");
+  const migrationsDir = join(root, "migrations");
+  const approvedGatePath = join(root, "approved-gate.sql");
+  mkdirSync(evidenceRoot, { recursive: true });
+  mkdirSync(migrationsDir, { recursive: true });
+  const beforeNames = [
+    "20260512194305_343cc389-05cd-47ac-8a65-f42104c4d6d1.sql",
+    "20261019071718_wp01_authorized_read_access_revocation.sql",
+    "20261112110000_p06_support_first_response_sla.sql",
+  ];
+  const afterNames = [...beforeNames, gateName].sort();
+  writeFileSync(join(evidenceRoot, "continue.complete"), "ready\n");
+  writeFileSync(join(evidenceRoot, "migrations.before.txt"), `${beforeNames.join("\n")}\n`);
+  writeFileSync(join(evidenceRoot, "migration.created.txt"), `${gateName}\n`);
+  writeFileSync(join(evidenceRoot, "migrations.after.txt"), `${afterNames.join("\n")}\n`);
+  writeFileSync(approvedGatePath, gateBytes);
+  for (const name of beforeNames) writeFileSync(join(migrationsDir, name), `-- ${name}\n`);
+  writeFileSync(join(migrationsDir, gateName), gateBytes);
+  return {
+    afterNames,
+    approvedGatePath,
+    evidenceRoot,
+    gateName,
+    migrationsDir,
+    remove: () => rmSync(root, { recursive: true, force: true }),
+    versions: afterNames.map((name) => name.slice(0, 14)),
+  };
+}
+
+test("captures the approved candidate and runtime gate migration list before restore", () => {
+  assert.equal(typeof shadowUpgrade.loadApprovedRestoreMigrationVersions, "function");
+  const fixture = createApprovedRestoreFixture();
+  try {
+    assert.deepEqual(
+      shadowUpgrade.loadApprovedRestoreMigrationVersions({
+        evidenceRoot: fixture.evidenceRoot,
+        migrationsDir: fixture.migrationsDir,
+        approvedGatePath: fixture.approvedGatePath,
+      }),
+      fixture.versions,
+    );
+  } finally {
+    fixture.remove();
+  }
+});
+
+test("accepts a different approved gate timestamp without changing the restore contract", () => {
+  const fixture = createApprovedRestoreFixture({
+    gateName: "20350102030405_product_completion_read_access_gate.sql",
+  });
+  try {
+    assert.deepEqual(
+      shadowUpgrade.loadApprovedRestoreMigrationVersions({
+        evidenceRoot: fixture.evidenceRoot,
+        migrationsDir: fixture.migrationsDir,
+        approvedGatePath: fixture.approvedGatePath,
+      }),
+      fixture.versions,
+    );
+  } finally {
+    fixture.remove();
+  }
+});
+
+test("rejects missing, extra, duplicate, replaced, or malformed restored migration histories", () => {
+  assert.equal(typeof shadowUpgrade.assertRestoredMigrationVersions, "function");
+  const expected = ["20260512194305", "20261019071718", "20261112110000"];
+  assert.doesNotThrow(() => shadowUpgrade.assertRestoredMigrationVersions(expected, expected));
+  assert.throws(() => shadowUpgrade.assertRestoredMigrationVersions(expected.slice(1), expected));
+  assert.throws(() =>
+    shadowUpgrade.assertRestoredMigrationVersions([...expected, "20261113000000"], expected),
+  );
+  assert.throws(() =>
+    shadowUpgrade.assertRestoredMigrationVersions(
+      [expected[0], expected[1], expected[1], expected[2]],
+      expected,
+    ),
+  );
+  assert.throws(
+    () =>
+      shadowUpgrade.assertRestoredMigrationVersions(
+        [expected[0], "20261020000000", expected[2]],
+        expected,
+      ),
+    /differs/,
+  );
+  assert.throws(() =>
+    shadowUpgrade.assertRestoredMigrationVersions(
+      [expected[0], "not-a-version", expected[2]],
+      expected,
+    ),
+  );
+});
+
+test("rejects an unapproved gate and missing or corrupt expected-list evidence", () => {
+  const unapprovedGate = createApprovedRestoreFixture();
+  try {
+    writeFileSync(
+      join(unapprovedGate.migrationsDir, unapprovedGate.gateName),
+      "select 'changed';\n",
+    );
+    assert.throws(() =>
+      shadowUpgrade.loadApprovedRestoreMigrationVersions({
+        evidenceRoot: unapprovedGate.evidenceRoot,
+        migrationsDir: unapprovedGate.migrationsDir,
+        approvedGatePath: unapprovedGate.approvedGatePath,
+      }),
+    );
+  } finally {
+    unapprovedGate.remove();
+  }
+
+  const missingEvidence = createApprovedRestoreFixture();
+  try {
+    rmSync(join(missingEvidence.evidenceRoot, "migrations.after.txt"));
+    assert.throws(() =>
+      shadowUpgrade.loadApprovedRestoreMigrationVersions({
+        evidenceRoot: missingEvidence.evidenceRoot,
+        migrationsDir: missingEvidence.migrationsDir,
+        approvedGatePath: missingEvidence.approvedGatePath,
+      }),
+    );
+  } finally {
+    missingEvidence.remove();
+  }
+
+  const corruptEvidence = createApprovedRestoreFixture();
+  try {
+    writeFileSync(join(corruptEvidence.evidenceRoot, "migrations.after.txt"), "invalid\n");
+    assert.throws(() =>
+      shadowUpgrade.loadApprovedRestoreMigrationVersions({
+        evidenceRoot: corruptEvidence.evidenceRoot,
+        migrationsDir: corruptEvidence.migrationsDir,
+        approvedGatePath: corruptEvidence.approvedGatePath,
+      }),
+    );
+  } finally {
+    corruptEvidence.remove();
+  }
+});
+
+test("rejects invalid migration query output while preserving the remaining reset invariants", () => {
+  assert.equal(typeof shadowUpgrade.verifyResetStateResult, "function");
+  const expected = {
+    migrationVersions: ["20260512194305", "20261019071718"],
+    migrations: 2,
+    latest: "20261019071718",
+    m117: true,
+    users: 0,
+  };
+  assert.throws(() =>
+    shadowUpgrade.verifyResetStateResult(
+      {
+        migration_versions: "query-failed",
+        migrations: 2,
+        latest: "20261019071718",
+        m117: true,
+        users: 0,
+      },
+      expected,
+    ),
+  );
+  assert.throws(() =>
+    shadowUpgrade.verifyResetStateResult(
+      {
+        migration_versions: ["20260512194305"],
+        migrations: 2,
+        latest: "20261019071718",
+        m117: true,
+        users: 0,
+      },
+      expected,
+    ),
+  );
+
+  let queryFailure;
+  try {
+    runResetWithVerifiedState({
+      target: { id: "isolated" },
+      reset: () => {},
+      waitForReady: (target) => target,
+      expectedState: expected,
+      verifyState: () => {
+        throw new Error("migration history query failed");
+      },
+    });
+    assert.fail("expected reset verification to fail");
+  } catch (error) {
+    queryFailure = error;
+  }
+  assert.equal(queryFailure.name, "ResetResultError");
+  assert.match(queryFailure.cause.message, /query failed/);
+});
+
+test("derives count and latest from the approved full history and preserves the primary failure", () => {
+  const versions = ["20260512194305", "20261013113744", "20350102030405"];
+  assert.deepEqual(shadowUpgrade.createExpectedRestoreState(versions), {
+    migrationVersions: versions,
+    migrations: 3,
+    latest: "20350102030405",
+    m117: true,
+    users: 0,
+    profiles: 0,
+    conversations: 0,
+    messages: 0,
+    cycles: 0,
+    work_items: 0,
+    ledger: 0,
+    notifications: 0,
+    analytics: 0,
+  });
+
+  const primary = new Error("upgrade assertions failed");
+  const cleanup = new Error("restore verification failed");
+  let reportedCleanup;
+  assert.throws(
+    () =>
+      runValidatedUpgrade({
+        validateTarget: () => ({ id: "isolated" }),
+        verifyTarget: () => {},
+        resetTo113: (target) => target,
+        upgrade: () => {
+          throw primary;
+        },
+        cleanup: () => {
+          throw cleanup;
+        },
+        reportCleanupFailure: (error) => {
+          reportedCleanup = error;
+        },
+      }),
+    (error) => error === primary,
+  );
+  assert.equal(reportedCleanup, cleanup);
 });

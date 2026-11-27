@@ -229,8 +229,22 @@ beforeEach(() => {
   });
   io.list
     .mockReset()
-    .mockImplementation(({ data }: { data: { include_archived: boolean } }) =>
-      Promise.resolve(data.include_archived ? [archived] : [clientA, clientB]),
+    .mockImplementation(
+      ({ data }: { data: { include_archived: boolean; search?: string; status?: string } }) => {
+        const rows = data.include_archived ? [archived] : [clientA, clientB];
+        const search = data.search?.toLowerCase() ?? "";
+        return Promise.resolve(
+          rows.filter(
+            (row) =>
+              (!search || row.email.includes(search) || row.display_name.includes(search)) &&
+              (data.status === "active"
+                ? row.status === "active"
+                : data.status === "inactive"
+                  ? row.status === "blocked"
+                  : true),
+          ),
+        );
+      },
     );
   io.details.mockReset().mockResolvedValue(makeDetails());
   for (const fn of [io.update, io.status, io.credits, io.archive, io.pii, io.restore, io.promote])
@@ -391,12 +405,97 @@ describe("admin client workspace", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "חיפוש לפי שם או אימייל" }), {
       target: { value: "לא קיים" },
     });
-    expect(screen.getByText("לא נמצאו לקוחות התואמים למסננים")).toBeInTheDocument();
+    expect(await screen.findByText("לא נמצאו לקוחות התואמים למסננים")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "איפוס מסננים" }));
-    expect(screen.getByText("2 מתוך 2 לקוחות ברשימה שנטענה")).toBeInTheDocument();
+    expect(await screen.findByText("2 לקוחות שנטענו")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "הצג לקוחות שנמחקו בלבד" }));
     expect(await screen.findByText(archived.display_name)).toBeInTheDocument();
-    expect(io.list).toHaveBeenLastCalledWith({ data: { include_archived: true } });
+    expect(io.list).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ include_archived: true }),
+    });
+  });
+
+  it("finds a client beyond the first page and retains stable continuation", async () => {
+    const clients = Array.from({ length: 105 }, (_, index) => ({
+      ...clientA,
+      user_id: `client-${index}`,
+      email: `client${index}@example.test`,
+      display_name: `Client ${index}`,
+      created_at: new Date(Date.UTC(2026, 10, 25) - index * 1000).toISOString(),
+    }));
+    io.list.mockImplementation(
+      ({ data }: { data: { search: string; before_user_id: string | null } }) => {
+        const matching = data.search
+          ? clients.filter((client) => client.email.includes(data.search.toLowerCase()))
+          : clients;
+        const start = data.before_user_id
+          ? matching.findIndex((client) => client.user_id === data.before_user_id) + 1
+          : 0;
+        return Promise.resolve(matching.slice(start, start + 101));
+      },
+    );
+    mount();
+    expect(await screen.findByText("Client 0")).toBeInTheDocument();
+    expect(screen.queryByText("Client 104")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "חיפוש לפי שם או אימייל" }), {
+      target: { value: "client104@example.test" },
+    });
+    expect(await screen.findByText("Client 104")).toBeInTheDocument();
+    expect(io.list).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ search: "client104@example.test" }),
+    });
+    fireEvent.change(screen.getByRole("searchbox", { name: "חיפוש לפי שם או אימייל" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByText("Client 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "טען לקוחות נוספים" }));
+    expect(await screen.findByText("Client 104")).toBeInTheDocument();
+    expect(screen.getByText("105 לקוחות שנטענו")).toBeInTheDocument();
+  });
+
+  it("keeps earlier client rows when a later page fails and retries that page", async () => {
+    const clients = Array.from({ length: 101 }, (_, index) => ({
+      ...clientA,
+      user_id: `client-${index}`,
+      display_name: `Client ${index}`,
+      created_at: new Date(Date.UTC(2026, 10, 25) - index * 1000).toISOString(),
+    }));
+    let failed = false;
+    io.list.mockImplementation(({ data }: { data: { before_user_id: string | null } }) => {
+      if (!data.before_user_id) return Promise.resolve(clients);
+      if (!failed) {
+        failed = true;
+        return Promise.reject(new Error("page unavailable"));
+      }
+      return Promise.resolve(clients.slice(100));
+    });
+    mount();
+    expect(await screen.findByText("Client 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "טען לקוחות נוספים" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("טעינת לקוחות נוספים נכשלה");
+    expect(screen.getByText("Client 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "טען לקוחות נוספים" }));
+    expect(await screen.findByText("Client 100")).toBeInTheDocument();
+  });
+
+  it("does not present a missing wallet as a zero balance", async () => {
+    io.list.mockResolvedValueOnce([{ ...clientA, credits_balance: null }]);
+    mount();
+    expect(await screen.findByText(clientA.display_name)).toBeInTheDocument();
+    expect(screen.getByText("יתרה לא זמינה")).toBeInTheDocument();
+    expect(screen.getByTitle("ניהול קרדיטים")).toBeDisabled();
+    expect(screen.getByTitle("עריכת לקוח")).toBeEnabled();
+  });
+
+  it("keeps a missing detail wallet unavailable and blocks credit navigation", async () => {
+    io.details.mockResolvedValueOnce({ ...makeDetails(), wallet: null });
+    mount();
+    await screen.findByText(clientA.display_name);
+    fireEvent.click(screen.getAllByTitle("פרטי לקוח")[0]);
+    expect(await screen.findByText("הרשמה הושלמה")).toBeInTheDocument();
+    expect(screen.getByText("לא זמינה")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ניהול קרדיטים" })).toBeDisabled();
+    expect(io.navigate).not.toHaveBeenCalled();
   });
 
   it("keeps cached rows after refresh failure and clears one warning on retry", async () => {
