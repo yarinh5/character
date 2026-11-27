@@ -1,10 +1,5 @@
 export type RecoveryRequirementState =
-  | "verified"
-  | "pending"
-  | "missing"
-  | "gap"
-  | "unknown"
-  | "failed";
+  "verified" | "pending" | "missing" | "gap" | "unknown" | "failed";
 
 export type RecoveryGateState = {
   eventId: string;

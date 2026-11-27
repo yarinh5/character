@@ -1,10 +1,5 @@
 export type SupportCategory =
-  | "account"
-  | "conversation"
-  | "billing"
-  | "privacy"
-  | "technical"
-  | "other";
+  "account" | "conversation" | "billing" | "privacy" | "technical" | "other";
 
 export type SupportTicketStatus = "new" | "in_progress" | "waiting_for_client" | "closed";
 

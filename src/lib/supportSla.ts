@@ -1,9 +1,5 @@
 export type SupportFirstResponseState =
-  | "not_set"
-  | "pending"
-  | "overdue"
-  | "answered_on_time"
-  | "answered_late";
+  "not_set" | "pending" | "overdue" | "answered_on_time" | "answered_late";
 
 export type SupportFirstResponseSnapshot = {
   firstResponseTargetAt: string | null;

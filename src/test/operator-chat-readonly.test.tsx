@@ -410,8 +410,7 @@ describe("operator chat read-only responsibility", () => {
       );
     expect(channel).toBeDefined();
     const system = channel!.on.mock.calls.find(([type]) => type === "system")?.[2] as
-      | ((payload: { extension: string; status: string }) => void)
-      | undefined;
+      ((payload: { extension: string; status: string }) => void) | undefined;
     expect(system).toBeDefined();
     expect(screen.queryByText("Operator catch-up message")).not.toBeInTheDocument();
     act(() => {
@@ -434,8 +433,7 @@ describe("operator chat read-only responsibility", () => {
         ),
       );
     const system = channel?.on.mock.calls.find(([type]) => type === "system")?.[2] as
-      | ((payload: { extension: string; status: string }) => void)
-      | undefined;
+      ((payload: { extension: string; status: string }) => void) | undefined;
     expect(channel).toBeDefined();
     expect(system).toBeDefined();
 
