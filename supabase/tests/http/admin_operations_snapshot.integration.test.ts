@@ -83,8 +83,8 @@ suite("V4-3-C HTTP Admin snapshot authorization", () => {
   it("does not expose sensitive wallet rows to an anonymous HTTP client", async () => {
     const anon = createAnonymousClient();
     const result = await anon.from("credit_wallets").select("user_id").limit(1);
-    expect(result.error).toBeNull();
-    expect(result.data).toEqual([]);
+    expect(result.error?.code).toBe("42501");
+    expect(result.data).toBeNull();
   });
 
   it("rejects a non-admin and returns one aggregate row to an admin", async () => {
