@@ -1515,6 +1515,13 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
   }, 15_000);
 
   it("runs the client upload, real decode, idempotent replay, expiry and cleanup path", async () => {
+    const walletBefore = await service
+      .from("credit_wallets")
+      .select("balance")
+      .eq("user_id", userId(emails.owner))
+      .single();
+    expect(walletBefore.error).toBeNull();
+    expect(walletBefore.data?.balance).toBeGreaterThanOrEqual(10);
     const intent = await owner.functions.invoke("client-media-upload-intent", {
       body: { conversation_id: ids.conversation, content_type: "image/png" },
     });
@@ -1555,6 +1562,40 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
     tracked.messages.push(first.message.id);
     tracked.attachments.push(first.attachment.id);
 
+    const financialState = async () => {
+      const [wallet, transactions, messages] = await Promise.all([
+        service
+          .from("credit_wallets")
+          .select("balance")
+          .eq("user_id", userId(emails.owner))
+          .single(),
+        service
+          .from("credit_transactions")
+          .select("amount, message_id", { count: "exact" })
+          .eq("message_attachment_id", first.attachment.id),
+        service
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("id", first.message.id),
+      ]);
+      expect(wallet.error).toBeNull();
+      expect(transactions.error).toBeNull();
+      expect(messages.error).toBeNull();
+      return {
+        balance: wallet.data?.balance,
+        transactions: transactions.data,
+        transactionCount: transactions.count,
+        messageCount: messages.count,
+      };
+    };
+    const expectedFinancialState = {
+      balance: walletBefore.data!.balance - 10,
+      transactions: [{ amount: -10, message_id: first.message.id }],
+      transactionCount: 1,
+      messageCount: 1,
+    };
+    expect(await financialState()).toEqual(expectedFinancialState);
+
     const replay = await owner.functions.invoke("client-media-finalize", {
       body: { upload_id: uploadId, idempotency_key: idempotencyKey },
     });
@@ -1564,6 +1605,7 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
       message: { id: first.message.id },
       attachment: { id: first.attachment.id },
     });
+    expect(await financialState()).toEqual(expectedFinancialState);
 
     const expired = await service
       .from("client_media_uploads")
@@ -1587,6 +1629,78 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
     expect(cleaned.error).toBeNull();
     expect(cleaned.data?.status).toBe("deleted");
   });
+
+  it("rejects a client image without credits and leaves no charge or message", async () => {
+    const clientId = userId(emails.otherClient);
+    const state = async () => {
+      const [wallet, transactions, messages] = await Promise.all([
+        service.from("credit_wallets").select("balance").eq("user_id", clientId).maybeSingle(),
+        service
+          .from("credit_transactions")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", clientId),
+        service
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", ids.otherClientConversation),
+      ]);
+      expect(wallet.error).toBeNull();
+      expect(transactions.error).toBeNull();
+      expect(messages.error).toBeNull();
+      return {
+        balance: wallet.data?.balance ?? null,
+        transactionCount: transactions.count,
+        messageCount: messages.count,
+      };
+    };
+    const before = await state();
+    expect(before.balance ?? 0).toBe(0);
+
+    const intent = await otherClient.functions.invoke("client-media-upload-intent", {
+      body: { conversation_id: ids.otherClientConversation, content_type: "image/png" },
+    });
+    expect(intent.error).toBeNull();
+    const uploadId = String((intent.data as { upload_id: string }).upload_id);
+    tracked.clientUploads.push(uploadId);
+    const signedUpload = new URL(String((intent.data as { upload_url: string }).upload_url));
+    const localApi = new URL(process.env.SUPABASE_LOCAL_URL ?? "");
+    signedUpload.protocol = localApi.protocol;
+    signedUpload.host = localApi.host;
+    const uploaded = await fetch(signedUpload, {
+      method: "PUT",
+      headers: { "Content-Type": "image/png" },
+      body: Uint8Array.from(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      ),
+    });
+    expect(uploaded.ok).toBe(true);
+
+    const finalized = await otherClient.functions.invoke("client-media-finalize", {
+      body: {
+        upload_id: uploadId,
+        idempotency_key: "00000000-0000-4000-8000-000000061198",
+      },
+    });
+    expect(finalized.error).not.toBeNull();
+    const response = (finalized.error as { context?: Response }).context;
+    expect(response?.status).toBe(402);
+    expect(await response?.json()).toEqual({ code: "insufficient_credits" });
+    expect(await state()).toEqual(before);
+    const upload = await service
+      .from("client_media_uploads")
+      .select("message_id, message_attachment_id, finalized_at")
+      .eq("id", uploadId)
+      .single();
+    expect(upload.error).toBeNull();
+    expect(upload.data).toMatchObject({
+      message_id: null,
+      message_attachment_id: null,
+      finalized_at: null,
+    });
+  }, 15_000);
 
   it("enforces the View Once open and completion window", async () => {
     const body = { kind: "message_attachment", attachment_id: ids.viewOnceAttachment };
