@@ -194,6 +194,7 @@ export function OperatorChatPage() {
     sendScope,
     responsibility,
     responsibilityCycleId,
+    checkingResponsibility,
     refreshResponsibility,
     applySuccessfulSendCycle,
     releaseOwnership,
@@ -903,9 +904,11 @@ export function OperatorChatPage() {
   };
 
   const send = async () => {
-    const content = input.trim();
-    if (!content || !user || sending) return;
-    if (hasOtherResponsibility()) return;
+    const draft = input;
+    const content = draft.trim();
+    const access = readScopeRef.current;
+    if (!content || !user || !access.allowed || activeTextRequestRef.current !== null) return;
+    if (textSendUnavailable || hasOtherResponsibility()) return;
     if (conv?.status === "closed") {
       toast.error("השיחה סגורה. פתח אותה מחדש כדי לשלוח הודעה.");
       return;
@@ -914,22 +917,38 @@ export function OperatorChatPage() {
       toast.error("הודעה ארוכה מדי");
       return;
     }
-    const ticket = sendScope.beginRequest(responsibilityCycleId);
-    activeTextRequestRef.current = ticket.requestId;
-    if (!sendScope.isCurrent(ticket) || hasOtherResponsibility()) return;
-    stopTyping();
+    const request = sendScope.beginRequest();
+    activeTextRequestRef.current = request.requestId;
     setSending(true);
-    const { data, error } = await supabase.rpc("send_operator_message", {
-      _conversation_id: ticket.conversationId,
-      _content: content,
-      _expected_cycle_id: ticket.expectedCycleId,
-    });
-    if (error) {
-      sendScope.completeRequest(ticket, () => {
-        if (activeTextRequestRef.current === ticket.requestId) {
-          activeTextRequestRef.current = null;
-          setSending(false);
+    const current = () =>
+      activeTextRequestRef.current === request.requestId &&
+      readScopeRef.current === access &&
+      sendScope.isCurrent(request);
+    try {
+      let expectedCycleId = responsibilityCycleId;
+      if (!isAdmin) {
+        // An assignment may already have committed before its Realtime event arrives.
+        const ownership = await refreshResponsibility();
+        if (!current()) return;
+        if (
+          !ownership ||
+          (ownership.state !== "available" && (ownership.state !== "mine" || !ownership.cycleId))
+        ) {
+          toast.error("לא ניתן לאמת שהשיחה זמינה לשליחה. הטיוטה נשמרה.");
+          return;
         }
+        expectedCycleId = ownership.cycleId;
+      }
+      if (!current()) return;
+      const ticket = { ...request, expectedCycleId };
+      stopTyping();
+      const { data, error } = await supabase.rpc("send_operator_message", {
+        _conversation_id: ticket.conversationId,
+        _content: content,
+        _expected_cycle_id: ticket.expectedCycleId,
+      });
+      if (!current()) return;
+      if (error) {
         if (error.message.includes("operator_record_required")) {
           toast.error("כדי לענות מהפאנל צריך רשומת עובד פעילה לאדמין/משתמש הזה.");
           return;
@@ -939,17 +958,11 @@ export function OperatorChatPage() {
           return;
         }
         toast.error("שליחה נכשלה");
-      });
-      return;
-    }
-    const result = data as { message?: Msg; cycle_id?: unknown } | null;
-    const accepted =
-      result !== null &&
+        return;
+      }
+      const result = data as { message?: Msg; cycle_id?: unknown } | null;
+      if (!result) return;
       applySuccessfulSendCycle(ticket, result, () => {
-        if (activeTextRequestRef.current === ticket.requestId) {
-          activeTextRequestRef.current = null;
-          setSending(false);
-        }
         if (result.message) {
           const message = {
             ...result.message,
@@ -958,10 +971,12 @@ export function OperatorChatPage() {
           shouldStickToBottomRef.current = true;
           setMessages((prev) => mergeMessagesById(prev, [message]));
         }
-        setInput("");
+        setInput((latest) => (latest === draft ? "" : latest));
       });
-    if (!accepted && sendScope.isCurrent(ticket)) {
-      if (activeTextRequestRef.current === ticket.requestId) {
+    } catch {
+      if (current()) toast.error("שליחה נכשלה");
+    } finally {
+      if (activeTextRequestRef.current === request.requestId) {
         activeTextRequestRef.current = null;
         setSending(false);
       }
@@ -1132,6 +1147,11 @@ export function OperatorChatPage() {
     !!activeLock && (!operator || activeLock.locked_by_operator_id !== operator.id);
   const sendBlockedByLock = concurrencyMode === "lock" && lockHeldByOther;
   const composerReadOnly = !readAllowed || responsibility === "other";
+  const textSendUnavailable =
+    composerReadOnly ||
+    (!isAdmin &&
+      (checkingResponsibility ||
+        (responsibility !== "available" && (responsibility !== "mine" || !responsibilityCycleId))));
   const canMutateContent = readAllowed && (isAdmin || responsibility === "mine");
   const sendBlocked = sendBlockedByLock || composerReadOnly;
   const canReleaseConversation = responsibility === "mine";
@@ -1555,7 +1575,7 @@ export function OperatorChatPage() {
                         <Button
                           className="h-10 w-10"
                           onClick={send}
-                          disabled={sending || !input.trim() || composerReadOnly}
+                          disabled={sending || !input.trim() || textSendUnavailable}
                           size="icon"
                           aria-label="שליחת הודעה"
                           aria-busy={sending}
@@ -1565,7 +1585,7 @@ export function OperatorChatPage() {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {composerReadOnly ? "השיחה אינה זמינה לשליחה" : "שליחת הודעה"}
+                      {textSendUnavailable ? "השיחה אינה זמינה לשליחה" : "שליחת הודעה"}
                     </TooltipContent>
                   </Tooltip>
                 </div>

@@ -41,7 +41,10 @@ const stableMocks = vi.hoisted(() => ({
   isCurrent: vi.fn(() => true),
   invalidate: vi.fn(),
   operator: { id: "00000000-0000-4000-8000-000000000011", full_name: "עובד בדיקה" },
-  refreshResponsibility: vi.fn(async () => undefined),
+  refreshResponsibility: vi.fn(async () => ({
+    state: testState.responsibility,
+    cycleId: testState.cycleId,
+  })),
   revalidateReadAccess: vi.fn(),
   suspendReadAccess: vi.fn(),
   refetch: vi.fn(async () => undefined),
@@ -96,6 +99,7 @@ vi.mock("@/hooks/useStickerSend", async (importOriginal) => {
             },
             responsibility: testState.responsibility,
             responsibilityCycleId: testState.cycleId,
+            checkingResponsibility: false,
             refreshResponsibility: stableMocks.refreshResponsibility,
             applySuccessfulSendCycle: stableMocks.applySuccessfulSendCycle,
             releaseOwnership: stableMocks.releaseOwnership,
@@ -738,6 +742,68 @@ function lateTextResult() {
 }
 
 describe("text sends follow cycle authority rather than legacy locks", () => {
+  it("waits for the current cycle before sending from a stale available composer", async () => {
+    await renderLegacyText();
+    const pending = deferred<{ data: { state: "mine"; cycle_id: string }[]; error: null }>();
+    const prior = rpcMock.getMockImplementation()!;
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "get_operator_conversation_responsibility" ? pending.promise : prior(name, ...args),
+    );
+    fireEvent.change(textComposer(), { target: { value: "טיוטה אחרי הקצאה" } });
+    fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+    expect(textCalls()).toHaveLength(0);
+    expect(textComposer()).toHaveValue("טיוטה אחרי הקצאה");
+    await act(async () =>
+      pending.resolve({ data: [{ state: "mine", cycle_id: cycleId }], error: null }),
+    );
+    expect(textCalls()).toEqual([
+      [
+        "send_operator_message",
+        {
+          _conversation_id: conversationId,
+          _content: "טיוטה אחרי הקצאה",
+          _expected_cycle_id: cycleId,
+        },
+      ],
+    ]);
+    expect(textComposer()).toHaveValue("");
+  });
+
+  it("keeps the draft and does not write after ownership moves to another operator", async () => {
+    await renderLegacyText("mine");
+    testState.responsibility = "other";
+    testState.cycleId = null;
+    fireEvent.change(textComposer(), { target: { value: "טיוטה לפני העברה" } });
+    fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+    const composer = await screen.findByPlaceholderText("השיחה בטיפול עובד אחר");
+    expect(composer).toBeDisabled();
+    expect(composer).toHaveValue("טיוטה לפני העברה");
+    expect(textCalls()).toHaveLength(0);
+  });
+
+  it("disables submission while a Realtime ownership update has not yielded a cycle", async () => {
+    await renderLegacyText();
+    const pending = deferred<{ data: { state: "mine"; cycle_id: null }[]; error: null }>();
+    const prior = rpcMock.getMockImplementation()!;
+    rpcMock.mockImplementation((name: string, ...args: unknown[]) =>
+      name === "get_operator_conversation_responsibility" ? pending.promise : prior(name, ...args),
+    );
+    fireEvent.change(textComposer(), { target: { value: "טיוטה בזמן סנכרון" } });
+    const registration = (channels.at(-1)!.on.mock.calls as ChannelRegistration[]).find(
+      ([, filter]) => filter.table === "conversations",
+    )!;
+    act(() => registration[2]({}));
+    expect(screen.getByRole("button", { name: "שליחת הודעה" })).toBeDisabled();
+    fireEvent.keyDown(textComposer(), { key: "Enter" });
+    await act(async () =>
+      pending.resolve({ data: [{ state: "mine", cycle_id: null }], error: null }),
+    );
+    expect(screen.getByRole("button", { name: "שליחת הודעה" })).toBeDisabled();
+    fireEvent.keyDown(textComposer(), { key: "Enter" });
+    expect(textCalls()).toHaveLength(0);
+    expect(textComposer()).toHaveValue("טיוטה בזמן סנכרון");
+  });
+
   it.each(["available", "mine"] as const)(
     "sends once for %s despite a foreign legacy lock with the exact server token contract",
     async (responsibility) => {
@@ -840,7 +906,7 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     fireEvent.change(composer, { target: { value: "בקשה אחת" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
     fireEvent.keyDown(composer, { key: "Enter" });
-    expect(textCalls()).toHaveLength(1);
+    await waitFor(() => expect(textCalls()).toHaveLength(1));
     expect(screen.getByRole("button", { name: "שליחת הודעה" })).toBeDisabled();
     await act(async () => pending.resolve(lateTextResult()));
   });
@@ -854,6 +920,7 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     );
     fireEvent.change(textComposer(), { target: { value: "טיוטת א" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+    await waitFor(() => expect(textCalls()).toHaveLength(1));
     testState.conversationId = "00000000-0000-4000-8000-000000000002";
     view.rerender(
       <TooltipProvider>
@@ -878,6 +945,7 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     );
     fireEvent.change(textComposer(), { target: { value: "בקשה ישנה" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+    await waitFor(() => expect(textCalls()).toHaveLength(1));
     testState.responsibility = "other";
     const registration = (channels.at(-1)!.on.mock.calls as ChannelRegistration[]).find(
       ([, filter]) => filter.table === "conversations",
@@ -899,6 +967,7 @@ describe("text sends follow cycle authority rather than legacy locks", () => {
     );
     fireEvent.change(textComposer(), { target: { value: "טיוטה מוגנת" } });
     fireEvent.click(screen.getByRole("button", { name: "שליחת הודעה" }));
+    await waitFor(() => expect(textCalls()).toHaveLength(1));
     testState.readAccessState = "denied";
     testState.readAccessGeneration++;
     view.rerender(
