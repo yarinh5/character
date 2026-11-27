@@ -104,12 +104,14 @@ SELECT is(
     FROM public.conversations conversation
     JOIN public.conversation_work_items work_item ON work_item.conversation_id = conversation.id
     WHERE work_item.status = 'new'
+      AND work_item.character_id = '00000000-0000-4000-8000-000000020201'
   ),
   (
     SELECT min(message.created_at)
     FROM public.messages message
     JOIN public.conversation_work_items work_item ON work_item.last_client_message_id = message.id
     WHERE work_item.status = 'new'
+      AND work_item.character_id = '00000000-0000-4000-8000-000000020201'
   ),
   'A capacity wait preserves the canonical pending_since value'
 );
@@ -264,6 +266,81 @@ SELECT ok(
   'The transfer audit preserves the explicit reason'
 );
 
+SELECT set_config(
+  'wp02.transfer_cycle',
+  (SELECT cycle.id::text FROM public.conversation_handling_cycles cycle
+   JOIN public.messages message ON message.conversation_id = cycle.conversation_id
+   WHERE message.content = 'WP02 later client request' AND cycle.ended_at IS NULL),
+  true
+);
+WITH anchor AS MATERIALIZED (SELECT clock_timestamp() - interval '181 seconds' AS at)
+UPDATE public.conversations conversation
+SET last_business_message_at = anchor.at,
+    inactivity_expires_at = anchor.at + interval '180 seconds'
+FROM anchor
+WHERE conversation.id = (
+  SELECT message.conversation_id FROM public.messages message
+  WHERE message.content = 'WP02 later client request'
+);
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-4000-8000-000000020002';
+SET LOCAL ROLE authenticated;
+SELECT throws_like(
+  $$SELECT public.admin_reassign_conversation(
+    (SELECT conversation_id FROM public.messages WHERE content = 'WP02 later client request'),
+    '00000000-0000-4000-8000-000000020101'::uuid,
+    'Expired transfer must fail'
+  )$$,
+  'handling_cycle_expired',
+  'Admin cannot transfer an expired handling cycle without a new business message'
+);
+RESET ROLE;
+SELECT is(
+  (SELECT cycle.id FROM public.conversation_handling_cycles cycle
+   WHERE cycle.id = current_setting('wp02.transfer_cycle')::uuid AND cycle.ended_at IS NULL),
+  current_setting('wp02.transfer_cycle')::uuid,
+  'Rejected expired transfer leaves the existing cycle intact'
+);
+SELECT is(
+  (SELECT count(*) FROM public.audit_logs audit
+   WHERE audit.action = 'conversation.reassigned'
+     AND audit.metadata->>'reason' = 'Expired transfer must fail'),
+  0::bigint,
+  'Rejected expired transfer does not write a reassignment audit'
+);
+UPDATE public.conversations conversation
+SET inactivity_expires_at = NULL
+WHERE conversation.id = (
+  SELECT message.conversation_id FROM public.messages message
+  WHERE message.content = 'WP02 later client request'
+);
+SET LOCAL ROLE authenticated;
+SELECT throws_like(
+  $$SELECT public.admin_reassign_conversation(
+    (SELECT conversation_id FROM public.messages WHERE content = 'WP02 later client request'),
+    '00000000-0000-4000-8000-000000020101'::uuid,
+    'Missing deadline must fail'
+  )$$,
+  'handling_cycle_expired',
+  'Admin cannot transfer a handling cycle with no business-message deadline'
+);
+RESET ROLE;
+SELECT is(
+  (SELECT count(*) FROM public.audit_logs audit
+   WHERE audit.action = 'conversation.reassigned'
+     AND audit.metadata->>'reason' = 'Missing deadline must fail'),
+  0::bigint,
+  'Rejected missing-deadline transfer does not write an audit'
+);
+WITH anchor AS MATERIALIZED (SELECT clock_timestamp() AS at)
+UPDATE public.conversations conversation
+SET last_business_message_at = anchor.at,
+    inactivity_expires_at = anchor.at + interval '180 seconds'
+FROM anchor
+WHERE conversation.id = (
+  SELECT message.conversation_id FROM public.messages message
+  WHERE message.content = 'WP02 later client request'
+);
+
 UPDATE public.operators
 SET is_active = false
 WHERE id = '00000000-0000-4000-8000-000000020101';
@@ -288,7 +365,8 @@ WHERE id = '00000000-0000-4000-8000-000000020101';
 SELECT set_config(
   'wp02.race_cycle',
   (SELECT cycle.id::text FROM public.conversation_handling_cycles cycle
-   WHERE cycle.ended_at IS NULL ORDER BY cycle.id LIMIT 1),
+   WHERE cycle.operator_id = '00000000-0000-4000-8000-000000020101'
+     AND cycle.ended_at IS NULL ORDER BY cycle.id LIMIT 1),
   true
 );
 SELECT set_config(

@@ -78,3 +78,28 @@ verification. None of those live gates ran in this offline package.
   work item, conversation owner and audit record. This is scoped capacity evidence, not the two
   formal WP02 DB passes or a full Product run.
 - Evidence: `F:/project love/character/.codex-task/wp02-capacity-race-20261126-01/REPORT.md`.
+
+## Admin transfer after inactivity expiry (2026-11-27)
+
+- A live, authenticated Admin transfer on the task-only project created an active cycle while the
+  conversation's 180-second business-message deadline had already elapsed. The new owner then
+  received `handling_cycle_expired` on send. This invalidates treating the earlier Admin UI
+  assignment as a usable transfer; it does not invalidate the observed UI submission or audit.
+- Forward migration `20261127020000` rejects a missing or elapsed deadline while holding the
+  conversation lock, before changing ownership, cycles, work items, or audit. Admin activity does
+  not extend the business-message clock. Its function body is byte-equivalent to the prior body
+  after removing that guard. The migration was applied directly to the dedicated task DB for this
+  focused check; the local migration ledger was not advanced by that direct `psql` invocation.
+- WP02 pgTAP now scopes two fixture queries and the selected race cycle to its own test character
+  and operator. Before migration, the new expired-transfer assertion failed as expected. After
+  migration, the complete WP02 file passed 38/38; adjacent expiry and cycle-bound files passed
+  30/30 and 21/21. These files run in rollback transactions.
+- On the same task project, expired transfer was denied without changing the owner or cycle.
+  A subsequent synthetic Client business message opened a new 180-second window, and Admin
+  transfer to a second operator succeeded. The old operator's cycle-token send was denied with
+  no message written; the old operator retained historical read access; the new operator sent one
+  message. The old cycle had ended by timeout on the Client message, not by reassignment.
+- `handling_shadow_foundation.test.sql` completed 255 assertions but reported 23 failures in
+  global readiness/consistency cases against this reused task DB. Their cause remains unproven;
+  this run is **not** a passing regression or integrated Product acceptance. A clean isolated DB
+  pass and the formal Product gates remain required.
