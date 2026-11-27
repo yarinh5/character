@@ -35,6 +35,11 @@ const objectName = "v4_3_media_fixture.webp";
 const objectPath = `${folder}/${objectName}`;
 const giftPurchaseKey = "00000000-0000-4000-8000-000000061101";
 const giftOpenKey = "00000000-0000-4000-8000-000000061102";
+const giftObjectPath = `collections/00000000-0000-4000-8000-000000060503/stickers/00000000-0000-4000-8000-000000060504/render.webp`;
+const giftWebp = Buffer.from(
+  "UklGRjYAAABXRUJQVlA4ICoAAABwAQCdASoBAAEAAUAmJaACdAFAAAD+7U3CMNGv/20P//bQ//9tD/pQAAA=",
+  "base64",
+);
 
 const ids = {
   character: "00000000-0000-4000-8000-000000060301",
@@ -93,6 +98,14 @@ const { expectSignedMedia, expectUnavailable, invokeMediaView, runPermanentMedia
     objectPath,
     fetch: (input, init) => fetch(input, init),
   });
+const giftMedia = createMediaTestPath({
+  apiUrl: process.env.SUPABASE_LOCAL_URL ?? "",
+  anonKey: process.env.SUPABASE_LOCAL_ANON_KEY ?? "",
+  serviceRoleKey: process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY ?? "",
+  bucket: "sticker-media",
+  objectPath: giftObjectPath,
+  fetch: (input, init) => fetch(input, init),
+});
 
 const wp06bUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const wp06bBucket = "user-avatars";
@@ -200,6 +213,7 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
   const users: Array<{ id: string; email: string }> = [];
   const tracked = {
     storageObjects: [] as string[],
+    giftStorageObjects: [] as string[],
     assets: [] as string[],
     reservations: [] as string[],
     messages: [] as string[],
@@ -447,15 +461,23 @@ suite("V4-3-D2 local media, Storage and signed URL authorization", () => {
       character_id: ids.character,
       is_active: true,
     });
+    const giftUpload = await service.storage
+      .from("sticker-media")
+      .upload(giftObjectPath, giftWebp, {
+        contentType: "image/webp",
+        upsert: false,
+      });
+    if (giftUpload.error) throw giftUpload.error;
+    tracked.giftStorageObjects.push(giftObjectPath);
     await insertRow(service, "stickers", {
       id: ids.giftSticker,
       collection_id: ids.giftCollection,
       slug: "v4-3-media-gift",
       name: "V4-3 media gift",
-      object_path: `collections/${ids.giftCollection}/stickers/${ids.giftSticker}/render.webp`,
+      object_path: giftObjectPath,
       width: 1,
       height: 1,
-      byte_size: 1,
+      byte_size: giftWebp.length,
       is_active: true,
       is_gift: true,
       ingest_status: "ready",
@@ -798,6 +820,16 @@ SELECT NOT EXISTS (
         run: async () => {
           if (tracked.storageObjects.length === 0) return;
           const { error } = await service.storage.from(bucket).remove(tracked.storageObjects);
+          if (error) throw error;
+        },
+      },
+      {
+        label: "Gift Storage object",
+        run: async () => {
+          if (tracked.giftStorageObjects.length === 0) return;
+          const { error } = await service.storage
+            .from("sticker-media")
+            .remove(tracked.giftStorageObjects);
           if (error) throw error;
         },
       },
@@ -1728,7 +1760,7 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
         .single(),
       service
         .from("message_stickers")
-        .select("sticker_id,sticker_name_snapshot,price_credits_snapshot")
+        .select("id,sticker_id,sticker_name_snapshot,price_credits_snapshot")
         .eq("message_id", giftMessageId)
         .single(),
     ]);
@@ -1745,6 +1777,62 @@ DELETE FROM private.gift_reward_events WHERE purchase_id IN (
       sticker_name_snapshot: "V4-3 media gift",
       price_credits_snapshot: 7,
     });
+
+    const { data: stickerSetting, error: stickerSettingError } = await service
+      .from("system_settings")
+      .select("value")
+      .eq("key", "stickers_enabled")
+      .single();
+    expect(stickerSettingError).toBeNull();
+    const wasStickersEnabled = stickerSetting?.value === true;
+    if (wasStickersEnabled) {
+      const { error } = await service
+        .from("system_settings")
+        .update({ value: false })
+        .eq("key", "stickers_enabled");
+      expect(error).toBeNull();
+    }
+    let restoreError: unknown = null;
+    try {
+      const giftMessageBody = {
+        kind: "message_sticker",
+        message_sticker_id: messageSticker.data!.id,
+      };
+      await giftMedia.expectSignedMedia(
+        await giftMedia.invokeMediaView(owner, giftMessageBody),
+        60,
+      );
+      await giftMedia.expectUnavailable(
+        await giftMedia.invokeMediaView(otherClient, giftMessageBody),
+      );
+      const unpaidMessageId = randomUUID();
+      const ownerId = userId(emails.owner);
+      expect(ownerId).toBeDefined();
+      const unpaidPath = wp06bFixtureDb(
+        `
+BEGIN;
+INSERT INTO public.messages (id, conversation_id, sender_type, sender_id, content)
+VALUES ('${unpaidMessageId}'::uuid, '${ids.conversation}'::uuid, 'client', '${ownerId}'::uuid, '[sticker]');
+INSERT INTO public.message_stickers
+  (message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, price_credits_snapshot)
+VALUES ('${unpaidMessageId}'::uuid, '${ids.giftSticker}'::uuid, 'V4-3 media gift', 'V4-3 media gifts', 7);
+SELECT coalesce(public.resolve_sticker_object_path_for_server('${ownerId}'::uuid, ms.id), 'NULL')
+FROM public.message_stickers ms WHERE ms.message_id = '${unpaidMessageId}'::uuid;
+ROLLBACK;
+`,
+        "unpaid sticker remains hidden while ordinary stickers are disabled",
+      );
+      expect(unpaidPath).toBe("NULL");
+    } finally {
+      if (wasStickersEnabled) {
+        const { error } = await service
+          .from("system_settings")
+          .update({ value: true })
+          .eq("key", "stickers_enabled");
+        restoreError = error;
+      }
+    }
+    expect(restoreError).toBeNull();
 
     requireWp06b(wp06bUuid.test(paidSessionId), "gift session identity");
     const expiredSessionId = wp06bFixtureDb(
