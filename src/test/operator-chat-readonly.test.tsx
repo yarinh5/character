@@ -172,6 +172,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 let conversationMaybeSinglePromise: Promise<QueryResult> | null = null;
+let messageRows: unknown[] = [];
 type Query = {
   eq: (...args: unknown[]) => Query;
   in: (...args: unknown[]) => Query;
@@ -245,6 +246,7 @@ function resultFor(table: string): QueryResult {
       error: null,
     };
   }
+  if (table === "messages") return { data: messageRows, error: null };
   return { data: [], error: null, count: 0 };
 }
 
@@ -313,6 +315,7 @@ import { OperatorChatPage } from "@/routes/operator.chat.$conversationId";
 beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   channels.length = 0;
+  messageRows = [];
   recordPicker.mockClear();
   stableMocks.applySuccessfulSendCycle.mockClear();
   stableMocks.revalidateReadAccess.mockClear();
@@ -363,6 +366,65 @@ async function renderChat() {
 }
 
 describe("operator chat read-only responsibility", () => {
+  it("reconciles a missed message only after postgres changes is ready", async () => {
+    await renderChat();
+    messageRows = [{
+      id: "message-catch-up",
+      conversation_id: conversationId,
+      sender_type: "client",
+      sender_id: "00000000-0000-4000-8000-000000000031",
+      content: "Operator catch-up message",
+      created_at: "2026-11-27T10:00:00.000Z",
+      is_read: false,
+      message_attachments: [],
+      message_stickers: null,
+    }];
+    const channel = [...channels].reverse().find((item) => item.on.mock.calls.some(
+      ([type, filter]) => type === "postgres_changes" && filter.table === "messages" && filter.filter === `conversation_id=eq.${conversationId}`,
+    ));
+    expect(channel).toBeDefined();
+    const system = channel!.on.mock.calls.find(([type]) => type === "system")?.[2] as
+      | ((payload: { extension: string; status: string }) => void)
+      | undefined;
+    expect(system).toBeDefined();
+    expect(screen.queryByText("Operator catch-up message")).not.toBeInTheDocument();
+    act(() => {
+      channel!.status("SUBSCRIBED");
+      system?.({ extension: "postgres_changes", status: "ok" });
+    });
+    expect(await screen.findByText("Operator catch-up message")).toBeInTheDocument();
+  });
+
+  it("does not reconcile from a retired channel after read access is revoked", async () => {
+    const view = await renderChat();
+    const channel = [...channels].reverse().find((item) => item.on.mock.calls.some(
+      ([type, filter]) => type === "postgres_changes" && filter.table === "messages" && filter.filter === `conversation_id=eq.${conversationId}`,
+    ));
+    const system = channel?.on.mock.calls.find(([type]) => type === "system")?.[2] as
+      | ((payload: { extension: string; status: string }) => void)
+      | undefined;
+    expect(channel).toBeDefined();
+    expect(system).toBeDefined();
+
+    testState.readAccessState = "denied";
+    testState.readAccessGeneration += 1;
+    view.rerender(<TooltipProvider><OperatorChatPage /></TooltipProvider>);
+    messageRows = [{
+      id: "revoked-message",
+      conversation_id: conversationId,
+      sender_type: "client",
+      sender_id: "00000000-0000-4000-8000-000000000031",
+      content: "Revoked message",
+      created_at: "2026-11-27T10:01:00.000Z",
+      is_read: false,
+    }];
+    act(() => {
+      channel?.status("SUBSCRIBED");
+      system?.({ extension: "postgres_changes", status: "ok" });
+    });
+    expect(screen.queryByText("Revoked message")).not.toBeInTheDocument();
+  });
+
   it("names the icon-only header controls", async () => {
     await renderChat();
 

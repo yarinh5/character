@@ -415,7 +415,7 @@ export function OperatorChatPage() {
       await supabase.rpc("cleanup_expired_conversation_locks");
 
       const [
-        { data: m },
+        { data: m, error: me },
         { data: n },
         { data: info },
         { data: prof },
@@ -481,7 +481,9 @@ export function OperatorChatPage() {
         : { data: [] as { user_id: string }[] };
       if (isStale()) return;
       setAdminOperatorUserIds((adminRoles ?? []).map((role) => role.user_id));
-      setMessages(loadedMessages);
+      setMessages((prev) =>
+        me ? [] : mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), loadedMessages),
+      );
       setHasOlderMessages(loadedMessages.length === MESSAGE_PAGE_SIZE);
       setNotes((n ?? []) as unknown as Note[]);
       setCustomerInfoEntries((info ?? []) as unknown as CustomerInfoEntry[]);
@@ -525,8 +527,24 @@ export function OperatorChatPage() {
   useEffect(() => {
     if (!readAllowed) return;
     let disposed = false;
+    let joined = false;
     const accessScope = readScopeRef.current;
     const isStale = () => disposed || readScopeRef.current !== accessScope || !accessScope.allowed;
+    const reconcileMessages = async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select(
+          "*, operators(full_name, user_id), message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, created_at)",
+        )
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
+      if (isStale() || error) return;
+      setMessages((prev) =>
+        mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), (data ?? []) as Msg[]),
+      );
+    };
     const ch = supabase
       .channel(`op-chat-${conversationId}`)
       .on(
@@ -664,8 +682,14 @@ export function OperatorChatPage() {
           void refreshResponsibility();
         },
       )
+      .on("system", {}, (payload: { extension?: string; status?: string }) => {
+        if (joined && !isStale() && payload.extension === "postgres_changes" && payload.status === "ok") {
+          void reconcileMessages();
+        }
+      })
       .subscribe((status) => {
         if (disposed) return;
+        joined = status === "SUBSCRIBED";
         // The access hook reconciles its own subscription/reconnect. Doing it here
         // tears down this channel while checking, creating a subscribe/check loop.
         if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {

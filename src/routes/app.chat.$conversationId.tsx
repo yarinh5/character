@@ -240,7 +240,9 @@ function ChatPage() {
       if (me) toast.error("שגיאה בטעינת הודעות");
       setConv(c as unknown as Conv);
       const latestMessages = sortMessagesAsc((m ?? []) as Msg[]);
-      setMessages(latestMessages);
+      setMessages((prev) =>
+        me ? [] : mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), latestMessages),
+      );
       setHasOlderMessages(latestMessages.length === MESSAGE_PAGE_SIZE);
       setCreditBalance(wallet?.balance ?? null);
       setClientAvatarUrl(profile?.avatar_url ?? null);
@@ -262,6 +264,23 @@ function ChatPage() {
 
   // Realtime
   useEffect(() => {
+    let disposed = false;
+    let joined = false;
+    const reconcileMessages = async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select(
+          "*, message_attachments(id, message_id, kind, position, caption, metadata, created_at), message_stickers(id, message_id, sticker_id, sticker_name_snapshot, collection_name_snapshot, created_at)",
+        )
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
+      if (disposed || error) return;
+      setMessages((prev) =>
+        mergeMessagesById(prev.filter((message) => message.conversation_id === conversationId), (data ?? []) as Msg[]),
+      );
+    };
     const channel = supabase
       .channel(`chat-${conversationId}`)
       .on(
@@ -297,8 +316,16 @@ function ChatPage() {
             .catch(() => undefined);
         },
       )
-      .subscribe();
+      .on("system", {}, (payload: { extension?: string; status?: string }) => {
+        if (joined && payload.extension === "postgres_changes" && payload.status === "ok") {
+          void reconcileMessages();
+        }
+      })
+      .subscribe((status) => {
+        joined = status === "SUBSCRIBED";
+      });
     return () => {
+      disposed = true;
       supabase.removeChannel(channel);
     };
   }, [conversationId]);

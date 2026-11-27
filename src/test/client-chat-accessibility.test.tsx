@@ -1,10 +1,17 @@
 import type { ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({ navigate: vi.fn() }));
+const realtime = vi.hoisted(() => ({
+  messages: [] as unknown[],
+  pendingMessages: null as null | Promise<{ data: unknown[]; error: null }>,
+  message: null as null | ((payload: { eventType: string; new: unknown }) => void),
+  status: null as null | ((status: string) => void),
+  system: null as null | ((payload: { extension: string; status: string }) => void),
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({
@@ -55,9 +62,17 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/integrations/supabase/client", () => {
-  const channel = { on: vi.fn(), subscribe: vi.fn() };
-  channel.on.mockReturnValue(channel);
-  channel.subscribe.mockReturnValue(channel);
+  const channel = {
+    on: vi.fn((type: string, _filter: unknown, callback: (...args: unknown[]) => void) => {
+      if (type === "system") realtime.system = callback as typeof realtime.system;
+      if (type === "postgres_changes") realtime.message = callback as typeof realtime.message;
+      return channel;
+    }),
+    subscribe: vi.fn((callback?: (status: string) => void) => {
+      realtime.status = callback ?? null;
+      return channel;
+    }),
+  };
 
   function from(table: string) {
     if (table === "conversations") {
@@ -88,7 +103,16 @@ vi.mock("@/integrations/supabase/client", () => {
       const query = {
         eq: () => query,
         order: () => query,
-        limit: () => Promise.resolve({ data: [], error: null }),
+        limit: () => realtime.pendingMessages ?? Promise.resolve({ data: realtime.messages, error: null }),
+      };
+      return { select: () => query };
+    }
+    if (table === "message_attachments" || table === "message_stickers") {
+      const result = { data: [], error: null };
+      const query = {
+        eq: () => query,
+        order: () => Promise.resolve(result),
+        then: (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve),
       };
       return { select: () => query };
     }
@@ -123,6 +147,15 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Page = (Route as unknown as { component: ComponentType }).component;
 
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
+  realtime.messages = [];
+  realtime.pendingMessages = null;
+  realtime.message = null;
+  realtime.status = null;
+  realtime.system = null;
+});
+
 function renderChat() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
@@ -135,6 +168,50 @@ function renderChat() {
 }
 
 describe("client chat accessibility regressions", () => {
+  it("keeps a realtime message when the initial query returns an older snapshot", async () => {
+    let resolveMessages!: (result: { data: unknown[]; error: null }) => void;
+    realtime.pendingMessages = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
+    renderChat();
+    await waitFor(() => expect(realtime.message).not.toBeNull());
+    const message = {
+      id: "message-before-initial-load",
+      conversation_id: "conversation-a",
+      sender_type: "client",
+      sender_id: "client-a",
+      content: "Message before initial load",
+      created_at: "2026-11-27T10:00:00.000Z",
+      is_read: false,
+    };
+    act(() => realtime.message?.({ eventType: "INSERT", new: message }));
+    await act(async () => resolveMessages({ data: [], error: null }));
+    expect(await screen.findByText("Message before initial load")).toBeInTheDocument();
+  });
+
+  it("reconciles a message missed before postgres changes became ready", async () => {
+    renderChat();
+    await screen.findByRole("textbox", { name: "הודעה" });
+    realtime.messages = [{
+      id: "message-catch-up",
+      conversation_id: "conversation-a",
+      sender_type: "operator",
+      sender_id: "operator-a",
+      content: "Catch-up message",
+      created_at: "2026-11-27T10:00:00.000Z",
+      is_read: false,
+      message_attachments: [],
+      message_stickers: null,
+    }];
+
+    expect(screen.queryByText("Catch-up message")).not.toBeInTheDocument();
+    act(() => {
+      realtime.status?.("SUBSCRIBED");
+      realtime.system?.({ extension: "postgres_changes", status: "ok" });
+    });
+    expect(await screen.findByText("Catch-up message")).toBeInTheDocument();
+  });
+
   it("keeps every icon-only chat action named after hydration", async () => {
     renderChat();
 
