@@ -79,6 +79,37 @@ describe("regular media 60-second policy UI", () => {
     expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
   });
 
+  it("completes an active window when the parent replaces the refresh callback", async () => {
+    const refreshAccess = vi.fn().mockResolvedValue(null);
+    const view = render(
+      <MessageAttachment
+        attachment={attachment}
+        access={activeRegularWindow}
+        accessStatus="ready"
+        refreshAccess={() => refreshAccess()}
+      />,
+    );
+
+    for (let second = 0; second < 60; second += 1) {
+      await act(async () => vi.advanceTimersByTime(1_000));
+      if (second < 59) {
+        view.rerender(
+          <MessageAttachment
+            attachment={attachment}
+            access={activeRegularWindow}
+            accessStatus="ready"
+            refreshAccess={() => refreshAccess()}
+          />,
+        );
+      }
+    }
+
+    expect(rpc).toHaveBeenCalledWith("complete_free_view_once_attachment", {
+      _attachment_id: attachment.id,
+    });
+    expect(refreshAccess).toHaveBeenCalledTimes(1);
+  });
+
   it.each([null, "not-a-date", "2026-11-04T23:59:59.000Z"])(
     "does not display an active view-once image with expiry %s",
     (session_expires_at) => {
