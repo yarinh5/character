@@ -52,6 +52,7 @@ export function MessageAttachment({
   const [unlocking, setUnlocking] = useState(false);
   const [viewOnceOpening, setViewOnceOpening] = useState(false);
   const [expiredViewOnceSessionKey, setExpiredViewOnceSessionKey] = useState<string | null>(null);
+  const [expiredClientMediaKey, setExpiredClientMediaKey] = useState<string | null>(null);
   const [paidOpenPurchasing, setPaidOpenPurchasing] = useState(false);
   const [paidOpenConfirmOpen, setPaidOpenConfirmOpen] = useState(false);
   const [expiredPaidSessionKey, setExpiredPaidSessionKey] = useState<string | null>(null);
@@ -63,8 +64,22 @@ export function MessageAttachment({
   refreshAccessRef.current = refreshAccess;
   const isViewOnce = access?.view_mode === "view_once";
   const isPaidOpen = access?.view_mode === "paid_open";
-  const isExpiredClientMedia =
-    access?.view_mode === "client_24h" && access.render_state === "client_24h_expired";
+  const isClientMedia = access?.view_mode === "client_24h";
+  const clientMediaExpiry = access?.session_expires_at
+    ? Date.parse(access.session_expires_at)
+    : Number.NaN;
+  const clientMediaKey =
+    isClientMedia && access?.render_state === "client_24h_available" && access.session_expires_at
+      ? `${attachment.id}:${access.session_expires_at}`
+      : null;
+  const canRenderClientMedia =
+    isClientMedia &&
+    access?.render_state === "client_24h_available" &&
+    clientMediaKey !== null &&
+    Number.isFinite(clientMediaExpiry) &&
+    clientMediaExpiry > Date.now() &&
+    expiredClientMediaKey !== clientMediaKey;
+  const isExpiredClientMedia = isClientMedia && !canRenderClientMedia;
   const canOpenViewOnce =
     accessStatus === "ready" && isViewOnce && access?.render_state === "view_once_available";
   const activeViewOnceSessionKey =
@@ -113,6 +128,7 @@ export function MessageAttachment({
     attachment.id,
     enabled &&
       accessStatus === "ready" &&
+      (!isClientMedia || canRenderClientMedia) &&
       (!isViewOnce || canRenderViewOnce) &&
       (!isPaidOpen || canRenderPaid),
     accessGeneration,
@@ -126,7 +142,20 @@ export function MessageAttachment({
     setViewOnceOpening(false);
     setPaidOpenPurchasing(false);
     setPaidOpenConfirmOpen(false);
+    setExpiredClientMediaKey(null);
   }, [attachment.id]);
+
+  useEffect(() => {
+    if (!clientMediaKey || !Number.isFinite(clientMediaExpiry)) return;
+    const timeout = window.setTimeout(
+      () => {
+        setExpiredClientMediaKey(clientMediaKey);
+        void refreshAccessRef.current().catch(() => undefined);
+      },
+      Math.max(0, clientMediaExpiry - Date.now()),
+    );
+    return () => window.clearTimeout(timeout);
+  }, [clientMediaExpiry, clientMediaKey]);
 
   useEffect(() => {
     if (!completionViewOnceSessionKey || !Number.isFinite(activeViewOnceSessionExpiry)) return;

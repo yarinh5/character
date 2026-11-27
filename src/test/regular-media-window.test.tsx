@@ -258,3 +258,46 @@ describe("regular media 60-second policy UI", () => {
     expect(openCalls[0][1]._idempotency_key).toBe(openCalls[1][1]._idempotency_key);
   });
 });
+
+describe("client media 24-hour policy UI", () => {
+  const availableClientMedia: MessageAttachmentAccess = {
+    ...activeRegularWindow,
+    view_mode: "client_24h",
+    render_state: "client_24h_available",
+    session_expires_at: "2026-11-05T00:01:00.000Z",
+  };
+
+  it("hides an already loaded image at the server deadline even if refresh fails", async () => {
+    const refreshAccess = vi.fn().mockRejectedValue(new Error("offline"));
+    render(
+      <MessageAttachment
+        attachment={attachment}
+        access={availableClientMedia}
+        accessStatus="ready"
+        refreshAccess={refreshAccess}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "תמונה שנשלחה בצ'אט" })).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+    expect(screen.getByText("התמונה אינה זמינה עוד")).toBeInTheDocument();
+  });
+
+  it.each([null, "not-a-date", "2026-11-04T23:59:59.000Z"])(
+    "does not display client media with expiry %s",
+    (session_expires_at) => {
+      render(
+        <MessageAttachment
+          attachment={attachment}
+          access={{ ...availableClientMedia, session_expires_at }}
+          accessStatus="ready"
+          refreshAccess={vi.fn().mockResolvedValue(null)}
+        />,
+      );
+
+      expect(screen.queryByRole("img", { name: "תמונה שנשלחה בצ'אט" })).not.toBeInTheDocument();
+      expect(screen.getByText("התמונה אינה זמינה עוד")).toBeInTheDocument();
+    },
+  );
+});
