@@ -54,6 +54,7 @@ export function MessageAttachment({
   const [viewOnceViewing, setViewOnceViewing] = useState(false);
   const [paidOpenPurchasing, setPaidOpenPurchasing] = useState(false);
   const [paidOpenConfirmOpen, setPaidOpenConfirmOpen] = useState(false);
+  const [expiredPaidSessionKey, setExpiredPaidSessionKey] = useState<string | null>(null);
   const unlockIdempotencyKeyRef = useRef<string | null>(null);
   const viewOnceIdempotencyKeyRef = useRef<string | null>(null);
   const paidOpenIdempotencyKeyRef = useRef<string | null>(null);
@@ -75,9 +76,21 @@ export function MessageAttachment({
     accessStatus === "ready" && isPaidOpen && access?.render_state === "gift_purchase_required";
   const canOpenPurchasedGift =
     accessStatus === "ready" && isPaidOpen && access?.render_state === "gift_purchased";
+  const activePaidSessionKey =
+    access?.render_state === "paid_open_active" && access.session_expires_at
+      ? `${attachment.id}:${access.session_expires_at}`
+      : null;
+  const activePaidSessionExpiry = access?.session_expires_at
+    ? Date.parse(access.session_expires_at)
+    : Number.NaN;
   const canRenderPaid =
     isPaidOpen &&
-    (access?.render_state === "paid_open_staff" || access?.render_state === "paid_open_active");
+    (access?.render_state === "paid_open_staff" ||
+      (access?.render_state === "paid_open_active" &&
+        activePaidSessionKey !== null &&
+        Number.isFinite(activePaidSessionExpiry) &&
+        activePaidSessionExpiry > Date.now() &&
+        expiredPaidSessionKey !== activePaidSessionKey));
   const preview = useMessageAttachmentUrl(
     attachment.id,
     enabled &&
@@ -118,14 +131,17 @@ export function MessageAttachment({
   ]);
 
   useEffect(() => {
-    if (!isPaidOpen || access?.render_state !== "paid_open_active" || !access.session_expires_at)
+    if (
+      !isPaidOpen ||
+      access?.render_state !== "paid_open_active" ||
+      !activePaidSessionKey ||
+      !Number.isFinite(activePaidSessionExpiry)
+    )
       return;
 
-    const remainingMilliseconds = Math.max(
-      0,
-      new Date(access.session_expires_at).getTime() - Date.now(),
-    );
+    const remainingMilliseconds = Math.max(0, activePaidSessionExpiry - Date.now());
     const timeout = window.setTimeout(() => {
+      setExpiredPaidSessionKey(activePaidSessionKey);
       const sessionId = paidOpenSessionIdRef.current;
       if (sessionId) {
         void supabase.rpc("complete_paid_message_attachment_session", { _session_id: sessionId });
@@ -134,7 +150,13 @@ export function MessageAttachment({
     }, remainingMilliseconds);
 
     return () => window.clearTimeout(timeout);
-  }, [access?.render_state, access?.session_expires_at, isPaidOpen, refreshAccess]);
+  }, [
+    access?.render_state,
+    activePaidSessionExpiry,
+    activePaidSessionKey,
+    isPaidOpen,
+    refreshAccess,
+  ]);
 
   if (attachment.kind !== "image") return null;
 
