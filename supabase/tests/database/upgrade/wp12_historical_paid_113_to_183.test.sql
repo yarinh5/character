@@ -1,11 +1,11 @@
 -- Run after committing the WP01 M113 fixture and the WP12 paid fixture at M113,
--- then applying M114-M183. Every observation here is rolled back.
+-- then applying M114-M184. Every observation here is rolled back.
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = extensions, public, pg_catalog;
 
-SELECT plan(24);
+SELECT plan(28);
 
 SELECT is((SELECT count(*) FROM supabase_migrations.schema_migrations), 184::bigint,
   'The complete 184-migration chain is installed');
@@ -128,6 +128,13 @@ SELECT is((SELECT count(*) FROM public.messages
 SELECT is((SELECT count(id) FROM public.message_attachments
   WHERE id = '00000000-0000-4000-8000-0000000b0503'),
   1::bigint, 'Buyer can still read the historical attachment');
+SELECT is((SELECT count(*) FROM public.credit_wallets
+  WHERE user_id = '00000000-0000-4000-8000-0000000b0002'),
+  1::bigint, 'Buyer can still read their historical credit wallet');
+SELECT is((SELECT count(*) FROM public.credit_transactions
+  WHERE user_id = '00000000-0000-4000-8000-0000000b0002'
+    AND reason LIKE 'wp12_synthetic_legacy_%'),
+  2::bigint, 'Buyer can still read their two historical credit entries');
 
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000b0001', true);
 SELECT is((SELECT count(*) FROM public.get_message_attachment_access(
@@ -139,6 +146,13 @@ SELECT is((SELECT count(*) FROM public.messages
 SELECT is((SELECT count(id) FROM public.message_attachments
   WHERE id = '00000000-0000-4000-8000-0000000b0503'),
   0::bigint, 'Another client cannot read the historical attachment');
+SELECT is((SELECT count(*) FROM public.credit_wallets
+  WHERE user_id = '00000000-0000-4000-8000-0000000b0002'),
+  0::bigint, 'Another client cannot read the buyer credit wallet');
+SELECT is((SELECT count(*) FROM public.credit_transactions
+  WHERE user_id = '00000000-0000-4000-8000-0000000b0002'
+    AND reason LIKE 'wp12_synthetic_legacy_%'),
+  0::bigint, 'Another client cannot read the buyer credit entries');
 RESET ROLE;
 
 SELECT * FROM finish();

@@ -17,9 +17,12 @@ SELECT ok(has_table_privilege('authenticated', 'public.credit_wallets', 'SELECT'
   'Authenticated wallet reads retain their table grant');
 SELECT ok(has_table_privilege('authenticated', 'public.credit_transactions', 'SELECT'),
   'Authenticated ledger reads retain their table grant');
-SELECT ok(has_table_privilege('service_role', 'public.credit_wallets', 'SELECT, INSERT, UPDATE'),
+SELECT ok(has_table_privilege('service_role', 'public.credit_wallets', 'SELECT')
+  AND has_table_privilege('service_role', 'public.credit_wallets', 'INSERT')
+  AND has_table_privilege('service_role', 'public.credit_wallets', 'UPDATE'),
   'Service wallet operations retain their table grants');
-SELECT ok(has_table_privilege('service_role', 'public.credit_transactions', 'SELECT, INSERT'),
+SELECT ok(has_table_privilege('service_role', 'public.credit_transactions', 'SELECT')
+  AND has_table_privilege('service_role', 'public.credit_transactions', 'INSERT'),
   'Service ledger operations retain their table grants');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.credit_wallets'::regclass),
   'Wallet RLS stays enabled');
